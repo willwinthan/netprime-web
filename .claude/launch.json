@@ -1,0 +1,51 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mockups",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4173",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 4173
+    },
+    {
+      "name": "backend-local",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "wrangler",
+        "dev",
+        "--config",
+        "backend/wrangler.local.jsonc",
+        "--local",
+        "--ip",
+        "127.0.0.1",
+        "--port",
+        "8788"
+      ],
+      "port": 8788
+    },
+    {
+      "name": "frontend-local",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend-admin && VITE_API_BASE_URL=http://127.0.0.1:8788/api npx vite --host 127.0.0.1 --port 5173 --strictPort"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "frontend-worker",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend-admin && VITE_API_BASE_URL=http://127.0.0.1:8788/api npx vite build && npx wrangler dev --ip 127.0.0.1 --port 5173 --var API_BASE_URL:http://127.0.0.1:8788/api"
+      ],
+      "port": 5173
+    }
+  ]
+}

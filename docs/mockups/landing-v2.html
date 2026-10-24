@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetPrime Landing v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@300..700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* Tokens copied from frontend-admin/src/index.css */
+:root {
+  --primary: #e56b25;
+  --primary-glow: rgba(229, 107, 37, 0.12);
+  --bg-primary: #fdfdfd;
+  --bg-secondary: hsl(30, 40%, 97%);
+  --bg-card: rgba(255, 255, 255, 0.7);
+  --secondary: hsl(265, 80%, 62%);
+  --secondary-glow: rgba(168, 85, 247, 0.12);
+  --accent: hsl(150, 60%, 42%);
+  --accent-glow: rgba(16, 185, 129, 0.12);
+  --text-primary: hsl(222, 47%, 18%);
+  --text-secondary: hsl(222, 20%, 45%);
+  --text-muted: hsl(222, 10%, 62%);
+  --line: rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 30px -10px rgba(229, 107, 37, 0.10);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Anuphan', 'Inter', system-ui, sans-serif; }
+body { background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%); color: var(--text-primary); line-height: 1.6; overflow-x: hidden; }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.glow { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.glow i { position: absolute; border-radius: 50%; filter: blur(120px); opacity: .10; }
+.glow i:nth-child(1) { top: -10%; left: 20%; width: 45vw; height: 45vw; background: var(--primary); }
+.glow i:nth-child(2) { bottom: -10%; right: 10%; width: 50vw; height: 50vw; background: var(--secondary); }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: 1rem; font-weight: 600; font-size: 14px; cursor: pointer; border: 2px solid var(--primary); transition: .2s; }
+.btn-primary { background: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(229,107,37,.25); }
+.btn-primary:hover { transform: translateY(-1.5px); box-shadow: 0 6px 20px rgba(229,107,37,.4); }
+.btn-outline { background: transparent; color: var(--primary); }
+.btn-outline:hover { background: var(--primary); color: #fff; }
+.card { background: var(--bg-card); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,.7); border-radius: 1.5rem; box-shadow: var(--shadow-lg); transition: .3s; }
+.card:hover { transform: translateY(-4px); box-shadow: 0 16px 40px -12px rgba(229,107,37,.18); }
+.eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--primary); background: var(--primary-glow); padding: 5px 12px; border-radius: 99px; }
+.sec { padding: 72px 0; border-top: 1px solid var(--line); position: relative; scroll-margin-top: 72px; }
+.sec-head { text-align: center; max-width: 720px; margin: 0 auto 40px; }
+.sec-head h2 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0 10px; }
+.sec-head p { color: var(--text-secondary); }
+.ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--primary-glow); color: var(--primary); flex: none; }
+.ico svg { width: 22px; height: 22px; }
+
+/* Section tags for the handoff (toggle) */
+.tag { display: none; position: absolute; top: 12px; left: 12px; font: 600 11px Inter, sans-serif; color: var(--secondary); border: 1px dashed var(--secondary); background: #fff; padding: 2px 8px; border-radius: 6px; z-index: 5; }
+body.show-tags .tag { display: block; }
+.tag-toggle { position: fixed; right: 16px; bottom: 16px; z-index: 60; font-size: 13px; padding: 8px 14px; border-radius: 99px; border: 1px solid var(--secondary); background: #fff; color: var(--secondary); cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.08); }
+
+/* 1. Top bar */
+.topbar { background: var(--text-primary); color: #e7e9f0; font-size: 13px; }
+.topbar .wrap { display: flex; justify-content: space-between; gap: 16px; padding-top: 8px; padding-bottom: 8px; flex-wrap: wrap; }
+.topbar span { opacity: .85; margin-right: 18px; }
+
+/* 2. Header */
+header { position: sticky; top: 0; z-index: 50; background: rgba(253,253,253,.85); backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; align-items: center; justify-content: space-between; height: 72px; gap: 16px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; }
+.logo img { height: 36px; }
+.logo small { display: block; font-size: 11px; font-weight: 500; color: var(--text-muted); }
+nav.menu { display: flex; gap: 4px; }
+nav.menu a { padding: 8px 12px; border-radius: 10px; font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+nav.menu a:hover, nav.menu a.on { color: var(--primary); background: var(--primary-glow); }
+.head-cta { display: flex; gap: 8px; }
+.burger { display: none; background: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+
+/* 3. Hero */
+.hero .wrap { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; padding-top: 56px; padding-bottom: 64px; }
+.hero h1 { font-size: clamp(34px, 5.4vw, 58px); margin: 18px 0; }
+.hero h1 em { font-style: normal; color: var(--primary); }
+.hero p.lead { color: var(--text-secondary); font-size: 17px; max-width: 520px; }
+.hero .actions { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+.stats { display: flex; gap: 28px; margin-top: 36px; flex-wrap: wrap; }
+.stats b { display: block; font-size: 26px; color: var(--text-primary); }
+.stats span { font-size: 13px; color: var(--text-muted); }
+.hero-art { position: relative; }
+.hero-art img { width: 100%; border-radius: 2rem; display: block; }
+.float { position: absolute; padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.float b { display: block; font-size: 14px; }
+.float.a { top: 8%; left: -6%; }
+.float.b { bottom: 10%; right: -4%; }
+
+/* 4. Training with us */
+.vendors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.vendor { padding: 26px; display: flex; flex-direction: column; gap: 12px; }
+.vendor .top { display: flex; justify-content: space-between; align-items: center; }
+.vlogo { font: 800 20px Inter, sans-serif; letter-spacing: -.02em; }
+.pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: var(--accent-glow); color: var(--accent); font-weight: 600; }
+.vendor p { color: var(--text-secondary); font-size: 14px; flex: 1; }
+.vendor .more { color: var(--primary); font-weight: 600; font-size: 14px; }
+
+/* 5. Schedule */
+.schedule { overflow-x: auto; padding: 8px; }
+table { width: 100%; border-collapse: collapse; min-width: 720px; font-size: 14px; }
+th { text-align: left; color: var(--text-muted); font-weight: 600; font-size: 12px; letter-spacing: .05em; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+td { padding: 16px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+.seat { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; }
+.seat.ok { background: var(--accent-glow); color: var(--accent); }
+.seat.low { background: var(--primary-glow); color: var(--primary); }
+.mode { font-size: 12px; color: var(--secondary); background: var(--secondary-glow); padding: 3px 10px; border-radius: 99px; }
+
+/* 6. Services */
+.services { display: grid; grid-template-columns: 1fr 1.3fr; gap: 40px; align-items: start; }
+.services .intro h2 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0; }
+.services .intro p { color: var(--text-secondary); margin-bottom: 24px; }
+.svc-list { display: grid; gap: 14px; }
+.svc { display: flex; gap: 16px; align-items: center; padding: 18px 20px; }
+.svc h3 { font-size: 16px; }
+.svc p { font-size: 13px; color: var(--text-secondary); }
+
+/* 7. CTA band */
+.cta-band { border-radius: 2rem; padding: 44px; display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap;
+  background: linear-gradient(120deg, var(--primary) 0%, #f08a4b 55%, hsl(265, 80%, 66%) 130%); color: #fff; box-shadow: 0 20px 50px -20px rgba(229,107,37,.55); }
+.cta-band h2 { font-size: clamp(24px, 3.4vw, 32px); color: #fff; }
+.cta-band p { opacity: .9; }
+.cta-band .btn-primary { background: #fff; color: var(--primary); border-color: #fff; }
+.cta-band .btn-outline { color: #fff; border-color: rgba(255,255,255,.8); }
+.cta-band .btn-outline:hover { background: rgba(255,255,255,.15); }
+
+/* 8. Articles */
+.filters { display: flex; gap: 8px; justify-content: center; margin-bottom: 28px; flex-wrap: wrap; }
+.filters button { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 7px 16px; font-size: 13px; cursor: pointer; color: var(--text-secondary); }
+.filters button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.articles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.article { overflow: hidden; }
+.thumb { height: 140px; display: grid; place-items: center; font: 800 22px Inter, sans-serif; color: #fff; }
+.article .body { padding: 18px; }
+.article .meta { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.article h3 { font-size: 15px; margin-bottom: 8px; }
+.article p { font-size: 13px; color: var(--text-secondary); }
+
+/* 9. Contact */
+.contact { display: grid; grid-template-columns: 1fr 1.1fr; gap: 32px; }
+.channels { display: grid; gap: 14px; margin-top: 24px; }
+.channel { display: flex; gap: 14px; align-items: center; }
+.channel span { display: block; font-size: 13px; color: var(--text-muted); }
+form.card { padding: 28px; display: grid; gap: 14px; }
+form label { font-size: 13px; font-weight: 600; display: grid; gap: 6px; }
+input, select, textarea { font: inherit; font-size: 14px; padding: 11px 14px; border-radius: 12px; border: 1px solid rgba(0,0,0,.1); background: #fff; color: var(--text-primary); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary-glow); border-color: var(--primary); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.consent { font-size: 12px; color: var(--text-secondary); display: flex; gap: 8px; align-items: flex-start; }
+
+/* 10. Footer */
+footer { border-top: 1px solid var(--line); padding: 56px 0 28px; position: relative; }
+.fgrid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 32px; }
+footer h4 { font-size: 14px; margin-bottom: 12px; }
+footer li { list-style: none; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+footer .copy { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+
+/* 11. Cookie banner */
+.cookie { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 760px; margin: 0 auto; z-index: 55; padding: 14px 18px; display: flex; gap: 16px; align-items: center; justify-content: space-between; font-size: 13px; }
+.cookie .btns { display: flex; gap: 8px; flex: none; }
+.cookie .btn { padding: 7px 14px; font-size: 13px; }
+
+@media (max-width: 1080px) {
+  nav.menu { display: none; }
+  .burger { display: inline-block; }
+  .articles { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 860px) {
+  .hero .wrap, .services, .contact { grid-template-columns: 1fr; }
+  .vendors { grid-template-columns: 1fr 1fr; }
+  .fgrid { grid-template-columns: 1fr 1fr; }
+  .float.a { left: 4px; } .float.b { right: 4px; }
+  .head-cta .btn-outline { display: none; }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 16px; }
+  .vendors, .articles, .row2, .fgrid { grid-template-columns: 1fr; }
+  .sec { padding: 52px 0; }
+  .cta-band { padding: 28px; }
+  .topbar .hide-sm { display: none; }
+  .cookie { flex-direction: column; align-items: stretch; }
+  .head-cta .btn-primary { padding: 8px 12px; font-size: 13px; }
+  .head-cta .btn, .burger { white-space: nowrap; }
+  .burger .lbl { display: none; }
+  .logo small { display: none; }
+  /* Schedule rows become stacked cards */
+  table { min-width: 0; }
+  thead { display: none; }
+  tr { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 16px; border-bottom: 1px solid var(--line); }
+  tr:last-child { border-bottom: 0; }
+  td { padding: 0; border: 0; }
+  td:first-child { grid-column: 1 / -1; }
+  td:last-child { grid-column: 1 / -1; }
+  td:last-child .btn { width: 100%; justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div class="glow"><i></i><i></i></div>
+
+<!-- 1. Top bar -->
+<div class="topbar" style="position:relative">
+  <div class="wrap">
+    <div><span>☎ 02-xxx-xxxx</span><span class="hide-sm">✉ training@netprime.co.th</span><span class="hide-sm">LINE @netprime</span></div>
+    <div><span>จ.–ศ. 08:30–17:30</span></div>
+  </div>
+</div>
+
+<!-- 2. Header -->
+<header>
+  <span class="tag">2 · Header + เมนูหลัก</span>
+  <div class="wrap">
+    <a class="logo" href="#"><img src="../../frontend-admin/logo/NetPrimeLogo.png" alt=""><div>NetPrime<small>Training Center</small></div></a>
+    <nav class="menu">
+      <a class="on" href="#">หน้าแรก</a>
+      <a href="#">โปรโมชั่น</a>
+      <a href="#training">หลักสูตร ▾</a>
+      <a href="#schedule">ตารางอบรม</a>
+      <a href="#services">บริการ</a>
+      <a href="#articles">บทความ</a>
+      <a href="#contact">ติดต่อเรา</a>
+    </nav>
+    <div class="head-cta">
+      <a class="btn btn-outline" href="#">เข้าสู่ระบบ</a>
+      <a class="btn btn-primary" href="#schedule">ลงทะเบียนหลักสูตร</a>
+      <button class="burger" aria-label="เมนู">☰<span class="lbl"> เมนู</span></button>
+    </div>
+  </div>
+</header>
+
+<!-- 3. Hero -->
+<section class="hero" style="position:relative">
+  <span class="tag">3 · Hero (คงรูป server rack + badge ลอยจากเดิม)</span>
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">◆ ศูนย์ฝึกอบรมด้าน IT ระดับ Enterprise</span>
+      <h1>เรียนรู้ <em>Network</em>,<br><em>Cloud</em> & Security<br>จากผู้เชี่ยวชาญตัวจริง</h1>
+      <p class="lead">หลักสูตร Cisco, Aruba, AWS, Azure และ CompTIA สอนบนอุปกรณ์จริง โดยวิทยากรที่ทำงานในสายงาน พร้อมใบประกาศนียบัตรที่ตรวจสอบได้ออนไลน์</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#training">ดูหลักสูตรทั้งหมด →</a>
+        <a class="btn btn-outline" href="#schedule">ตารางอบรมเดือนนี้</a>
+      </div>
+      <div class="stats">
+        <div><b>21+</b><span>หลักสูตร</span></div>
+        <div><b>4.9/5</b><span>ความพึงพอใจผู้เรียน</span></div>
+        <div><b>120+</b><span>องค์กรที่ไว้วางใจ</span></div>
+      </div>
+    </div>
+    <div class="hero-art">
+      <img src="../../frontend-admin/logo/server_rack_hero.png" alt="ห้องปฏิบัติการ server rack">
+      <div class="card float a"><div class="ico" style="width:36px;height:36px">🛡</div><div><b>Security Expert</b>สาย Cyber Security</div></div>
+      <div class="card float b"><div class="ico" style="width:36px;height:36px;background:var(--secondary-glow);color:var(--secondary)">☁</div><div><b>Cloud Associate</b>AWS · Azure</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Training with us -->
+<section class="sec" id="training">
+  <span class="tag">4 · อบรมกับเรา — การ์ดหลักสูตรตาม vendor</span>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">อบรมกับเรา</span>
+      <h2>หลักสูตรครอบคลุมทุก vendor ที่องค์กรใช้</h2>
+      <p>Network และ Data Center, Virtualization, Cloud และ Security สอนบนอุปกรณ์ระดับ Enterprise เรียนได้ทั้งในห้องอบรมและออนไลน์ผ่าน LMS</p>
+    </div>
+    <div class="vendors">
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#1ba0d7">Cisco</span><span class="pill">6 หลักสูตร</span></div><p>CCNA, CCNP Enterprise, Security และ Data Center พร้อม Lab อุปกรณ์จริง</p><span class="more">ดูหลักสูตร →</span></a>
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#ff8300">Aruba</span><span class="pill">4 หลักสูตร</span></div><p>Wireless, Switching และ ClearPass สำหรับผู้ดูแลเครือข่ายองค์กร</p><span class="more">ดูหลักสูตร →</span></a>
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#232f3e">AWS</span><span class="pill">3 หลักสูตร</span></div><p>Cloud Practitioner ถึง Solutions Architect Associate</p><span class="more">ดูหลักสูตร →</span></a>
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#0078d4">Azure</span><span class="pill">3 หลักสูตร</span></div><p>AZ-900, AZ-104 และการออกแบบ Hybrid Cloud</p><span class="more">ดูหลักสูตร →</span></a>
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#c8202f">CompTIA</span><span class="pill">3 หลักสูตร</span></div><p>A+, Network+ และ Security+ สำหรับพื้นฐานสาย IT</p><span class="more">ดูหลักสูตร →</span></a>
+      <a class="card vendor" href="#"><div class="top"><span class="vlogo" style="color:#607078">VMware</span><span class="pill">2 หลักสูตร</span></div><p>vSphere Install, Configure, Manage และ NSX</p><span class="more">ดูหลักสูตร →</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Schedule -->
+<section class="sec" id="schedule">
+  <span class="tag">5 · ตารางอบรม (ดึงจาก API รอบอบรม — ยังไม่มีในระบบ)</span>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">ตารางอบรม</span>
+      <h2>รอบอบรมที่กำลังจะเปิด</h2>
+      <p>เลือกรอบที่สะดวกแล้วลงทะเบียนได้ทันที ที่นั่งมีจำกัดในแต่ละรอบ</p>
+    </div>
+    <div class="card schedule">
+      <table>
+        <thead><tr><th>หลักสูตร</th><th>วันที่</th><th>รูปแบบ</th><th>ราคา</th><th>ที่นั่ง</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>CCNA 200-301</b><br><small style="color:var(--text-muted)">Cisco · 5 วัน</small></td><td>3–7 พ.ย. 2569</td><td><span class="mode">ห้องอบรม</span></td><td>฿18,900</td><td><span class="seat low">เหลือ 3</span></td><td><a class="btn btn-outline" style="padding:6px 14px" href="#">ลงทะเบียน</a></td></tr>
+          <tr><td><b>Aruba Mobility Fundamentals</b><br><small style="color:var(--text-muted)">Aruba · 3 วัน</small></td><td>12–14 พ.ย. 2569</td><td><span class="mode">ห้องอบรม</span></td><td>฿15,500</td><td><span class="seat ok">เหลือ 9</span></td><td><a class="btn btn-outline" style="padding:6px 14px" href="#">ลงทะเบียน</a></td></tr>
+          <tr><td><b>AWS Solutions Architect</b><br><small style="color:var(--text-muted)">AWS · 4 สัปดาห์</small></td><td>เริ่ม 18 พ.ย. 2569</td><td><span class="mode">ออนไลน์ (LMS)</span></td><td>฿12,900</td><td><span class="seat ok">เปิดรับ</span></td><td><a class="btn btn-outline" style="padding:6px 14px" href="#">ลงทะเบียน</a></td></tr>
+          <tr><td><b>CompTIA Security+</b><br><small style="color:var(--text-muted)">CompTIA · 5 วัน</small></td><td>1–5 ธ.ค. 2569</td><td><span class="mode">Hybrid</span></td><td>฿16,500</td><td><span class="seat ok">เหลือ 12</span></td><td><a class="btn btn-outline" style="padding:6px 14px" href="#">ลงทะเบียน</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="text-align:center;margin-top:20px"><a class="btn btn-outline" href="#">ดูตารางอบรมทั้งหมด</a></p>
+  </div>
+</section>
+
+<!-- 6. Services -->
+<section class="sec" id="services">
+  <span class="tag">6 · บริการของเรา</span>
+  <div class="wrap services">
+    <div class="intro">
+      <span class="eyebrow">บริการของเรา</span>
+      <h2>มากกว่าการอบรม เราดูแลระบบ IT ขององค์กรครบวงจร</h2>
+      <p>ยกระดับความรู้ของบุคลากรด้านไอที ทั้งภาคธุรกิจ หน่วยงานภาครัฐ และสถานศึกษา ให้นำไปใช้งานได้จริงในสายงาน</p>
+      <a class="btn btn-primary" href="#">อ่านเพิ่มเติม →</a>
+    </div>
+    <div class="svc-list">
+      <div class="card svc"><div class="ico">🎓</div><div><h3>จัดฝึกอบรมระบบไอที</h3><p>Public class, In-house training และหลักสูตรออนไลน์ผ่าน LMS พร้อมรายงานผลสำหรับ HR</p></div></div>
+      <div class="card svc"><div class="ico">🧭</div><div><h3>ที่ปรึกษา ออกแบบและติดตั้งระบบ</h3><p>Network และ Data Center ตั้งแต่ออกแบบจนส่งมอบ</p></div></div>
+      <div class="card svc"><div class="ico">🛠</div><div><h3>บริการ MA ระบบเครือข่าย</h3><p>ดูแลและบำรุงรักษาอุปกรณ์เน็ตเวิร์กตามสัญญา</p></div></div>
+      <div class="card svc"><div class="ico">📦</div><div><h3>จำหน่ายสินค้าด้านไอที</h3><p>อุปกรณ์ Network, Wireless และ Security จากแบรนด์ชั้นนำ</p></div></div>
+      <div class="card svc"><div class="ico">🏢</div><div><h3>ให้เช่าอุปกรณ์และห้องอบรม</h3><p>ห้อง Lab พร้อมอุปกรณ์ Enterprise สำหรับจัดอบรมของคุณเอง</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. CTA band -->
+<section class="sec" style="border-top:0;padding-top:24px">
+  <span class="tag">7 · CTA ลงทะเบียน / ติดต่อเจ้าหน้าที่</span>
+  <div class="wrap">
+    <div class="cta-band">
+      <div><h2>สนใจคอร์สเรียนเพิ่มเติม?</h2><p>สมัครเรียนออนไลน์ได้ทันที หรือให้เจ้าหน้าที่ช่วยแนะนำหลักสูตรที่เหมาะกับคุณ</p></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap"><a class="btn btn-primary" href="#schedule">ลงทะเบียนหลักสูตร</a><a class="btn btn-outline" href="#contact">ติดต่อเจ้าหน้าที่</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Articles -->
+<section class="sec" id="articles">
+  <span class="tag">8 · บทความและข่าวสาร (กรองตาม vendor)</span>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">บทความและข่าวสาร</span>
+      <h2>อัปเดตความรู้ด้านไอที</h2>
+    </div>
+    <div class="filters"><button class="on">ทั้งหมด</button><button>Cisco</button><button>Aruba</button><button>CompTIA</button><button>VMware</button></div>
+    <div class="articles">
+      <a class="card article" href="#"><div class="thumb" style="background:linear-gradient(135deg,#1ba0d7,#0d6e99)">Cisco</div><div class="body"><div class="meta">Cisco · 18 ต.ค. 2569</div><h3>เตรียมสอบ CCNA ให้ผ่านในรอบเดียว</h3><p>แผนอ่าน 6 สัปดาห์และ Lab ที่ต้องฝึก</p></div></a>
+      <a class="card article" href="#"><div class="thumb" style="background:linear-gradient(135deg,#ff9a3c,var(--primary))">Aruba</div><div class="body"><div class="meta">Aruba · 10 ต.ค. 2569</div><h3>ออกแบบ Wi-Fi สำนักงานให้รองรับผู้ใช้หนาแน่น</h3><p>Channel planning และ RF ที่ควรรู้</p></div></a>
+      <a class="card article" href="#"><div class="thumb" style="background:linear-gradient(135deg,#d94a57,#9c1c28)">CompTIA</div><div class="body"><div class="meta">CompTIA · 2 ต.ค. 2569</div><h3>Security+ เวอร์ชันใหม่เปลี่ยนอะไรบ้าง</h3><p>สรุปหัวข้อสอบที่เพิ่มเข้ามา</p></div></a>
+      <a class="card article" href="#"><div class="thumb" style="background:linear-gradient(135deg,#7f8f97,#46545b)">VMware</div><div class="body"><div class="meta">VMware · 25 ก.ย. 2569</div><h3>vSphere 8 สำหรับผู้เริ่มต้น</h3><p>ติดตั้ง ESXi และ vCenter ทีละขั้น</p></div></a>
+    </div>
+  </div>
+</section>
+
+<!-- 9. Contact -->
+<section class="sec" id="contact">
+  <span class="tag">9 · ติดต่อ / สอบถามหลักสูตร (ฟอร์มยังไม่มี API)</span>
+  <div class="wrap contact">
+    <div>
+      <span class="eyebrow">ติดต่อเรา</span>
+      <h2 style="font-size:clamp(26px,4vw,36px);margin:12px 0">สนใจหลักสูตรอบรม หรือสอบถามเพิ่มเติม?</h2>
+      <p style="color:var(--text-secondary)">ทิ้งข้อมูลไว้ เจ้าหน้าที่จะติดต่อกลับภายใน 1 วันทำการ หรือติดต่อเราได้ตามช่องทางด้านล่าง</p>
+      <div class="channels">
+        <div class="channel"><div class="ico">☎</div><div><span>โทรศัพท์</span>02-xxx-xxxx</div></div>
+        <div class="channel"><div class="ico">✉</div><div><span>อีเมล</span>training@netprime.co.th</div></div>
+        <div class="channel"><div class="ico" style="background:var(--accent-glow);color:var(--accent)">💬</div><div><span>LINE Official</span>@netprime</div></div>
+        <div class="channel"><div class="ico">📍</div><div><span>ศูนย์ฝึกอบรม</span>กรุงเทพมหานคร</div></div>
+      </div>
+    </div>
+    <form class="card" onsubmit="event.preventDefault()">
+      <div class="row2"><label>ชื่อ-นามสกุล<input placeholder="สมชาย ใจดี"></label><label>บริษัท / หน่วยงาน<input placeholder="ไม่บังคับ"></label></div>
+      <div class="row2"><label>อีเมล<input type="email" placeholder="you@company.com"></label><label>เบอร์โทร<input placeholder="08x-xxx-xxxx"></label></div>
+      <label>หลักสูตรที่สนใจ<select><option>เลือกหลักสูตร</option><option>CCNA 200-301</option><option>Aruba Mobility</option><option>AWS Solutions Architect</option><option>อบรม In-house สำหรับองค์กร</option></select></label>
+      <label>ข้อความ<textarea rows="4" placeholder="จำนวนผู้เรียน ช่วงเวลาที่สะดวก ฯลฯ"></textarea></label>
+      <label class="consent"><input type="checkbox" style="margin-top:3px"> ยินยอมให้ติดต่อกลับตาม <a href="#" style="color:var(--primary)">นโยบายความเป็นส่วนตัว</a></label>
+      <button class="btn btn-primary" style="justify-content:center">ส่งข้อมูล</button>
+    </form>
+  </div>
+</section>
+
+<!-- 10. Footer -->
+<footer>
+  <span class="tag">10 · Footer</span>
+  <div class="wrap">
+    <div class="fgrid">
+      <div><a class="logo" href="#"><img src="../../frontend-admin/logo/NetPrimeLogo.png" alt=""><div>NetPrime<small>Training Center</small></div></a><p style="font-size:13px;color:var(--text-secondary);margin-top:12px;max-width:300px">ศูนย์ฝึกอบรมด้าน Network, Cloud และ Security พร้อมระบบเรียนออนไลน์สำหรับบุคคลและองค์กร</p></div>
+      <div><h4>หลักสูตร</h4><ul><li>Cisco</li><li>Aruba</li><li>AWS / Azure</li><li>CompTIA / VMware</li></ul></div>
+      <div><h4>บริการ</h4><ul><li>อบรมสำหรับองค์กร</li><li>ที่ปรึกษาและติดตั้ง</li><li>บริการ MA</li><li>เช่าห้องอบรม</li></ul></div>
+      <div><h4>ข้อมูล</h4><ul><li>ตรวจสอบใบประกาศนียบัตร</li><li>ร่วมงานกับเรา</li><li>นโยบายความเป็นส่วนตัว</li><li>เงื่อนไขการใช้งาน</li></ul></div>
+    </div>
+    <div class="copy"><span>© 2026 NetPrime Training Center · สงวนลิขสิทธิ์</span><span>เข้าสู่ระบบ LMS · ผู้สอน · องค์กร</span></div>
+  </div>
+</footer>
+
+<!-- 11. Cookie / PDPA banner -->
+<div class="card cookie" id="cookie">
+  <span>เราใช้คุกกี้เพื่อปรับปรุงเว็บไซต์และประสบการณ์ของคุณ อ่านเพิ่มเติมที่ <a href="#" style="color:var(--primary)">นโยบายความเป็นส่วนตัว</a></span>
+  <div class="btns"><button class="btn btn-outline" onclick="cookie.remove()">เฉพาะที่จำเป็น</button><button class="btn btn-primary" onclick="cookie.remove()">ยอมรับ</button></div>
+</div>
+
+<button class="tag-toggle" onclick="document.body.classList.toggle('show-tags')">แสดง/ซ่อนป้าย section</button>
+</body>
+</html>

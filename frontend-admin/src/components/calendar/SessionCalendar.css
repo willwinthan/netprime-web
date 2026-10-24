@@ -1,0 +1,116 @@
+/* Training-session calendar (admin console + public site). Colours are variables with fallbacks;
+   the public site re-maps them under .ps in site/site.css. */
+
+.scal {
+  --scal-ink: var(--text-primary, #182443);
+  --scal-ink-2: var(--text-secondary, #4a5775);
+  --scal-muted: var(--text-muted, #6b7280);
+  --scal-line: rgba(15, 23, 42, 0.08);
+  --scal-surface: #ffffff;
+  --scal-outside: #f8f7f5;
+  --scal-weekend: #fcfaf8;
+  --scal-today: var(--primary, #e56b25);
+  --scal-today-tint: var(--primary-glow, rgba(229, 107, 37, 0.12));
+  --scal-focus: var(--primary, #c2541a);
+  color: var(--scal-ink);
+  position: relative;
+}
+.scal *, .scal *::before, .scal *::after { box-sizing: border-box; }
+.scal-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.scal-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.scal-nav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scal-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.scal-title { font-size: 18px; font-weight: 700; margin: 0 0 0 8px; color: var(--scal-ink); }
+.scal-btn {
+  min-width: 36px; min-height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--scal-line);
+  background: var(--scal-surface); color: var(--scal-ink); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.scal-btn:hover { background: var(--scal-outside); }
+.scal-btn-today { font-size: 13px; }
+.scal button:focus-visible { outline: 3px solid var(--scal-focus); outline-offset: 1px; position: relative; z-index: 3; }
+
+.scal-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 0 0 10px; padding: 0; font-size: 12px; color: var(--scal-ink-2); }
+.scal-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.scal-swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid; display: inline-block; }
+
+.scal-month { position: relative; border: 1px solid var(--scal-line); border-radius: 14px; background: var(--scal-surface); overflow: visible; }
+.scal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--scal-line); }
+.scal-weekday { padding: 8px 8px; font-size: 12px; font-weight: 700; color: var(--scal-ink-2); text-align: left; }
+.scal-weekday.is-weekend { color: var(--scal-muted); }
+
+.scal-week { position: relative; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; border-bottom: 1px solid var(--scal-line); }
+.scal-week:last-child { border-bottom: 0; }
+
+.scal-day {
+  grid-row: 1 / -1; position: relative; z-index: 0; display: flex; align-items: flex-start; justify-content: flex-start;
+  min-height: 118px; margin: 0; padding: 6px 8px; border: 0; border-right: 1px solid var(--scal-line); border-radius: 0;
+  background: transparent; color: var(--scal-ink); font: inherit; text-align: left; cursor: pointer;
+}
+.scal-day:nth-of-type(7) { border-right: 0; }
+.scal-day:hover { background: var(--scal-outside); }
+.scal-day.is-weekend { background: var(--scal-weekend); }
+.scal-day.is-outside { background: var(--scal-outside); color: var(--scal-muted); }
+.scal-daynum { font-size: 13px; font-weight: 600; line-height: 22px; min-width: 24px; padding: 0 4px; border-radius: 99px; text-align: center; }
+.scal-day.is-today .scal-daynum { background: var(--scal-today); color: #ffffff; }
+
+.scal-bar {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 4px; min-width: 0; height: 22px;
+  margin: 0 4px; padding: 0 8px; border: 1px solid; border-left-width: 3px; border-radius: 6px;
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1; text-align: left; cursor: pointer; overflow: hidden;
+}
+.scal-bar:hover { filter: brightness(0.96); }
+.scal-bar.cont-before { margin-left: 0; border-left-width: 1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.scal-bar.cont-after { margin-right: 0; border-right-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.scal-bar-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scal-bar.is-muted .scal-bar-text { text-decoration: line-through; opacity: 0.75; }
+.scal-bar-badge { flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 99px; }
+.scal-bar-arrow { flex: 0 0 auto; }
+
+.scal-more {
+  position: relative; z-index: 1; justify-self: start; margin: 0 4px; padding: 0 6px; height: 20px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--scal-ink-2); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.scal-more:hover { background: var(--scal-today-tint); color: var(--scal-ink); }
+
+.scal-popover {
+  position: absolute; top: 28px; z-index: 20; width: min(340px, 92vw); max-height: 380px; overflow-y: auto;
+  padding: 12px; border: 1px solid var(--scal-line); border-radius: 14px; background: var(--scal-surface);
+  box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.28);
+}
+.scal-popover-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+.scal-close { min-width: 32px; min-height: 32px; font-size: 18px; }
+.scal-day-action { width: 100%; margin-top: 8px; font-size: 13px; }
+
+.scal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.scal-item { display: grid; gap: 6px; }
+.scal-item-btn {
+  display: grid; gap: 3px; width: 100%; padding: 10px 12px; border: 1px solid var(--scal-line); border-left: 4px solid;
+  border-radius: 10px; background: var(--scal-surface); color: var(--scal-ink); font: inherit; text-align: left; cursor: pointer;
+}
+.scal-item-btn:hover { background: var(--scal-outside); }
+.scal-item-title { font-weight: 700; font-size: 14px; }
+.scal-item-btn.is-muted .scal-item-title { text-decoration: line-through; }
+.scal-item-meta { font-size: 12px; color: var(--scal-ink-2); }
+.scal-item-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.scal-chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+.scal-item-extra { padding: 0 4px 0 16px; }
+
+.scal-agenda { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.scal-agenda-date { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: var(--scal-ink-2); }
+.scal-agenda-date.is-today { color: var(--scal-today); }
+
+.scal-empty { margin: 12px 0 0; padding: 20px; text-align: center; color: var(--scal-muted); font-size: 14px; }
+.scal-loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 5;
+  background: rgba(255, 255, 255, 0.6); color: var(--scal-ink-2); font-size: 14px; border-radius: 14px;
+}
+
+@media (max-width: 900px) {
+  .scal-day { min-height: 104px; padding: 4px 6px; }
+  .scal-bar { margin: 0 2px; padding: 0 5px; font-size: 11px; }
+  .scal-bar-badge { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .scal-bar, .scal-day, .scal-item-btn { transition: background-color 0.15s ease, filter 0.15s ease; }
+}

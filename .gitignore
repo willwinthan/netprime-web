@@ -1,0 +1,57 @@
+# Dependencies (pnpm only; pnpm-lock.yaml IS committed)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Wrangler / Miniflare local state
+.wrangler/
+.mf/
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+# frontend-admin: only public VITE_* values (baked into the browser bundle) - safe to commit
+!frontend-admin/.env.production
+!frontend-admin/.env.staging
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.local
+*.pem
+*.key
+
+# Generated at deploy time by scripts/build-init-sql.mjs
+backend/init.sql
+
+# D1 exports (contain user data)
+backups/
+*.sqlite
+*.sqlite3
+*.db
+
+# Test output and logs
+test-results/
+playwright-report/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor / temp files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.claude/settings.local.json

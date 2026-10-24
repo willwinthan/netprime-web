@@ -1,0 +1,20 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging"
+  },
+  "dependencies": {
+    "@tsndr/cloudflare-worker-jwt": "^2.5.3",
+    "hono": "^4.4.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240529.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^4.98.0"
+  }
+}

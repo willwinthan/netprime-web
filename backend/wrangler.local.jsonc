@@ -1,0 +1,25 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "netprime-local-only",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-05-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "send_metrics": false,
+  "vars": {
+    "FRONTEND_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173",
+    "APP_URL": "http://localhost:5173",
+    "ALLOW_LOCAL_SEED_PASSWORDS": "true",
+    "JWT_SECRET": "local-test-only-not-a-production-secret",
+    "STREAM_SIGNING_KEY": "mock-stream-local-key",
+    "STREAM_KEY_ID": "mock-stream-local-id",
+    "OMISE_SECRET_KEY": "mock-local-omise",
+    "RESEND_API_KEY": "mock-local-resend"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "netprime-test-db",
+    "database_id": "00000000-0000-0000-0000-000000000001"
+  }],
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "netprime-local-assets" }],
+  "kv_namespaces": [{ "binding": "SESSIONS", "id": "00000000000000000000000000000001" }]
+}

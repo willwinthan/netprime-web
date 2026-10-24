@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check:release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0 # pnpm 10 (lockfileVersion 9.0); keep in sync with the local toolchain
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm # caches the pnpm store keyed on pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # Production init SQL is generated from schema.sql: make sure it still builds and matches it.
+      - run: pnpm run db:init-sql:verify
+
+      # typecheck + every local test suite (disposable local D1/KV/R2 via wrangler dev) + frontend build + readiness
+      - run: pnpm run check:release
+
+  # Manual deploy (disabled). To enable: add repo secrets CLOUDFLARE_API_TOKEN (Workers Scripts:Edit, D1:Edit,
+  # Workers KV:Edit, R2:Edit) and CLOUDFLARE_ACCOUNT_ID, create a protected GitHub Environment per target,
+  # then uncomment. Backend must deploy before frontend. Back up D1 before applying migrations.
+  #
+  # deploy:
+  #   if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+  #   needs: check
+  #   runs-on: ubuntu-latest
+  #   environment: staging # or production (require reviewers in repo settings)
+  #   env:
+  #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: pnpm/action-setup@v4
+  #       with:
+  #         version: 10.33.0
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 22
+  #         cache: pnpm
+  #     - run: pnpm install --frozen-lockfile
+  #     - run: cd backend && npx wrangler d1 migrations apply netprime-db-staging --remote --env staging
+  #     - run: pnpm run deploy:backend:staging
+  #     - run: pnpm run deploy:frontend:staging

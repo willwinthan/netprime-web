@@ -1,0 +1,79 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "netprime-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-05-24",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "FRONTEND_ORIGINS": "",
+    "APP_URL": "",
+    "EMAIL_FROM": ""
+  },
+  // Workers Logs: search errors and request logs in the dashboard.
+  "observability": {
+    "enabled": true
+  },
+  // Daily 08:00 Asia/Bangkok: training reminders and housekeeping (src/jobs.ts).
+  "triggers": {
+    "crons": ["0 1 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "netprime-db",
+      "database_id": "37bc478a-6c99-41bc-b38c-88bf24dc66fa"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "netprime-assets"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "e4180f040e4940a1a16d75c0cc9ff8b1"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  // ค่าระดับบนสุด = production (Worker "netprime-backend") ใช้: wrangler deploy (ไม่ใส่ --env)
+  // staging = Worker "netprime-backend-staging" ใช้: wrangler deploy --env staging
+  // vars และ binding ไม่สืบทอดข้าม env จึงต้องระบุครบ; observability, triggers, compatibility_* สืบทอดจากด้านบน
+  // ดู docs/CLOUDFLARE-DEPLOY.md หัวข้อ 3
+  "env": {
+    "staging": {
+      "vars": {
+        "FRONTEND_ORIGINS": "",
+        "APP_URL": "",
+        "EMAIL_FROM": ""
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "netprime-db-staging",
+          "database_id": "ใส่ ID จริง: wrangler d1 create netprime-db-staging"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS",
+          "bucket_name": "netprime-assets-staging"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "SESSIONS",
+          "id": "ใส่ ID จริง: wrangler kv namespace create SESSIONS --env staging"
+        }
+      ],
+      "ai": {
+        "binding": "AI"
+      }
+    }
+  }
+}
