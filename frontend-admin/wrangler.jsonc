@@ -22,7 +22,7 @@
       // staging อยู่บัญชี NFR - APJC - TH - CLOUDTHING ระบุไว้เพื่อไม่ให้ cache ของ Wrangler พาไปบัญชีอื่น
       "account_id": "1c8ecd3a5d86428f39ea25f183f66137",
       "vars": {
-        "API_BASE_URL": ""
+        "API_BASE_URL": "https://netprime-backend-staging.nfr-apjc-th-cloudthing.workers.dev/api"
       }
     }
   }
