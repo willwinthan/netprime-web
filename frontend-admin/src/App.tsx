@@ -1,41 +1,45 @@
-import React, { useState } from "react";
+import React, { Suspense, lazy, useState } from "react";
 import { can, hasRole, useApi, User } from "./hooks/useApi";
 import { PublicSite, isPublicPath } from "./site/PublicSite";
 import { navigate, useLocation } from "./site/router";
-import { Dashboard } from "./pages/Dashboard";
-import { HRConsole } from "./pages/HRConsole";
-import { InstructorConsole } from "./pages/InstructorConsole";
-import { AdminConsole } from "./pages/AdminConsole";
-import { SiteManager, TRAINING_PERMISSIONS } from "./pages/SiteManager";
-import { UsersPage } from "./pages/UsersPage";
-import { ArticlesStudio } from "./pages/ArticlesStudio";
+import { TRAINING_PERMISSIONS, WEBSITE_PERMISSIONS, CERTIFICATE_PERMISSIONS } from "./pages/tabPermissions";
 import { ProfilePage, VerifyEmailBanner } from "./pages/ProfilePage";
-import { OrdersPage } from "./pages/OrdersPage";
-import { CoursesAdminPage } from "./pages/CoursesAdminPage";
-import { PrivacyPanel, PrivacyRequestsPage } from "./pages/PrivacyPages";
-import { CertificatesPage, CERTIFICATE_PERMISSIONS } from "./pages/CertificatesPage";
-import { AuditPage } from "./pages/AuditPage";
-import { VerifyCertificate } from "./pages/VerifyCertificate";
-import { AnalyticsDashboard } from "./pages/AnalyticsDashboard";
-import { ReportsPage } from "./pages/ReportsPage";
 import { GlobalSearch } from "./components/search/GlobalSearch";
 import { usePresenceHeartbeat } from "./hooks/usePresence";
-import { MarketingPage } from "./pages/MarketingPage";
-import { AffiliateDashboard } from "./components/marketing/AffiliateDashboard";
 import { sendSignupAttribution } from "./components/marketing/runtime";
-import { AssessmentsConsole } from "./components/assessment/CourseAssessments";
-import { CourseCategoriesPanel } from "./components/course/CourseCategoriesPanel";
-import { WebsiteBuilderPage, WEBSITE_PERMISSIONS } from "./pages/WebsiteBuilderPage";
-import { CommunicationPage } from "./pages/CommunicationPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { SsoCompletePage } from "./components/settings/SsoLogin";
 import { MaintenanceBanner } from "./components/settings/MaintenanceBanner";
-import { AiSettingsPanel } from "./components/ai/AiSettingsPanel";
-import { NotificationPreferences } from "./components/communication/NotificationPreferences";
 import { InstallAppButton } from "./pwa/pwa";
-import { CommercePage } from "./components/commerce/CommercePage";
 import logo from "../logo/NetPrimeLogo.png";
-import { motion, AnimatePresence } from "framer-motion";
+// Console pages load on first visit so learners and visitors don't download every staff screen.
+const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
+const HRConsole = lazy(() => import("./pages/HRConsole").then(m => ({ default: m.HRConsole })));
+const InstructorConsole = lazy(() => import("./pages/InstructorConsole").then(m => ({ default: m.InstructorConsole })));
+const AdminConsole = lazy(() => import("./pages/AdminConsole").then(m => ({ default: m.AdminConsole })));
+const SiteManager = lazy(() => import("./pages/SiteManager").then(m => ({ default: m.SiteManager })));
+const UsersPage = lazy(() => import("./pages/UsersPage").then(m => ({ default: m.UsersPage })));
+const ArticlesStudio = lazy(() => import("./pages/ArticlesStudio").then(m => ({ default: m.ArticlesStudio })));
+const OrdersPage = lazy(() => import("./pages/OrdersPage").then(m => ({ default: m.OrdersPage })));
+const CoursesAdminPage = lazy(() => import("./pages/CoursesAdminPage").then(m => ({ default: m.CoursesAdminPage })));
+const PrivacyPanel = lazy(() => import("./pages/PrivacyPages").then(m => ({ default: m.PrivacyPanel })));
+const PrivacyRequestsPage = lazy(() => import("./pages/PrivacyPages").then(m => ({ default: m.PrivacyRequestsPage })));
+const CertificatesPage = lazy(() => import("./pages/CertificatesPage").then(m => ({ default: m.CertificatesPage })));
+const AuditPage = lazy(() => import("./pages/AuditPage").then(m => ({ default: m.AuditPage })));
+const VerifyCertificate = lazy(() => import("./pages/VerifyCertificate").then(m => ({ default: m.VerifyCertificate })));
+const AnalyticsDashboard = lazy(() => import("./pages/AnalyticsDashboard").then(m => ({ default: m.AnalyticsDashboard })));
+const ReportsPage = lazy(() => import("./pages/ReportsPage").then(m => ({ default: m.ReportsPage })));
+const MarketingPage = lazy(() => import("./pages/MarketingPage").then(m => ({ default: m.MarketingPage })));
+const AffiliateDashboard = lazy(() => import("./components/marketing/AffiliateDashboard").then(m => ({ default: m.AffiliateDashboard })));
+const AssessmentsConsole = lazy(() => import("./components/assessment/CourseAssessments").then(m => ({ default: m.AssessmentsConsole })));
+const CourseCategoriesPanel = lazy(() => import("./components/course/CourseCategoriesPanel").then(m => ({ default: m.CourseCategoriesPanel })));
+const WebsiteBuilderPage = lazy(() => import("./pages/WebsiteBuilderPage").then(m => ({ default: m.WebsiteBuilderPage })));
+const CommunicationPage = lazy(() => import("./pages/CommunicationPage").then(m => ({ default: m.CommunicationPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const AiSettingsPanel = lazy(() => import("./components/ai/AiSettingsPanel").then(m => ({ default: m.AiSettingsPanel })));
+const NotificationPreferences = lazy(() => import("./components/communication/NotificationPreferences").then(m => ({ default: m.NotificationPreferences })));
+const CommercePage = lazy(() => import("./components/commerce/CommercePage").then(m => ({ default: m.CommercePage })));
+
+import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { 
   BookOpen, 
   Users, 
@@ -260,6 +264,9 @@ export const App: React.FC = () => {
   } as const;
 
   return (
+    // LazyMotion keeps the animation runtime small in the main bundle; console pages that use the
+    // full `motion` API load it with their own (lazy) chunks.
+    <LazyMotion features={domAnimation}>
     <div className="app-container">
       {/* Background neon ambient layout blobs */}
       <div className="ambient-glow-wrapper">
@@ -269,7 +276,7 @@ export const App: React.FC = () => {
 
       <AnimatePresence mode="wait">
         {oauthProcessing ? (
-          <motion.div
+          <m.div
             key="oauth-processing"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -287,15 +294,15 @@ export const App: React.FC = () => {
             <div className="spinner" style={{ border: "3px solid rgba(229,107,37,0.2)", borderTop: "3px solid var(--primary)", borderRadius: "50%", width: "40px", height: "40px", animation: "spin 1s linear infinite" }} />
             <h3 style={{ fontSize: "18px", color: "var(--text-primary)", fontWeight: "700" }}>กำลังตรวจสอบการเข้าสู่ระบบแบบ Single Sign-On...</h3>
             <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>กำลังเชื่อมต่อผู้ให้บริการยืนยันตัวตนขององค์กร</p>
-          </motion.div>
+          </m.div>
         ) : location.pathname === "/auth/sso/complete" ? (
           // Enterprise SSO (OIDC) hands back a one-time ticket in the URL fragment.
-          <motion.div key="sso-complete" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ width: "100%" }}>
+          <m.div key="sso-complete" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ width: "100%" }}>
             <SsoCompletePage onLogin={(token, user) => { handleLoginSuccess(token, user); navigate("/dashboard"); }} />
-          </motion.div>
+          </m.div>
         ) : verifyCode ? (
           // Public Certificate Verification Portal
-          <motion.div 
+          <m.div 
             key="verify-certificate" 
             initial={{ opacity: 0, scale: 0.95 }} 
             animate={{ opacity: 1, scale: 1 }} 
@@ -303,11 +310,11 @@ export const App: React.FC = () => {
             transition={{ duration: 0.25 }}
             style={{ width: "100%" }}
           >
-            <VerifyCertificate />
-          </motion.div>
+            <Suspense fallback={null}><VerifyCertificate /></Suspense>
+          </m.div>
         ) : !api.token || isPublicPath(location.pathname) ? (
           // Public website at "/", "/blog" etc. for everyone; the signed-in console lives at /dashboard
-          <motion.div 
+          <m.div 
             key="public-site" 
             initial={{ opacity: 0, y: 20 }} 
             animate={{ opacity: 1, y: 0 }} 
@@ -316,10 +323,10 @@ export const App: React.FC = () => {
             style={{ width: "100%" }}
           >
             <PublicSite loggedIn={!!api.token} onLogin={handleLoginSuccess} />
-          </motion.div>
+          </m.div>
         ) : (
           // Authenticated Workspace Layout
-          <motion.div 
+          <m.div 
             key={`workspace-${api.user?.id}`}
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
@@ -409,66 +416,68 @@ export const App: React.FC = () => {
             <main className="main-content">
               <MaintenanceBanner />
               <VerifyEmailBanner onOpenProfile={() => setCurrentTab("profile")} />
+              <Suspense fallback={<div style={{ padding: "48px", textAlign: "center", color: "var(--text-secondary)" }}>กำลังโหลด…</div>}>
               <AnimatePresence mode="wait">
                 {currentTab === "dashboard" && canLearn && (
-                  <motion.div key="dashboard" {...pageTransition}>
+                  <m.div key="dashboard" {...pageTransition}>
                     <Dashboard />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "hr" && (
-                  <motion.div key="hr" {...pageTransition}>
+                  <m.div key="hr" {...pageTransition}>
                     <HRConsole />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "instructor" && (
-                  <motion.div key="instructor" {...pageTransition}>
+                  <m.div key="instructor" {...pageTransition}>
                     <InstructorConsole />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "admin" && (
-                  <motion.div key="admin" {...pageTransition}>
+                  <m.div key="admin" {...pageTransition}>
                     <AdminConsole onOpenUsers={() => setCurrentTab("users")} onOpenAnalytics={() => setCurrentTab("analytics")} />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "site" && (
-                  <motion.div key="site" {...pageTransition}>
+                  <m.div key="site" {...pageTransition}>
                     <SiteManager />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "articles" && (
-                  <motion.div key="articles" {...pageTransition}>
+                  <m.div key="articles" {...pageTransition}>
                     <ArticlesStudio />
-                  </motion.div>
+                  </m.div>
                 )}
                 {currentTab === "users" && (
-                  <motion.div key="users" {...pageTransition}>
+                  <m.div key="users" {...pageTransition}>
                     <UsersPage />
-                  </motion.div>
+                  </m.div>
                 )}
-                {currentTab === "orders" && <motion.div key="orders" {...pageTransition}><OrdersPage /></motion.div>}
-                {currentTab === "courses" && <motion.div key="courses" {...pageTransition}><CoursesAdminPage /></motion.div>}
-                {currentTab === "certificates" && <motion.div key="certificates" {...pageTransition}><CertificatesPage /></motion.div>}
-                {currentTab === "privacy" && <motion.div key="privacy" {...pageTransition}><PrivacyRequestsPage /></motion.div>}
-                {currentTab === "analytics" && <motion.div key="analytics" {...pageTransition}><AnalyticsDashboard onNavigate={t => openTab(t.tab)} onContact={() => setCurrentTab("communication")} /></motion.div>}
-                {currentTab === "reports" && <motion.div key="reports" {...pageTransition}><ReportsPage onNavigate={t => openTab(t.tab)} /></motion.div>}
-                {currentTab === "assessments" && <motion.div key="assessments" {...pageTransition}><AssessmentsConsole /></motion.div>}
-                {currentTab === "categories" && <motion.div key="categories" {...pageTransition}><CourseCategoriesPanel /></motion.div>}
-                {currentTab === "communication" && <motion.div key="communication" {...pageTransition}><CommunicationPage /></motion.div>}
-                {currentTab === "marketing" && <motion.div key="marketing" {...pageTransition}><MarketingPage /></motion.div>}
-                {currentTab === "website" && <motion.div key="website" {...pageTransition}><WebsiteBuilderPage /></motion.div>}
-                {currentTab === "ai" && <motion.div key="ai" {...pageTransition}><AiSettingsPanel /></motion.div>}
-                {currentTab === "settings" && <motion.div key="settings" {...pageTransition}><SettingsPage onOpenBranding={() => setCurrentTab("website")} /></motion.div>}
-                {currentTab === "audit" && <motion.div key="audit" {...pageTransition}><AuditPage /></motion.div>}
-                {currentTab === "commerce" && <motion.div key="commerce" {...pageTransition}><CommercePage /></motion.div>}
-                {currentTab === "affiliate" && <motion.div key="affiliate" {...pageTransition}><AffiliateDashboard /></motion.div>}
+                {currentTab === "orders" && <m.div key="orders" {...pageTransition}><OrdersPage /></m.div>}
+                {currentTab === "courses" && <m.div key="courses" {...pageTransition}><CoursesAdminPage /></m.div>}
+                {currentTab === "certificates" && <m.div key="certificates" {...pageTransition}><CertificatesPage /></m.div>}
+                {currentTab === "privacy" && <m.div key="privacy" {...pageTransition}><PrivacyRequestsPage /></m.div>}
+                {currentTab === "analytics" && <m.div key="analytics" {...pageTransition}><AnalyticsDashboard onNavigate={t => openTab(t.tab)} onContact={() => setCurrentTab("communication")} /></m.div>}
+                {currentTab === "reports" && <m.div key="reports" {...pageTransition}><ReportsPage onNavigate={t => openTab(t.tab)} /></m.div>}
+                {currentTab === "assessments" && <m.div key="assessments" {...pageTransition}><AssessmentsConsole /></m.div>}
+                {currentTab === "categories" && <m.div key="categories" {...pageTransition}><CourseCategoriesPanel /></m.div>}
+                {currentTab === "communication" && <m.div key="communication" {...pageTransition}><CommunicationPage /></m.div>}
+                {currentTab === "marketing" && <m.div key="marketing" {...pageTransition}><MarketingPage /></m.div>}
+                {currentTab === "website" && <m.div key="website" {...pageTransition}><WebsiteBuilderPage /></m.div>}
+                {currentTab === "ai" && <m.div key="ai" {...pageTransition}><AiSettingsPanel /></m.div>}
+                {currentTab === "settings" && <m.div key="settings" {...pageTransition}><SettingsPage onOpenBranding={() => setCurrentTab("website")} /></m.div>}
+                {currentTab === "audit" && <m.div key="audit" {...pageTransition}><AuditPage /></m.div>}
+                {currentTab === "commerce" && <m.div key="commerce" {...pageTransition}><CommercePage /></m.div>}
+                {currentTab === "affiliate" && <m.div key="affiliate" {...pageTransition}><AffiliateDashboard /></m.div>}
                 {currentTab === "profile" && (
-                  <motion.div key="profile" {...pageTransition}>
+                  <m.div key="profile" {...pageTransition}>
                     <ProfilePage><NotificationPreferences /><PrivacyPanel /></ProfilePage>
-                  </motion.div>
+                  </m.div>
                 )}
               </AnimatePresence>
+              </Suspense>
             </main>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
 
@@ -476,6 +485,7 @@ export const App: React.FC = () => {
         {sessionError} <button onClick={() => setSessionError(null)} aria-label="ปิดข้อความ">×</button>
       </div>}
     </div>
+    </LazyMotion>
   );
 };
 export default App;

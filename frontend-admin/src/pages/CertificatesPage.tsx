@@ -2,13 +2,13 @@ import React, { Suspense, lazy, useState } from "react";
 import { Award, LayoutTemplate } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { Empty } from "../components/site-admin/ui";
+import { CERTIFICATE_TABS } from "./tabPermissions";
 import { CertificatesAdminPanel } from "../components/site-admin/CertificatesAdminPanel";
 
 const CertificatesTemplatePanel = lazy(() => import("../components/builder/CertificatesPanel"));
 
 type Tab = "issued" | "templates";
-const TAB_PERMISSION: Record<Tab, string> = { issued: "certificates.manage", templates: "website.design" };
-export const CERTIFICATE_PERMISSIONS = Object.values(TAB_PERMISSION);
+const TAB_PERMISSION: Record<Tab, string> = CERTIFICATE_TABS;
 
 /** Certificates in one place: search/revoke/reissue issued certificates and design their templates. */
 export const CertificatesPage: React.FC = () => {

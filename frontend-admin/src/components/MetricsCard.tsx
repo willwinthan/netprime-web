@@ -1,11 +1,14 @@
 import React from "react";
-import * as Icons from "lucide-react";
+import { Activity, Banknote, BookOpen, Building, FileCheck, FolderGit2, TrendingUp, Users } from "lucide-react";
+
+// Only the icons cards use: `import * as` would pull every lucide icon (~1 MB) into the main bundle.
+const ICONS = { Activity, Banknote, BookOpen, Building, FileCheck, FolderGit2, TrendingUp, Users };
 
 interface MetricsCardProps {
   title: string;
   value: string | number;
   subValue?: string;
-  icon: keyof typeof Icons;
+  icon: keyof typeof ICONS;
   progress?: {
     current: number;
     total: number;
@@ -21,7 +24,7 @@ export const MetricsCard: React.FC<MetricsCardProps> = ({
   progress,
   color = "blue",
 }) => {
-  const IconComponent = Icons[icon] as React.ComponentType<{ className?: string }>;
+  const IconComponent = ICONS[icon] as React.ComponentType<{ className?: string }>;
 
   // Map color tokens to CSS variable classes
   const colorMap = {

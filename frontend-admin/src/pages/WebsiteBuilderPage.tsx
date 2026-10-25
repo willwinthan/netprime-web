@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState } from "react";
 import { ExternalLink, FileText, Home, Megaphone, Menu, Palette, Settings2 } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
+import { WEBSITE_TABS } from "./tabPermissions";
 import { Empty } from "../components/site-admin/ui";
 import { PromotionsPanel, SettingsPanel } from "../components/site-admin/ContentPanels";
 import { HomeContentPanel } from "../components/site-admin/HomeContentPanel";
@@ -13,15 +14,10 @@ const ThemePanel = lazy(() => import("../components/builder/ThemePanel"));
 
 type Tab = "home" | "pages" | "nav" | "theme" | "promotions" | "settings";
 
-const TAB_PERMISSION: Record<Tab, string> = {
-  home: "site.settings", pages: "website.design", nav: "website.design", theme: "website.design",
-  promotions: "site.promotions", settings: "site.settings"
-};
+const TAB_PERMISSION: Record<Tab, string> = WEBSITE_TABS;
 
 /** Permission that designs pages, menus and theme (coordinators by default; editable per role). */
 export const WEBSITE_BUILDER_PERMISSION = "website.design";
-/** Any of these opens the "เว็บไซต์" console page. */
-export const WEBSITE_PERMISSIONS = Array.from(new Set(Object.values(TAB_PERMISSION)));
 
 /**
  * "เว็บไซต์": everything visitors see on the public site in one place — homepage and policy pages,

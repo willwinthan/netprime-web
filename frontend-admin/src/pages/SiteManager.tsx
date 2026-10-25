@@ -1,17 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { LayoutDashboard, CalendarDays, MessageSquare, ExternalLink } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
+import { TRAINING_TABS } from "./tabPermissions";
 import { SessionsPanel } from "../components/site-admin/SessionsPanel";
 import { InquiriesPanel } from "../components/site-admin/ContentPanels";
 import { AdminSession, Chip, REG_STATUS, SeatBar, ErrorBox, Empty, formatDateRange, formatDateTime } from "../components/site-admin/ui";
 
 type Tab = "overview" | "sessions" | "inquiries";
 
-const TAB_PERMISSION: Record<Tab, string> = {
-  overview: "site.dashboard", sessions: "site.sessions", inquiries: "site.inquiries"
-};
-/** Any of these opens the training desk. Website content lives in WebsiteBuilderPage; audit in AuditPage. */
-export const TRAINING_PERMISSIONS = Object.values(TAB_PERMISSION);
+const TAB_PERMISSION: Record<Tab, string> = TRAINING_TABS;
 
 interface Summary {
   counts: { new_inquiries: number; pending_registrations: number; waitlist_registrations: number; open_sessions: number; published_articles: number };
