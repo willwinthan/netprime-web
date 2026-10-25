@@ -148,8 +148,8 @@ export const CoursesAdminPage: React.FC = () => {
                     <div>{course.submitted_at ? formatDateTime(course.submitted_at) : "-"}</div>
                     <div>{course.published_at ? formatDateTime(course.published_at) : "-"}</div>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
-                    <div style={{ display: "inline-flex", gap: 6 }}>
+                  <td style={{ ...tdStyle, textAlign: "right", minWidth: 220 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                       <button onClick={() => openPreview(course)} className="tech-button-outline" style={{ padding: "6px 10px", fontSize: 12 }}><Eye size={14} />ดูตัวอย่าง</button>
                       {course.status !== "published" && (
                         <button disabled={busy === course.id} onClick={() => act(course, "approve")} className="tech-button-primary" style={{ padding: "6px 10px", fontSize: 12 }}>

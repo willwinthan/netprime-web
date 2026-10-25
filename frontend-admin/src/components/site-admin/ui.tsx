@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import React from "react";
 import { X } from "lucide-react";
 import { API_BASE_URL } from "../../hooks/useApi";
@@ -131,7 +132,11 @@ export const SeatBar: React.FC<{ taken: number; capacity: number }> = ({ taken, 
   );
 };
 
-export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; width?: number }> = ({ title, onClose, children, width = 640 }) => (
+/**
+ * Rendered into document.body: cards use backdrop-filter/transform, which would otherwise trap a
+ * position:fixed overlay inside the card that opened it.
+ */
+export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; width?: number }> = ({ title, onClose, children, width = 640 }) => createPortal(
   <div role="dialog" aria-modal="true" aria-label={title} onClick={onClose}
     style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.4)", backdropFilter: "blur(6px)", zIndex: 9000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
     <div className="glass-card" onClick={e => e.stopPropagation()}
@@ -142,7 +147,8 @@ export const Modal: React.FC<{ title: string; onClose: () => void; children: Rea
       <h2 style={{ fontSize: "20px", marginBottom: "20px", paddingRight: "32px" }}>{title}</h2>
       {children}
     </div>
-  </div>
+  </div>,
+  document.body
 );
 
 export const Field: React.FC<{ label: string; hint?: string; children: React.ReactNode; span?: boolean }> = ({ label, hint, children, span }) => (

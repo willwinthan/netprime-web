@@ -50,6 +50,13 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* The reset above removes the UA margin:auto that centers native modal <dialog>s. */
+dialog:modal {
+  margin: auto;
+  max-height: calc(100vh - 32px);
+}
+
+
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
@@ -547,8 +554,15 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
   margin-bottom: 32px;
 }
+
+/* Header actions keep their labels on one line; the row wraps instead of squeezing them. */
+.header-row button, .header-row a { white-space: nowrap; flex-shrink: 0; }
+.header-row > div:last-child:not(:first-child) { display: flex; flex-wrap: wrap; gap: 8px; }
+.course-tabs > button { white-space: nowrap; }
 
 .header-title {
   font-size: 32px;

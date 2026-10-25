@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import React, { useEffect, useState } from "react";
 import { Check, Layers, Tag, X } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
@@ -20,6 +21,12 @@ export const ProductOrderModal: React.FC<{ product: Product; onClose: () => void
   const [buyer, setBuyer] = useState<BuyerTax>(EMPTY_BUYER);
   const [order, setOrder] = useState<CourseOrder | null>(null);
   const [instructions, setInstructions] = useState<BankTransfer | null>(null);
+  // A full tax invoice only exists when the school is VAT-registered (tax profile in OrdersPage).
+  const [vatRegistered, setVatRegistered] = useState(false);
+  useEffect(() => {
+    api.get<{ seller?: { vat_registered?: boolean } }>("/student/payment-instructions")
+      .then(res => setVatRegistered(!!res.seller?.vat_registered)).catch(() => undefined);
+  }, []);
   const [enrolled, setEnrolled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +60,7 @@ export const ProductOrderModal: React.FC<{ product: Product; onClose: () => void
   const per = Math.floor(product.price / installments);
   const isRenewal = product.kind === "membership" && product.membership?.status === "active";
 
-  return (
+  return createPortal(
     <div role="dialog" aria-modal="true" aria-label={`ซื้อ ${product.title}`} onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,0.6)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", overflowY: "auto" }}>
       <div className="glass-card" onClick={e => e.stopPropagation()}
@@ -126,7 +133,7 @@ export const ProductOrderModal: React.FC<{ product: Product; onClose: () => void
               <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}><Tag size={12} /> โค้ดส่วนลด (ถ้ามี)</label>
               <input type="text" className="form-input" placeholder="โค้ดที่ใช้ได้ทุกรายการ" value={code} onChange={e => setCode(e.target.value)} style={{ textTransform: "uppercase" }} />
             </div>
-            {product.price > 0 && (
+            {vatRegistered && product.price > 0 && (
               <div style={box}>
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: 600 }}>
                   <input type="checkbox" checked={wantTax} onChange={e => setWantTax(e.target.checked)} /> ต้องการใบกำกับภาษีเต็มรูป
@@ -144,7 +151,8 @@ export const ProductOrderModal: React.FC<{ product: Product; onClose: () => void
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

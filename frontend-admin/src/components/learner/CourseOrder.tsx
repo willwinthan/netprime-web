@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import React, { useEffect, useState } from "react";
 import { AlertCircle, Check, Copy, Tag, Upload, X } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
@@ -173,6 +174,12 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [order, setOrder] = useState<CourseOrder | null>(null);
   const [instructions, setInstructions] = useState<BankTransfer | null>(null);
+  // A full tax invoice only exists when the school is VAT-registered (tax profile in OrdersPage).
+  const [vatRegistered, setVatRegistered] = useState(false);
+  useEffect(() => {
+    api.get<{ seller?: { vat_registered?: boolean } }>("/student/payment-instructions")
+      .then(res => setVatRegistered(!!res.seller?.vat_registered)).catch(() => undefined);
+  }, []);
   const [enrolled, setEnrolled] = useState(false);
   const [wantTax, setWantTax] = useState(false);
   const [buyer, setBuyer] = useState<BuyerTax>(EMPTY_BUYER);
@@ -226,7 +233,7 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
   };
 
   const price = Math.round(course.price || 0);
-  return (
+  return createPortal(
     <div role="dialog" aria-modal="true" aria-label="ซื้อคอร์ส" onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,0.6)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", overflowY: "auto" }}>
       <div className="glass-card" onClick={e => e.stopPropagation()}
@@ -282,7 +289,7 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
             <div style={{ ...box, display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
               <span>ยอดที่ต้องชำระ</span><span style={{ color: "var(--primary)" }}>{baht(voucher ? voucher.final_price : price)}</span>
             </div>
-            {(voucher ? voucher.final_price : price) > 0 && (
+            {vatRegistered && (voucher ? voucher.final_price : price) > 0 && (
               <div style={{ ...box }}>
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: 600 }}>
                   <input type="checkbox" checked={wantTax} onChange={e => setWantTax(e.target.checked)} /> ต้องการใบกำกับภาษีเต็มรูป
@@ -298,6 +305,7 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import React, { useEffect, useState } from "react";
 import { FileText, Layers, Printer, Receipt, Route } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
@@ -206,7 +207,7 @@ const TaxRequestDialog: React.FC<{ order: CourseOrder; vatRegistered: boolean; o
       setBusy(false);
     }
   };
-  return (
+  return createPortal(
     <div role="dialog" aria-modal="true" aria-label="ขอใบกำกับภาษี" onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,0.6)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "60px 16px" }}>
       <div className="glass-card" onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: "520px", background: "#fff", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -221,6 +222,7 @@ const TaxRequestDialog: React.FC<{ order: CourseOrder; vatRegistered: boolean; o
           <button type="button" className="tech-button-primary" onClick={() => save(true)} disabled={busy || !buyerReady(buyer)}>{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

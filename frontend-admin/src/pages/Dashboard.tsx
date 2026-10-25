@@ -717,6 +717,11 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Progress, completions and certificates change inside a course; refresh the summary on the way back.
+  useEffect(() => {
+    if (!selectedCourseId && api.token) fetchDashboardStats();
+  }, [selectedCourseId]);
+
   // Claim Certificate when course is 100%
   const handleClaimCertificate = async () => {
     if (!selectedCourseId) return;
@@ -725,6 +730,7 @@ export const Dashboard: React.FC = () => {
       const res = await api.post<{ certificate: any }>(`/student/courses/${selectedCourseId}/certificate`, {});
       setCertificate(res.certificate);
       setShowCertificateModal(true);
+      fetchDashboardStats();
     } catch (err: any) {
       alert(err.message || "รับใบประกาศนียบัตรไม่สำเร็จ");
     } finally {
@@ -2435,15 +2441,15 @@ export const Dashboard: React.FC = () => {
                   </p>
 
                   <CourseAnnouncements courseId={courseDetail.id} compact />
-                  {enrollment && <CourseReviewForm courseId={courseDetail.id} tone="console" />}
+                  {enrollment && <CourseReviewForm key={`${courseDetail.id}-${enrollment.progress_percent}-${enrollment.status}`} courseId={courseDetail.id} tone="console" />}
 
                   {/* Tab selection menu */}
-                  <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px", marginBottom: "24px" }}>
+                  <div className="course-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "6px 8px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px", marginBottom: "24px" }}>
                     <button 
                       onClick={() => setActiveDetailTab("video")}
                       style={{ padding: "6px 12px", borderRadius: "0.5rem", background: activeDetailTab === "video" ? "var(--primary-glow)" : "none", border: "none", color: activeDetailTab === "video" ? "var(--color-brand-primary)" : "var(--text-secondary)", fontWeight: "600", cursor: "pointer" }}
                     >
-                      วิดีโอบทเรียน
+                      บทเรียน
                     </button>
                     <button 
                       onClick={() => setActiveDetailTab("resources")}

@@ -2,6 +2,56 @@
 PRAGMA foreign_keys = OFF;
 
 -- Clean up existing tables (dependencies first)
+DROP TABLE IF EXISTS danger_confirmations;
+DROP TABLE IF EXISTS live_attendance;
+DROP TABLE IF EXISTS course_live_sessions;
+DROP TABLE IF EXISTS session_meetings;
+DROP TABLE IF EXISTS sso_identities;
+DROP TABLE IF EXISTS sso_providers;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS webhook_deliveries;
+DROP TABLE IF EXISTS webhook_endpoints;
+DROP TABLE IF EXISTS broadcast_recipients;
+DROP TABLE IF EXISTS broadcasts;
+DROP TABLE IF EXISTS notification_preferences;
+DROP TABLE IF EXISTS email_templates;
+DROP TABLE IF EXISTS course_announcements;
+DROP TABLE IF EXISTS community_reports;
+DROP TABLE IF EXISTS community_follows;
+DROP TABLE IF EXISTS community_reactions;
+DROP TABLE IF EXISTS community_comments;
+DROP TABLE IF EXISTS community_posts;
+DROP TABLE IF EXISTS community_spaces;
+DROP TABLE IF EXISTS dm_messages;
+DROP TABLE IF EXISTS dm_threads;
+DROP TABLE IF EXISTS communication_settings;
+DROP TABLE IF EXISTS push_subscriptions;
+DROP TABLE IF EXISTS line_links;
+DROP TABLE IF EXISTS line_link_codes;
+DROP TABLE IF EXISTS voucher_campaign_codes;
+DROP TABLE IF EXISTS voucher_campaigns;
+DROP TABLE IF EXISTS course_reviews;
+DROP TABLE IF EXISTS leads;
+DROP TABLE IF EXISTS lead_forms;
+DROP TABLE IF EXISTS affiliate_conversions;
+DROP TABLE IF EXISTS affiliate_payouts;
+DROP TABLE IF EXISTS signup_attributions;
+DROP TABLE IF EXISTS affiliate_clicks;
+DROP TABLE IF EXISTS affiliates;
+DROP TABLE IF EXISTS affiliate_programs;
+DROP TABLE IF EXISTS ai_lesson_summaries;
+DROP TABLE IF EXISTS ai_usage_log;
+DROP TABLE IF EXISTS course_certificate_templates;
+DROP TABLE IF EXISTS certificate_templates;
+DROP TABLE IF EXISTS site_pages;
+DROP TABLE IF EXISTS user_import_rows;
+DROP TABLE IF EXISTS user_imports;
+DROP TABLE IF EXISTS staff_notes;
+DROP TABLE IF EXISTS user_profile_values;
+DROP TABLE IF EXISTS profile_fields;
+DROP TABLE IF EXISTS segments;
+DROP TABLE IF EXISTS article_revisions;
+DROP TABLE IF EXISTS privacy_requests;
 DROP TABLE IF EXISTS path_certificates;
 DROP TABLE IF EXISTS memberships;
 DROP TABLE IF EXISTS order_installments;
@@ -1125,8 +1175,6 @@ CREATE INDEX IF NOT EXISTS idx_lesson_qa_lesson ON lesson_qa (lesson_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id);
 
 -- Coordinator operations (see migrations/0014_site_ops.sql)
-DROP TABLE IF EXISTS article_revisions;
-DROP TABLE IF EXISTS privacy_requests;
 -- Training registrations ↔ LMS accounts (matched by email; see handlers/site.ts).
 ALTER TABLE session_registrations ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
 -- Set once the "starts in 2 days" reminder was sent (jobs.ts); cleared when the session date moves.
@@ -1167,12 +1215,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS privacy_requests_one_open ON privacy_requests 
 CREATE INDEX IF NOT EXISTS idx_privacy_requests_status ON privacy_requests (status, created_at);
 
 -- People management: segments, custom profile fields, staff notes, CSV import log (see migrations/0021_people.sql).
-DROP TABLE IF EXISTS user_import_rows;
-DROP TABLE IF EXISTS user_imports;
-DROP TABLE IF EXISTS staff_notes;
-DROP TABLE IF EXISTS user_profile_values;
-DROP TABLE IF EXISTS profile_fields;
-DROP TABLE IF EXISTS segments;
 -- Saved audience segments; rules_json follows utils/segments.ts SegmentRules.
 CREATE TABLE IF NOT EXISTS segments (
     id TEXT PRIMARY KEY,
@@ -1238,9 +1280,6 @@ CREATE TABLE IF NOT EXISTS user_import_rows (
 );
 
 -- Website builder: custom pages, certificate templates, per-course template override (see migrations/0025_website.sql).
-DROP TABLE IF EXISTS course_certificate_templates;
-DROP TABLE IF EXISTS certificate_templates;
-DROP TABLE IF EXISTS site_pages;
 CREATE TABLE IF NOT EXISTS site_pages (
     id TEXT PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
@@ -1522,8 +1561,6 @@ CREATE TABLE IF NOT EXISTS scorm_attempts (
 CREATE INDEX IF NOT EXISTS idx_scorm_attempts_lesson ON scorm_attempts (lesson_id);
 
 -- AI assistants: usage log and cached lesson summaries (see migrations/0027_ai.sql).
-DROP TABLE IF EXISTS ai_lesson_summaries;
-DROP TABLE IF EXISTS ai_usage_log;
 CREATE TABLE IF NOT EXISTS ai_usage_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     feature TEXT NOT NULL,
@@ -1552,17 +1589,6 @@ CREATE TABLE IF NOT EXISTS ai_lesson_summaries (
 );
 
 -- Marketing: affiliates, signup attribution, lead forms, reviews, voucher campaigns (see migrations/0024_marketing.sql)
-DROP TABLE IF EXISTS voucher_campaign_codes;
-DROP TABLE IF EXISTS voucher_campaigns;
-DROP TABLE IF EXISTS course_reviews;
-DROP TABLE IF EXISTS leads;
-DROP TABLE IF EXISTS lead_forms;
-DROP TABLE IF EXISTS affiliate_conversions;
-DROP TABLE IF EXISTS affiliate_payouts;
-DROP TABLE IF EXISTS signup_attributions;
-DROP TABLE IF EXISTS affiliate_clicks;
-DROP TABLE IF EXISTS affiliates;
-DROP TABLE IF EXISTS affiliate_programs;
 -- Commission programs; the default one is offered to every learner on "join".
 CREATE TABLE IF NOT EXISTS affiliate_programs (
     id TEXT PRIMARY KEY,
@@ -1726,23 +1752,6 @@ INSERT OR IGNORE INTO affiliate_programs (id, name, commission_percent, auto_app
 VALUES ('aff_default', 'โปรแกรมแนะนำเพื่อน', 10, 1, 90, 1, 1);
 
 -- Communication & community (see migrations/0022_communication.sql)
-DROP TABLE IF EXISTS broadcast_recipients;
-DROP TABLE IF EXISTS broadcasts;
-DROP TABLE IF EXISTS notification_preferences;
-DROP TABLE IF EXISTS email_templates;
-DROP TABLE IF EXISTS course_announcements;
-DROP TABLE IF EXISTS community_reports;
-DROP TABLE IF EXISTS community_follows;
-DROP TABLE IF EXISTS community_reactions;
-DROP TABLE IF EXISTS community_comments;
-DROP TABLE IF EXISTS community_posts;
-DROP TABLE IF EXISTS community_spaces;
-DROP TABLE IF EXISTS dm_messages;
-DROP TABLE IF EXISTS dm_threads;
-DROP TABLE IF EXISTS communication_settings;
-DROP TABLE IF EXISTS push_subscriptions;
-DROP TABLE IF EXISTS line_links;
-DROP TABLE IF EXISTS line_link_codes;
 -- In-app notifications may carry a link (opened on click) and a category (broadcast, announcement, community, message).
 ALTER TABLE notifications ADD COLUMN link TEXT;
 ALTER TABLE notifications ADD COLUMN category TEXT;
@@ -1961,14 +1970,6 @@ VALUES ('space_general', NULL, 'ห้องรวมทั่วไป', 'พ�
 -- ==========================================
 -- Platform: webhooks, API keys, enterprise SSO, live meetings (see migrations/0026_platform.sql)
 -- ==========================================
-DROP TABLE IF EXISTS live_attendance;
-DROP TABLE IF EXISTS course_live_sessions;
-DROP TABLE IF EXISTS session_meetings;
-DROP TABLE IF EXISTS sso_identities;
-DROP TABLE IF EXISTS sso_providers;
-DROP TABLE IF EXISTS api_keys;
-DROP TABLE IF EXISTS webhook_deliveries;
-DROP TABLE IF EXISTS webhook_endpoints;
 -- Outgoing webhook endpoints. secret_enc is AES-GCM encrypted (utils/secretbox.ts); never returned.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
     id TEXT PRIMARY KEY,
@@ -2098,7 +2099,6 @@ CREATE TABLE IF NOT EXISTS live_attendance (
 -- ==========================================
 -- Dangerous deletions: email confirmation codes (see migrations/0029_delete_confirmations.sql)
 -- ==========================================
-DROP TABLE IF EXISTS danger_confirmations;
 CREATE TABLE IF NOT EXISTS danger_confirmations (
     id TEXT PRIMARY KEY,
     action TEXT NOT NULL,                 -- e.g. course.delete, webhook.delete, privacy.approve
