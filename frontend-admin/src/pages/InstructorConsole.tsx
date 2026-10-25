@@ -3,6 +3,11 @@ import { useApi, hasRole } from "../hooks/useApi";
 import { Chip } from "../components/site-admin/ui";
 import { COURSE_STATUS, CourseStatus } from "./CoursesAdminPage";
 import { MetricsCard } from "../components/MetricsCard";
+import { CourseAssessments } from "../components/assessment/CourseAssessments";
+import { CourseLiveClassesPanel } from "../components/settings/CourseLiveClasses";
+import { CourseAnnouncements } from "../components/communication/CourseAnnouncements";
+import { CourseBuilder } from "../components/course/CourseBuilder";
+import { AiInstructorTools } from "../components/ai/AiInstructorTools";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   BookOpen, 
@@ -763,6 +768,7 @@ export const InstructorConsole: React.FC = () => {
               <ClipboardList size={16} />
               ถามตอบ
             </button>
+            <AiInstructorTools courses={data?.courses ?? []} onChanged={() => fetchAnalytics()} />
             <button 
               onClick={() => {
                 setModalError(null);
@@ -1237,6 +1243,9 @@ export const InstructorConsole: React.FC = () => {
             </p>
           </div>
 
+          <div style={{ display: "flex", gap: "12px", flexShrink: 0 }}>
+          <AiInstructorTools courses={data?.courses ?? []} course={selectedCourseForCurriculum} lessons={curriculumLessons}
+            onChanged={() => loadCurriculum(selectedCourseForCurriculum.id)} />
           <button 
             type="button" 
             onClick={() => {
@@ -1254,82 +1263,31 @@ export const InstructorConsole: React.FC = () => {
           >
             <Plus size={16} /> เพิ่มบทเรียน
           </button>
+          </div>
         </div>
 
-        {curriculumLoading ? (
-          <div style={{ display: "flex", justifyContent: "center", padding: "64px" }}>
-            <div className="spinner" style={{ border: "2px solid var(--border-subtle)", borderTop: "2px solid var(--primary)", borderRadius: "50%", width: "36px", height: "36px", animation: "spin 1s linear infinite" }} />
-          </div>
-        ) : curriculumLessons.length === 0 ? (
-          <div style={{ padding: "48px", textAlign: "center", color: "var(--text-muted)", fontSize: "14px", border: "1px dashed var(--border-subtle)", borderRadius: "1.5rem" }}>
-            ยังไม่มีบทเรียนในคอร์สนี้ กด "เพิ่มบทเรียน" ด้านบนเพื่อเริ่มสร้าง
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            {curriculumLessons.map((lesson) => (
-              <div 
-                key={lesson.id} 
-                className="glass-card"
-                style={{ 
-                  padding: "16px 24px", 
-                  background: "rgba(255, 255, 255, 0.4)", 
-                  border: "1px solid var(--border-subtle)", 
-                  borderRadius: "1.25rem",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "16px"
-                }}
-              >
-                <div style={{ flexGrow: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <span style={{ fontSize: "11px", background: "var(--primary-glow)", color: "var(--color-brand-primary)", padding: "3px 8px", borderRadius: "6px", fontWeight: "700" }}>
-                      ลำดับที่ {lesson.sort_order}
-                    </span>
-                    <strong style={{ fontSize: "16px", color: "var(--text-primary)" }}>{lesson.title}</strong>
-                  </div>
-                  
-                  <div style={{ display: "flex", gap: "20px", marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      {lesson.video_provider === "youtube" ? <Youtube size={14} color="red" /> : <Film size={14} />}
-                      แหล่งวิดีโอ: <strong style={{ color: "var(--text-primary)" }}>{PROVIDER_LABELS[lesson.video_provider || "cloudflare"] || lesson.video_provider}</strong> ({lesson.video_stream_uid})
-                    </span>
-                    {lesson.handout_r2_key && (
-                      <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <FileText size={14} color="var(--primary)" />
-                        เอกสารประกอบการเรียน: <strong style={{ color: "var(--text-primary)" }}>{lesson.handout_r2_key.split("/").pop()}</strong>
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button 
-                    onClick={() => handleManageQuizzesClick(lesson)}
-                    className="tech-button-outline"
-                    style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.75rem" }}
-                  >
-                    แบบทดสอบ
-                  </button>
-                  <button 
-                    onClick={() => handleEditLessonClick(lesson)}
-                    className="tech-button-outline"
-                    style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.75rem", borderColor: "var(--border-active)" }}
-                  >
-                    แก้ไขบทเรียน
-                  </button>
-                  <button 
-                    onClick={() => handleDeleteLesson(lesson.id)}
-                    className="tech-button-outline"
-                    style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.75rem", color: "var(--danger)", borderColor: "rgba(239, 68, 68, 0.2)" }}
-                  >
-                    ลบ
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Chapters, typed lessons, drip, sales page and prerequisites: components/course/CourseBuilder.tsx */}
+        <CourseBuilder
+          courseId={selectedCourseForCurriculum.id}
+          refreshToken={curriculumLessons}
+          onAddVideoLesson={() => {
+            setLessonCourseId(selectedCourseForCurriculum.id);
+            setLessonTitle("");
+            setLessonStreamUid("");
+            setLessonSortOrder(curriculumLessons.length + 1);
+            setLessonProvider("cloudflare");
+            setLessonHandoutKey("");
+            setModalError(null);
+            setView("create-lesson");
+          }}
+          onEditVideoLesson={lesson => handleEditLessonClick(lesson)}
+          onManageQuizzes={lesson => handleManageQuizzesClick(lesson)}
+          onDeleteLesson={lessonId => handleDeleteLesson(lessonId)}
+        />
+        {/* Question bank, exams, assignments, video questions and grading: components/assessment */}
+        <CourseAssessments courseId={selectedCourseForCurriculum.id} />
+        <CourseLiveClassesPanel courseId={selectedCourseForCurriculum.id} />
+        <CourseAnnouncements courseId={selectedCourseForCurriculum.id} />
       </div>
     );
   };

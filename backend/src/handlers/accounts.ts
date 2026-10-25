@@ -3,6 +3,7 @@ import { Env, rbac, UserPayload } from "../middleware/rbac";
 import { hashPassword } from "../utils/crypto";
 import { issueAccountToken } from "../utils/tokens";
 import { appUrl, sendInvitationEmail } from "../utils/email";
+import { normalizeTag, parseSegmentRules, segmentWhere, SegmentRules } from "../utils/segments";
 import {
   ROLES, ROLE_INFO, PERMISSIONS, DEFAULT_GRANTS, Role, Permission,
   isRole, isPermission, grantable, permit, permissionsForRole, currentPermissions,
@@ -16,27 +17,28 @@ import {
  */
 export const accountsRouter = new Hono<Env>();
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface AccountRow {
-  id: string; email: string; name: string; primary_role: string; role_list: string | null; partner_id: string | null;
+  id: string; email: string; name: string; primary_role: string; role_list: string | null; tag_list: string | null; partner_id: string | null;
   company_name: string | null; partner_type: string | null; status: "active" | "suspended";
   created_at: string; last_login_at: string | null;
   email_verified_at: string | null; invite_expires_at: string | null;
 }
-type Account = Omit<AccountRow, "primary_role" | "role_list"> & { role: Role; roles: Role[] };
+export type Account = Omit<AccountRow, "primary_role" | "role_list" | "tag_list"> & { role: Role; roles: Role[]; tags: string[] };
 
 const ACCOUNT_SELECT = `SELECT u.id, u.email, u.name, COALESCE(u.staff_role, u.role) AS primary_role, ${rolesColumn("u")} AS role_list,
+  (SELECT GROUP_CONCAT(tag) FROM user_tags WHERE user_id = u.id) AS tag_list,
   u.partner_id, p.company_name, p.partner_type, u.status, u.created_at, u.last_login_at, u.email_verified_at,
   (SELECT MAX(t.expires_at) FROM account_tokens t WHERE t.user_id = u.id AND t.purpose = 'invite' AND t.used_at IS NULL) AS invite_expires_at
   FROM users u LEFT JOIN partners p ON p.id = u.partner_id`;
 
-function toAccount({ primary_role, role_list, ...row }: AccountRow): Account {
+function toAccount({ primary_role, role_list, tag_list, ...row }: AccountRow): Account {
   const roles = parseRoles(role_list, primary_role);
-  return { ...row, role: primaryRole(roles), roles };
+  return { ...row, role: primaryRole(roles), roles, tags: tag_list ? tag_list.split(",").sort() : [] };
 }
 
-async function loadAccount(db: D1Database, id: string): Promise<Account | null> {
+export async function loadAccount(db: D1Database, id: string): Promise<Account | null> {
   const row = await db.prepare(`${ACCOUNT_SELECT} WHERE u.id = ?`).bind(id).first<AccountRow>();
   return row ? toAccount(row) : null;
 }
@@ -52,14 +54,14 @@ function requestedRoles(body: Record<string, unknown>): Role[] | null | undefine
 const sameRoles = (a: readonly Role[], b: readonly Role[]) => a.length === b.length && a.every(r => b.includes(r));
 
 /** Partners must belong to an organization; organization accounts may only be partners and/or students. */
-function organizationRule(roles: readonly Role[], partnerId: string | null): string | null {
+export function organizationRule(roles: readonly Role[], partnerId: string | null): string | null {
   if (roles.includes("partner") && !partnerId) return "พาร์ตเนอร์องค์กรต้องเลือกองค์กร";
   const other = roles.find(r => r !== "partner" && r !== "student");
   if (partnerId && other) return `บทบาท${ROLE_INFO[other].label}ผูกกับองค์กรไม่ได้`;
   return null;
 }
 
-async function audit(c: Context<Env>, action: string, entity: string, entityId: string, detail?: unknown) {
+export async function audit(c: Context<Env>, action: string, entity: string, entityId: string, detail?: unknown) {
   try {
     await c.env.DB.prepare("INSERT INTO admin_audit_log (id, user_id, action, entity, entity_id, detail) VALUES (?, ?, ?, ?, ?, ?)")
       .bind("log_" + crypto.randomUUID().replace(/-/g, "").slice(0, 16), c.get("user").id, action, entity, entityId,
@@ -73,17 +75,17 @@ async function audit(c: Context<Env>, action: string, entity: string, entityId: 
  * Emails a single-use "set your password" link (7 days). Locally the link is also returned
  * as debug_url for the test harness; ALLOW_LOCAL_SEED_PASSWORDS is never set in staging/production.
  */
-async function sendInvite(c: Context<Env>, account: { id: string; email: string; name: string }): Promise<{ debug_url?: string }> {
+export async function sendInvite(c: Context<Env>, account: { id: string; email: string; name: string }): Promise<{ debug_url?: string }> {
   const url = appUrl(c.env, "/reset-password?token=" + await issueAccountToken(c.env.DB, account.id, "invite") + "&invite=1");
   try {
-    await sendInvitationEmail(account.email, account.name, c.get("user").name, url, c.env.RESEND_API_KEY);
+    await sendInvitationEmail(account.email, account.name, c.get("user").name, url, c.env.RESEND_API_KEY, c.env.DB);
   } catch (error) {
     console.error("Invitation email delivery failed", error);
   }
   return c.env.ALLOW_LOCAL_SEED_PASSWORDS === "true" ? { debug_url: url } : {};
 }
 
-async function activeAdmins(db: D1Database, excludingId?: string): Promise<number> {
+export async function activeAdmins(db: D1Database, excludingId?: string): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM users u WHERE u.status = 'active' AND u.id != ?
     AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'admin')`)
     .bind(excludingId ?? "").first<{ n: number }>();
@@ -94,30 +96,30 @@ async function activeAdmins(db: D1Database, excludingId?: string): Promise<numbe
  * Non-admins may only give or manage roles whose combined permissions they already hold,
  * so users.manage cannot be used to gain (or take over accounts with) more access.
  */
-async function withinActorPermissions(c: Context<Env>, roles: readonly Role[]): Promise<boolean> {
+export async function withinActorPermissions(c: Context<Env>, roles: readonly Role[]): Promise<boolean> {
   if (c.get("user").roles.includes("admin")) return true;
   if (roles.includes("admin")) return false;
   const actorPermissions = await currentPermissions(c);
   return (await permissionsForRoles(c.env.DB, roles)).every(p => actorPermissions.has(p));
 }
 
-async function targetRoles(db: D1Database, id: string): Promise<Role[] | null> {
+export async function targetRoles(db: D1Database, id: string): Promise<Role[] | null> {
   const row = await db.prepare(`SELECT COALESCE(u.staff_role, u.role) AS primary_role, ${rolesColumn("u")} AS role_list FROM users u WHERE u.id = ?`)
     .bind(id).first<{ primary_role: string; role_list: string | null }>();
   return row ? parseRoles(row.role_list, row.primary_role) : null;
 }
 
-const BEYOND_ACTOR = "บัญชีของคุณจัดการผู้ใช้ที่มีสิทธิ์มากกว่าตัวเองไม่ได้";
+export const BEYOND_ACTOR = "บัญชีของคุณจัดการผู้ใช้ที่มีสิทธิ์มากกว่าตัวเองไม่ได้";
 
 /** Replaces the account's role set; users.role/staff_role already hold the primary role. */
-function writeRoles(db: D1Database, id: string, roles: readonly Role[]) {
+export function writeRoles(db: D1Database, id: string, roles: readonly Role[]) {
   return db.batch([
     db.prepare(`DELETE FROM user_roles WHERE user_id = ? AND role NOT IN (${roles.map(() => "?").join(", ")})`).bind(id, ...roles),
     ...roles.map(r => db.prepare("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)").bind(id, r))
   ]);
 }
 
-async function recountSeats(db: D1Database, partnerId: string | null) {
+export async function recountSeats(db: D1Database, partnerId: string | null) {
   if (!partnerId) return;
   await db.prepare(`UPDATE partners SET allocated_seats =
     (SELECT COUNT(*) FROM users WHERE partner_id = ? AND role = 'student' AND staff_role IS NULL) WHERE id = ?`)
@@ -128,7 +130,7 @@ async function recountSeats(db: D1Database, partnerId: string | null) {
  * Seats are only consumed by organization accounts whose primary role is student (a partner who also
  * studies does not take a seat). The capacity check runs inside the same statement as the write.
  */
-const SEAT_AVAILABLE = `(SELECT COUNT(*) FROM users x WHERE x.partner_id = p.id AND x.role = 'student' AND x.staff_role IS NULL AND x.id != ?) < p.total_seats`;
+export const SEAT_AVAILABLE = `(SELECT COUNT(*) FROM users x WHERE x.partner_id = p.id AND x.role = 'student' AND x.staff_role IS NULL AND x.id != ?) < p.total_seats`;
 
 accountsRouter.use("/accounts", rbac());
 accountsRouter.use("/accounts/*", rbac());
@@ -152,16 +154,28 @@ accountsRouter.get("/accounts", permit("users.view"), async (c) => {
   const role = c.req.query("role");
   const status = c.req.query("status");
   const partnerId = c.req.query("partner_id");
+  const tag = normalizeTag(c.req.query("tag"));
+  // Optional saved segment (segments.id): only its members are listed.
+  let segment: { sql: string; params: unknown[] } = { sql: "1 = 1", params: [] };
+  const segmentId = c.req.query("segment_id");
+  if (segmentId) {
+    const row = await c.env.DB.prepare("SELECT rules_json FROM segments WHERE id = ?").bind(segmentId).first<{ rules_json: string }>();
+    const rules = row ? parseSegmentRules(JSON.parse(row.rules_json)) : "ไม่พบกลุ่มผู้ใช้";
+    if (typeof rules === "string") return c.json({ error: rules }, 404);
+    segment = segmentWhere(rules as SegmentRules);
+  }
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "25", 10) || 25, 1), 100);
   const offset = Math.max(parseInt(c.req.query("offset") || "0", 10) || 0, 0);
   const like = q ? `%${q.replace(/[\\%_]/g, ch => "\\" + ch)}%` : null;
   const where = `WHERE (? IS NULL OR u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')
     AND (? IS NULL OR EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = ?))
     AND (? IS NULL OR u.status = ?)
-    AND (? IS NULL OR u.partner_id = ?)`;
+    AND (? IS NULL OR u.partner_id = ?)
+    AND (? IS NULL OR EXISTS (SELECT 1 FROM user_tags t WHERE t.user_id = u.id AND t.tag = ?))
+    AND ${segment.sql}`;
   const filters = [like, like, like, isRole(role) ? role : null, isRole(role) ? role : null,
     status === "active" || status === "suspended" ? status : null, status === "active" || status === "suspended" ? status : null,
-    partnerId || null, partnerId || null];
+    partnerId || null, partnerId || null, tag, tag, ...segment.params];
   const rows = await c.env.DB.prepare(`${ACCOUNT_SELECT} ${where} ORDER BY u.created_at DESC, u.email LIMIT ? OFFSET ?`)
     .bind(...filters, limit, offset).all<AccountRow>();
   const total = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users u ${where}`).bind(...filters).first<{ n: number }>();

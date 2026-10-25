@@ -23,7 +23,7 @@ async function createUser(body) {
 test('sign-in returns the permissions of each role', async () => {
   assert.ok(admin.user.permissions.includes('roles.manage'));
   assert.ok(coord.user.permissions.includes('site.sessions') && !coord.user.permissions.includes('users.view'));
-  assert.deepEqual([...instructor.user.permissions].sort(), ['articles.import_notion', 'articles.write', 'site.media']);
+  assert.deepEqual([...instructor.user.permissions].sort(), ['articles.import_notion', 'articles.write', 'community.moderate', 'site.media']);
   const student = await login('student3@netprime.com', 'stud123');
   assert.deepEqual(student.user.permissions, []);
   const me = await expectStatus('/api/auth/me', 200, { token: instructor.token });

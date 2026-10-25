@@ -8,7 +8,8 @@ import {
   Pencil,
   ArrowRightLeft,
   Users,
-  CheckCircle
+  CheckCircle,
+  BarChart3
 } from "lucide-react";
 
 type PartnerType = "company" | "university";
@@ -59,7 +60,8 @@ const emptyForm: OrgForm = { id: "", company_name: "", partner_type: "company", 
  * Platform overview and organization (partner) management. Individual accounts live on the
  * "ผู้ใช้และสิทธิ์" page; `onOpenUsers` opens it when the shell provides navigation.
  */
-export const AdminConsole: React.FC<{ onOpenUsers?: () => void }> = ({ onOpenUsers }) => {
+/** `onOpenAnalytics` opens the school dashboard (pages/AnalyticsDashboard) when the shell provides it. */
+export const AdminConsole: React.FC<{ onOpenUsers?: () => void; onOpenAnalytics?: () => void }> = ({ onOpenUsers, onOpenAnalytics }) => {
   const api = useApi();
   const [data, setData] = useState<AdminAnalytics | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -260,6 +262,22 @@ export const AdminConsole: React.FC<{ onOpenUsers?: () => void }> = ({ onOpenUse
             <MetricsCard title="หลักสูตรที่เปิดอยู่" value={data.totalCourses} subValue="เนื้อหาหลักสูตรในระบบ" icon="FolderGit2" color="accent" />
             <MetricsCard title="การลงทะเบียนเรียน" value={data.totalEnrollments} subValue="ทุกสถานะ" icon="Activity" color="purple" />
           </div>
+
+          {/* Full KPIs, charts, online users and events live on the school dashboard */}
+          {onOpenAnalytics && (
+            <div className="glass-card" style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+              <BarChart3 size={22} color="var(--primary)" />
+              <div style={{ flex: 1, minWidth: "220px" }}>
+                <h3 style={{ fontSize: "16px", color: "var(--text-primary)" }}>แดชบอร์ดโรงเรียนและรายงาน</h3>
+                <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "4px" }}>
+                  ผู้สมัครใหม่ ยอดขาย ผู้เรียนที่ใช้งาน ผู้ใช้ออนไลน์ บันทึกกิจกรรม และรายงานส่งออก CSV
+                </p>
+              </div>
+              <button onClick={onOpenAnalytics} className="tech-button-primary" style={{ borderRadius: "1rem" }}>
+                เปิดแดชบอร์ด
+              </button>
+            </div>
+          )}
 
           {/* Accounts moved to the users & permissions page */}
           <div className="glass-card" style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>

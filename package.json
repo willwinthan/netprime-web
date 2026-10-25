@@ -5,7 +5,7 @@
     "typecheck": "pnpm --filter backend run typecheck && pnpm --filter frontend-admin run typecheck",
     "test": "node scripts/test-local.mjs smoke",
     "test:readiness": "node scripts/test-local.mjs readiness",
-    "check": "pnpm run typecheck && pnpm run test:password && pnpm run test:share-meta && pnpm run test:notion && pnpm run test:calendar && pnpm test && pnpm run test:auth && pnpm run test:outsource && pnpm run test:business && pnpm run test:learning && pnpm run test:site && pnpm run test:access && pnpm run test:accounts && pnpm run test:teaching && pnpm run test:payments && pnpm run test:coordination && pnpm run test:partners && pnpm run build:frontend",
+    "check": "pnpm run typecheck && pnpm run test:password && pnpm run test:share-meta && pnpm run test:notion && pnpm run test:calendar && pnpm run test:i18n && pnpm run test:oidc && pnpm test && pnpm run test:auth && pnpm run test:outsource && pnpm run test:business && pnpm run test:learning && pnpm run test:site && pnpm run test:access && pnpm run test:accounts && pnpm run test:teaching && pnpm run test:payments && pnpm run test:coordination && pnpm run test:partners && pnpm run test:content && pnpm run test:assessments && pnpm run test:analytics && pnpm run test:people && pnpm run test:communication && pnpm run test:commerce && pnpm run test:marketing && pnpm run test:website && pnpm run test:platform && pnpm run test:aiassist && pnpm run build:frontend",
     "check:release": "pnpm run check && pnpm run test:readiness",
     "dev:backend:local": "wrangler dev --config backend/wrangler.local.jsonc --local --ip 127.0.0.1 --port 8787",
     "dev:frontend:local": "pnpm --filter frontend-admin run dev:local",
@@ -37,7 +37,19 @@
     "test:payments": "node scripts/test-local.mjs payments",
     "test:coordination": "node scripts/test-local.mjs coordination",
     "test:partners": "node scripts/test-local.mjs partners",
-    "test:calendar": "node --test tests/calendar-dates.test.mjs"
+    "test:calendar": "node --test tests/calendar-dates.test.mjs",
+    "test:content": "node scripts/test-local.mjs content",
+    "test:assessments": "node scripts/test-local.mjs assessments",
+    "test:analytics": "node scripts/test-local.mjs analytics",
+    "test:people": "node scripts/test-local.mjs people",
+    "test:communication": "node scripts/test-local.mjs communication",
+    "test:commerce": "node scripts/test-local.mjs commerce",
+    "test:marketing": "node scripts/test-local.mjs marketing",
+    "test:website": "node scripts/test-local.mjs website",
+    "test:platform": "node scripts/test-local.mjs platform",
+    "test:aiassist": "node scripts/test-local.mjs aiassist",
+    "test:i18n": "node --test tests/i18n-keys.test.mjs",
+    "test:oidc": "node --test tests/oidc-verify.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.98.0"

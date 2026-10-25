@@ -15,6 +15,24 @@ import { CoursesAdminPage } from "./pages/CoursesAdminPage";
 import { PrivacyPanel, PrivacyRequestsPage } from "./pages/PrivacyPages";
 import { CertificatesAdminPanel } from "./components/site-admin/CertificatesAdminPanel";
 import { VerifyCertificate } from "./pages/VerifyCertificate";
+import { AnalyticsDashboard } from "./pages/AnalyticsDashboard";
+import { ReportsPage } from "./pages/ReportsPage";
+import { GlobalSearch } from "./components/search/GlobalSearch";
+import { usePresenceHeartbeat } from "./hooks/usePresence";
+import { MarketingPage } from "./pages/MarketingPage";
+import { AffiliateDashboard } from "./components/marketing/AffiliateDashboard";
+import { sendSignupAttribution } from "./components/marketing/runtime";
+import { AssessmentsConsole } from "./components/assessment/CourseAssessments";
+import { CourseCategoriesPanel } from "./components/course/CourseCategoriesPanel";
+import { WebsiteBuilderPage } from "./pages/WebsiteBuilderPage";
+import { CommunicationPage } from "./pages/CommunicationPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { SsoCompletePage } from "./components/settings/SsoLogin";
+import { MaintenanceBanner } from "./components/settings/MaintenanceBanner";
+import { AiSettingsPanel } from "./components/ai/AiSettingsPanel";
+import { NotificationPreferences } from "./components/communication/NotificationPreferences";
+import { InstallAppButton } from "./pwa/pwa";
+import { CommercePage } from "./components/commerce/CommercePage";
 import logo from "../logo/NetPrimeLogo.png";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -32,19 +50,89 @@ import {
   GraduationCap,
   Award,
   ShieldAlert,
-  CircleUser
+  CircleUser,
+  BarChart3,
+  FileBarChart,
+  ClipboardCheck,
+  FolderTree,
+  Megaphone,
+  LayoutTemplate,
+  MessagesSquare,
+  Settings,
+  Sparkles,
+  Gift,
+  ShoppingBag,
+  ChevronDown
 } from "lucide-react";
 
 type ConsoleTab = "dashboard" | "hr" | "instructor" | "admin" | "site" | "articles" | "users"
-  | "orders" | "courses" | "certificates" | "privacy" | "profile";
+  | "orders" | "courses" | "certificates" | "privacy" | "profile"
+  | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
+  | "settings" | "ai" | "affiliate" | "commerce";
 
-/** Staff menus shown by permission: [tab, label, icon, permissions (any)]. */
-const PERMISSION_TABS: Array<[ConsoleTab, string, React.ReactNode, string[]]> = [
-  ["orders", "คำสั่งซื้อและการชำระเงิน", <Receipt size={16} />, ["payments.manage"]],
-  ["courses", "ตรวจและเผยแพร่คอร์ส", <GraduationCap size={16} />, ["courses.approve"]],
-  ["certificates", "ใบประกาศ", <Award size={16} />, ["certificates.manage"]],
-  ["privacy", "คำขอข้อมูลส่วนบุคคล", <ShieldAlert size={16} />, ["privacy.manage"]]
+type NavItem = { tab: ConsoleTab; label: string; icon: React.ReactNode; show: (user: User | null) => boolean };
+type NavGroup = { id: string; title: string; hint: string; items: NavItem[] };
+
+const perm = (...permissions: string[]) => (user: User | null) => can(user, ...permissions);
+const role = (...roles: User["role"][]) => (user: User | null) => hasRole(user, ...roles);
+
+/**
+ * Sidebar menu grouped by who uses it: learners, instructors, organizations, coordinators (overview,
+ * training, sales, outreach) and system admins. Items appear by role or permission; a user only sees
+ * the groups that have at least one item for them. Items that share a tab (reports, communication,
+ * articles) show in exactly one group, depending on whether the user has the school-wide permission.
+ */
+const NAV_GROUPS: NavGroup[] = [
+  { id: "learn", title: "การเรียนของฉัน", hint: "คอร์ส บทเรียน ข้อสอบ ใบประกาศ ชุมชน และการชำระเงินของคุณ", items: [
+    { tab: "dashboard", label: "ห้องเรียนของฉัน", icon: <BookOpen size={16} />, show: role("student", "admin") },
+    { tab: "affiliate", label: "แนะนำเพื่อน", icon: <Gift size={16} />, show: role("student") }
+  ] },
+  { id: "teach", title: "การสอน", hint: "คอร์สที่คุณสอน ข้อสอบ งานที่ต้องตรวจ และผู้เรียนของคุณ", items: [
+    { tab: "instructor", label: "คอร์สที่ฉันสอน", icon: <Hammer size={16} />, show: role("instructor", "admin") },
+    { tab: "assessments", label: "การวัดผลและสอบ", icon: <ClipboardCheck size={16} />, show: role("instructor", "admin") },
+    { tab: "reports", label: "รายงานคอร์สของฉัน", icon: <FileBarChart size={16} />, show: u => hasRole(u, "instructor") && !can(u, "reports.view") },
+    { tab: "communication", label: "ประกาศและข้อความ", icon: <MessagesSquare size={16} />, show: u => hasRole(u, "instructor") && !can(u, "communication.manage") },
+    { tab: "articles", label: "เขียนบทความ", icon: <Newspaper size={16} />, show: u => can(u, "articles.write") && !can(u, "articles.publish", "articles.manage") }
+  ] },
+  { id: "org", title: "องค์กรของฉัน", hint: "พนักงาน ที่นั่ง คอร์สที่องค์กรสนับสนุน และรายงานความคืบหน้า", items: [
+    { tab: "hr", label: "พนักงานและที่นั่ง", icon: <Users size={16} />, show: role("hr", "partner") }
+  ] },
+  { id: "overview", title: "ภาพรวมและรายงาน", hint: "ตัวเลขสำคัญของโรงเรียน กิจกรรมผู้เรียน และรายงานส่งออก", items: [
+    { tab: "analytics", label: "แดชบอร์ดโรงเรียน", icon: <BarChart3 size={16} />, show: perm("reports.view") },
+    { tab: "reports", label: "รายงาน", icon: <FileBarChart size={16} />, show: perm("reports.view") }
+  ] },
+  { id: "training", title: "งานอบรมและหลักสูตร", hint: "รอบอบรม ผู้สมัคร การอนุมัติคอร์ส หมวดหมู่ และใบประกาศ", items: [
+    { tab: "site", label: "รอบอบรมและผู้สมัคร", icon: <Globe size={16} />, show: perm(...SITE_PERMISSIONS) },
+    { tab: "courses", label: "ตรวจและเผยแพร่คอร์ส", icon: <GraduationCap size={16} />, show: perm("courses.approve") },
+    { tab: "categories", label: "หมวดหมู่คอร์ส", icon: <FolderTree size={16} />, show: perm("courses.approve", "website.design") },
+    { tab: "certificates", label: "ใบประกาศ", icon: <Award size={16} />, show: perm("certificates.manage") }
+  ] },
+  { id: "sales", title: "การขาย", hint: "คำสั่งซื้อ สลิปโอน ใบเสร็จ/ใบกำกับภาษี ชุดคอร์ส สมาชิก และใบเสนอราคา", items: [
+    { tab: "orders", label: "คำสั่งซื้อและการชำระเงิน", icon: <Receipt size={16} />, show: perm("payments.manage") },
+    { tab: "commerce", label: "สินค้า ชุดคอร์ส ใบเสนอราคา", icon: <ShoppingBag size={16} />, show: perm("commerce.manage") }
+  ] },
+  { id: "outreach", title: "สื่อสาร การตลาด และเนื้อหา", hint: "ประกาศ อีเมล ชุมชน affiliate บทความ และหน้าเว็บ", items: [
+    { tab: "communication", label: "การสื่อสารและชุมชน", icon: <MessagesSquare size={16} />, show: perm("communication.manage") },
+    { tab: "marketing", label: "การตลาด", icon: <Megaphone size={16} />, show: perm("marketing.manage") },
+    { tab: "articles", label: "บทความ", icon: <Newspaper size={16} />, show: perm("articles.publish", "articles.manage") },
+    { tab: "website", label: "ออกแบบเว็บไซต์", icon: <LayoutTemplate size={16} />, show: perm("website.design") }
+  ] },
+  { id: "system", title: "ระบบและผู้ดูแล", hint: "ผู้ใช้ สิทธิ์ องค์กรลูกค้า PDPA AI และการเชื่อมต่อระบบ", items: [
+    { tab: "admin", label: "ภาพรวมผู้ดูแลระบบ", icon: <ShieldCheck size={16} />, show: role("admin") },
+    { tab: "users", label: "ผู้ใช้และสิทธิ์", icon: <UserCog size={16} />, show: perm("users.view", "roles.manage") },
+    { tab: "privacy", label: "คำขอข้อมูลส่วนบุคคล", icon: <ShieldAlert size={16} />, show: perm("privacy.manage") },
+    { tab: "ai", label: "ผู้ช่วย AI", icon: <Sparkles size={16} />, show: perm("integrations.manage") },
+    { tab: "settings", label: "ตั้งค่าระบบ", icon: <Settings size={16} />, show: perm("integrations.manage") }
+  ] }
 ];
+
+/** The group for the account's primary role goes first, so each person sees their own work at the top. */
+const PRIMARY_GROUP: Partial<Record<User["role"], string>> = {
+  student: "learn", instructor: "teach", partner: "org", hr: "org", coordinator: "overview", admin: "overview"
+};
+
+const ALL_TABS = new Set<string>(["profile", ...NAV_GROUPS.flatMap(g => g.items.map(i => i.tab))]);
+const NAV_COLLAPSED_KEY = "netprime.nav.collapsed";
 
 /** Starting console for the primary (highest) role; other roles are reachable from the sidebar. */
 function homeTab(role?: User["role"]): ConsoleTab {
@@ -90,6 +178,23 @@ export const App: React.FC = () => {
   const inConsole = !!api.token && !isPublicPath(location.pathname);
   // Learning is a role of its own: staff see it only when they also hold the student role.
   const canLearn = hasRole(api.user, "student", "admin");
+  usePresenceHeartbeat();
+  const openTab = (tab: string) => { if (ALL_TABS.has(tab)) setCurrentTab(tab as ConsoleTab); };
+  const [collapsed, setCollapsed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(NAV_COLLAPSED_KEY) || "[]"); } catch { return []; }
+  });
+  const toggleGroup = (id: string) => setCollapsed(prev => {
+    const next = prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id];
+    try { localStorage.setItem(NAV_COLLAPSED_KEY, JSON.stringify(next)); } catch { /* menu state is a convenience */ }
+    return next;
+  });
+  const visibleGroups = React.useMemo(() => {
+    const groups = NAV_GROUPS
+      .map(g => ({ ...g, items: g.items.filter(i => i.show(api.user)) }))
+      .filter(g => g.items.length > 0);
+    const first = PRIMARY_GROUP[api.user?.role ?? "student"];
+    return [...groups.filter(g => g.id === first), ...groups.filter(g => g.id !== first)];
+  }, [api.user]);
   React.useEffect(() => {
     if (inConsole) document.title = "แดชบอร์ด | NetPrime";
   }, [inConsole]);
@@ -120,6 +225,8 @@ export const App: React.FC = () => {
           // Clear the OAuth code from the URL and open the console
           window.history.replaceState({}, document.title, "/dashboard");
           handleLoginSuccess(res.token, res.user);
+          // Referral/UTM captured before the redirect (email sign-ups send it from the auth dialog).
+          sendSignupAttribution(res.token).catch(() => undefined);
         } catch (err: any) {
           console.error("OAuth Exchange failed:", err);
           setSessionError(err.message || "เข้าสู่ระบบไม่สำเร็จ");
@@ -177,6 +284,11 @@ export const App: React.FC = () => {
             <h3 style={{ fontSize: "18px", color: "var(--text-primary)", fontWeight: "700" }}>กำลังตรวจสอบการเข้าสู่ระบบแบบ Single Sign-On...</h3>
             <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>กำลังเชื่อมต่อผู้ให้บริการยืนยันตัวตนขององค์กร</p>
           </motion.div>
+        ) : location.pathname === "/auth/sso/complete" ? (
+          // Enterprise SSO (OIDC) hands back a one-time ticket in the URL fragment.
+          <motion.div key="sso-complete" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ width: "100%" }}>
+            <SsoCompletePage onLogin={(token, user) => { handleLoginSuccess(token, user); navigate("/dashboard"); }} />
+          </motion.div>
         ) : verifyCode ? (
           // Public Certificate Verification Portal
           <motion.div 
@@ -218,155 +330,80 @@ export const App: React.FC = () => {
                 NETPRIME<span style={{ color: "var(--primary)" }}>LMS</span>
               </div>
 
-              <nav className="nav-links">
-                {canLearn && <li>
-                  <button 
-                    onClick={() => setCurrentTab("dashboard")}
-                    className={`nav-item ${currentTab === "dashboard" ? "active" : ""}`}
-                    style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                  >
-                    <BookOpen size={16} />
-                    การเรียนของฉัน
-                  </button>
-                </li>}
-
-                {/* HR / Corporate Access */}
-                {hasRole(api.user, "hr", "partner", "admin") && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("hr")}
-                      className={`nav-item ${currentTab === "hr" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <Users size={16} />
-                      พาร์ตเนอร์องค์กร
-                    </button>
-                  </li>
-                )}
-
-                {/* Instructor Access */}
-                {hasRole(api.user, "instructor", "admin") && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("instructor")}
-                      className={`nav-item ${currentTab === "instructor" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <Hammer size={16} />
-                      ผู้สอน
-                    </button>
-                  </li>
-                )}
-
-                {/* Global Admin Access */}
-                {hasRole(api.user, "admin") && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("admin")}
-                      className={`nav-item ${currentTab === "admin" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <ShieldCheck size={16} />
-                      ผู้ดูแลระบบ
-                    </button>
-                  </li>
-                )}
-
-                {/* Articles: anyone allowed to write, review or manage them */}
-                {can(api.user, "articles.write", "articles.publish", "articles.manage") && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("articles")}
-                      className={`nav-item ${currentTab === "articles" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <Newspaper size={16} />
-                      บทความ
-                    </button>
-                  </li>
-                )}
-
-                {/* Website content: whoever holds a site.* permission */}
-                {can(api.user, ...SITE_PERMISSIONS) && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("site")}
-                      className={`nav-item ${currentTab === "site" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <Globe size={16} />
-                      จัดการเว็บไซต์
-                    </button>
-                  </li>
-                )}
-
-                {PERMISSION_TABS.filter(([, , , perms]) => can(api.user, ...perms)).map(([key, label, icon]) => (
-                  <li key={key}>
-                    <button 
-                      onClick={() => setCurrentTab(key)}
-                      className={`nav-item ${currentTab === key ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      {icon}
-                      {label}
-                    </button>
-                  </li>
-                ))}
-
-                {can(api.user, "users.view", "roles.manage") && (
-                  <li>
-                    <button 
-                      onClick={() => setCurrentTab("users")}
-                      className={`nav-item ${currentTab === "users" ? "active" : ""}`}
-                      style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                    >
-                      <UserCog size={16} />
-                      ผู้ใช้และสิทธิ์
-                    </button>
-                  </li>
-                )}
-                <li>
-                  <button 
-                    onClick={() => setCurrentTab("profile")}
-                    className={`nav-item ${currentTab === "profile" ? "active" : ""}`}
-                    style={{ width: "100%", background: "none", border: "none", textAlign: "left" }}
-                  >
-                    <CircleUser size={16} />
-                    โปรไฟล์ของฉัน
-                  </button>
-                </li>
+              <div style={{ padding: "0 12px 12px" }}>
+                <GlobalSearch onNavigate={t => openTab(t.tab)} />
+              </div>
+              <nav className="nav-links" aria-label="เมนูหลัก">
+                {visibleGroups.map(group => {
+                  const open = visibleGroups.length === 1 || !collapsed.includes(group.id) || group.items.some(i => i.tab === currentTab);
+                  return (
+                    <div key={group.id} className="nav-group">
+                      {visibleGroups.length > 1 ? (
+                        <button type="button" className="nav-group-title" aria-expanded={open} title={group.hint}
+                          onClick={() => toggleGroup(group.id)}>
+                          <span>{group.title}</span>
+                          <ChevronDown size={14} className={open ? "" : "nav-group-chevron-closed"} />
+                        </button>
+                      ) : (
+                        <div className="nav-group-title" title={group.hint} style={{ cursor: "default" }}>{group.title}</div>
+                      )}
+                      {open && (
+                        <ul className="nav-group-items">
+                          {group.items.map(item => (
+                            <li key={item.tab}>
+                              <button type="button" onClick={() => setCurrentTab(item.tab)}
+                                className={`nav-item ${currentTab === item.tab ? "active" : ""}`}
+                                aria-current={currentTab === item.tab ? "page" : undefined}>
+                                {item.icon}
+                                {item.label}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="nav-group nav-group-account">
+                  <ul className="nav-group-items">
+                    <li>
+                      <button type="button" onClick={() => setCurrentTab("profile")}
+                        className={`nav-item ${currentTab === "profile" ? "active" : ""}`}
+                        aria-current={currentTab === "profile" ? "page" : undefined}>
+                        <CircleUser size={16} />
+                        โปรไฟล์ของฉัน
+                      </button>
+                    </li>
+                  </ul>
+                </div>
               </nav>
 
-              <div className="sidebar-footer">
-                <div style={{ marginBottom: "12px" }}>
+              <div className="sidebar-footer" style={{ paddingTop: "12px" }}>
+                <div style={{ marginBottom: "10px" }}>
                   <p style={{ fontSize: "13px", fontWeight: "700", color: "#ffffff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {api.user?.name}
                   </p>
-                  <p style={{ fontSize: "11px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {api.user?.email}
+                  <p style={{ fontSize: "11px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={api.user?.email}>
+                    {rolesLabel(api.user)}
                   </p>
                 </div>
-
-                <div className="role-tag" style={{ marginBottom: "16px" }}>
-                  <span className={`user-badge badge-${api.user?.role || "student"}`} />
-                  <span style={{ textTransform: "capitalize", fontWeight: "600", fontSize: "11px" }}>
-                    บทบาท: {rolesLabel(api.user)}
-                  </span>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <InstallAppButton className="tech-button-outline" label="ติดตั้งแอป" style={{ flex: 1, fontSize: "12px", padding: "7px 10px", borderRadius: "1rem" }} />
+                  <button
+                    onClick={() => { setSessionError(null); api.logout().then(() => navigate("/")).catch((error: Error) => setSessionError("ออกจากระบบไม่สำเร็จ กรุณาลองอีกครั้ง: " + error.message)); }}
+                    className="tech-button-outline"
+                    style={{ flex: 1, gap: "6px", fontSize: "12px", padding: "7px 10px", border: "1px solid var(--color-brand-primary)", borderRadius: "1rem" }}
+                  >
+                    <LogOut size={14} />
+                    ออกจากระบบ
+                  </button>
                 </div>
-
-                <button 
-                  onClick={() => { setSessionError(null); api.logout().then(() => navigate("/")).catch((error: Error) => setSessionError("ออกจากระบบไม่สำเร็จ กรุณาลองอีกครั้ง: " + error.message)); }}
-                  className="tech-button-outline"
-                  style={{ width: "100%", gap: "8px", fontSize: "12px", padding: "8px 12px", border: "1px solid var(--color-brand-primary)", borderRadius: "1rem" }}
-                >
-                  <LogOut size={14} />
-                  ออกจากระบบ
-                </button>
               </div>
             </aside>
 
             {/* Right Main Content Panel */}
             <main className="main-content">
+              <MaintenanceBanner />
               <VerifyEmailBanner onOpenProfile={() => setCurrentTab("profile")} />
               <AnimatePresence mode="wait">
                 {currentTab === "dashboard" && canLearn && (
@@ -386,7 +423,7 @@ export const App: React.FC = () => {
                 )}
                 {currentTab === "admin" && (
                   <motion.div key="admin" {...pageTransition}>
-                    <AdminConsole onOpenUsers={() => setCurrentTab("users")} />
+                    <AdminConsole onOpenUsers={() => setCurrentTab("users")} onOpenAnalytics={() => setCurrentTab("analytics")} />
                   </motion.div>
                 )}
                 {currentTab === "site" && (
@@ -408,9 +445,20 @@ export const App: React.FC = () => {
                 {currentTab === "courses" && <motion.div key="courses" {...pageTransition}><CoursesAdminPage /></motion.div>}
                 {currentTab === "certificates" && <motion.div key="certificates" {...pageTransition}><CertificatesAdminPanel /></motion.div>}
                 {currentTab === "privacy" && <motion.div key="privacy" {...pageTransition}><PrivacyRequestsPage /></motion.div>}
+                {currentTab === "analytics" && <motion.div key="analytics" {...pageTransition}><AnalyticsDashboard onNavigate={t => openTab(t.tab)} onContact={() => setCurrentTab("communication")} /></motion.div>}
+                {currentTab === "reports" && <motion.div key="reports" {...pageTransition}><ReportsPage onNavigate={t => openTab(t.tab)} /></motion.div>}
+                {currentTab === "assessments" && <motion.div key="assessments" {...pageTransition}><AssessmentsConsole /></motion.div>}
+                {currentTab === "categories" && <motion.div key="categories" {...pageTransition}><CourseCategoriesPanel /></motion.div>}
+                {currentTab === "communication" && <motion.div key="communication" {...pageTransition}><CommunicationPage /></motion.div>}
+                {currentTab === "marketing" && <motion.div key="marketing" {...pageTransition}><MarketingPage /></motion.div>}
+                {currentTab === "website" && <motion.div key="website" {...pageTransition}><WebsiteBuilderPage /></motion.div>}
+                {currentTab === "ai" && <motion.div key="ai" {...pageTransition}><AiSettingsPanel /></motion.div>}
+                {currentTab === "settings" && <motion.div key="settings" {...pageTransition}><SettingsPage onOpenBranding={() => setCurrentTab("website")} /></motion.div>}
+                {currentTab === "commerce" && <motion.div key="commerce" {...pageTransition}><CommercePage /></motion.div>}
+                {currentTab === "affiliate" && <motion.div key="affiliate" {...pageTransition}><AffiliateDashboard /></motion.div>}
                 {currentTab === "profile" && (
                   <motion.div key="profile" {...pageTransition}>
-                    <ProfilePage><PrivacyPanel /></ProfilePage>
+                    <ProfilePage><NotificationPreferences /><PrivacyPanel /></ProfilePage>
                   </motion.div>
                 )}
               </AnimatePresence>

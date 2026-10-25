@@ -42,7 +42,9 @@ const OWN_TABLES: Array<[string, string, string]> = [
   ["gamification", "user_gamification", "user_id"],
   ["achievements", "user_achievements", "user_id"],
   ["notifications", "notifications", "user_id"],
-  ["privacy_requests", "privacy_requests", "user_id"]
+  ["privacy_requests", "privacy_requests", "user_id"],
+  ["tags", "user_tags", "user_id"],
+  ["profile_field_values", "user_profile_values", "user_id"]
 ];
 
 async function tableExists(db: D1Database, name: string): Promise<boolean> {
@@ -140,9 +142,24 @@ function adminNote(body: { note?: unknown } | null): string | null | undefined {
   return body.note.trim() || null;
 }
 
+/** Names of the given tables that exist in this database (older databases may lack later migrations). */
+async function existingTables(db: D1Database, names: string[]): Promise<Set<string>> {
+  const rows = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (SELECT value FROM json_each(?))")
+    .bind(JSON.stringify(names)).all<{ name: string }>();
+  return new Set(rows.results.map(r => r.name));
+}
+
+const DELETED_MESSAGE = "[ข้อความถูกลบตามคำขอลบข้อมูลส่วนบุคคล]";
+
 /**
- * Approve → anonymize: name and email replaced, account suspended, sessions revoked, personal notes,
- * sign-in identities, tokens and notifications deleted, registration contact details blanked.
+ * Approve → anonymize: name and email replaced, account suspended, sessions revoked.
+ * Deleted: personal/staff notes, sign-in identities (OAuth + SSO), tokens, notifications, custom profile
+ * values, tags, notification preferences, web push subscriptions, LINE links/codes, presence, marketing
+ * leads and contact inquiries sent with the account's email.
+ * Scrubbed: registration contact details, import-log emails, outgoing webhook payloads (user_email /
+ * user_name and data.email/name/phone) and the content + attachments of direct messages the user sent.
+ * Kept, with authorship anonymized through the renamed account: public community posts/comments, lesson
+ * Q&A and course reviews (deleting them would break other people's discussions).
  * Orders, payments, enrollments and certificates stay (tax/accounting retention, certificate checks).
  */
 privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
@@ -156,7 +173,13 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
   if (await db.prepare("SELECT 1 FROM user_roles WHERE user_id = ? AND role = 'admin'").bind(userId).first()) {
     return c.json({ error: "บัญชีนี้เป็นผู้ดูแลระบบ ให้ถอดบทบาทผู้ดูแลก่อนลบบัญชี" }, 409);
   }
-  const account = await db.prepare("SELECT partner_id FROM users WHERE id = ?").bind(userId).first<{ partner_id: string | null }>();
+  const account = await db.prepare("SELECT partner_id, email FROM users WHERE id = ?").bind(userId).first<{ partner_id: string | null; email: string }>();
+  const oldEmail = account?.email ?? "";
+  const tables = await existingTables(db, ["user_profile_values", "user_tags", "sso_identities", "webhook_deliveries", "push_subscriptions",
+    "line_links", "line_link_codes", "user_presence", "notification_preferences", "staff_notes", "leads", "inquiries", "user_import_rows", "dm_messages"]);
+  const attachments = tables.has("dm_messages")
+    ? (await db.prepare("SELECT attachment_key FROM dm_messages WHERE sender_id = ? AND attachment_key IS NOT NULL").bind(userId).all<{ attachment_key: string }>()).results
+    : [];
   const email = `deleted-${userId}@invalid`;
   const unusable = `pbkdf2-sha256$deleted$${crypto.randomUUID().replace(/-/g, "")}`;
   const now = new Date().toISOString();
@@ -175,12 +198,32 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
         company = CASE WHEN invoice_required = 1 THEN company ELSE NULL END
       WHERE user_id = ?`).bind(DELETED_NAME, userId)
   ];
+  for (const table of ["user_profile_values", "user_tags", "sso_identities", "push_subscriptions", "line_links", "line_link_codes", "user_presence", "notification_preferences", "staff_notes"]) {
+    if (tables.has(table)) statements.push(db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId));
+  }
+  if (tables.has("leads")) statements.push(db.prepare("DELETE FROM leads WHERE user_id = ? OR (? <> '' AND email = ?)").bind(userId, oldEmail, oldEmail));
+  if (tables.has("inquiries") && oldEmail) statements.push(db.prepare("DELETE FROM inquiries WHERE email = ?").bind(oldEmail));
+  if (tables.has("user_import_rows")) statements.push(db.prepare("UPDATE user_import_rows SET email = NULL WHERE user_id = ?").bind(userId));
+  if (tables.has("dm_messages")) {
+    statements.push(db.prepare("UPDATE dm_messages SET body = ?, attachment_key = NULL, attachment_type = NULL WHERE sender_id = ?").bind(DELETED_MESSAGE, userId));
+  }
+  if (tables.has("webhook_deliveries")) {
+    statements.push(
+      db.prepare(`UPDATE webhook_deliveries SET payload = json_remove(json_set(payload, '$.user_email', NULL, '$.user_name', NULL), '$.data.email', '$.data.name', '$.data.phone')
+        WHERE json_valid(payload) AND json_extract(payload, '$.user_id') = ?`).bind(userId),
+      // Truncated (non-JSON) payloads that mention the account are replaced entirely.
+      db.prepare(`UPDATE webhook_deliveries SET payload = '{"redacted":true}' WHERE NOT json_valid(payload) AND (instr(payload, ?) > 0 OR (? <> '' AND instr(payload, ?) > 0))`)
+        .bind(userId, oldEmail, oldEmail)
+    );
+  }
   if (account?.partner_id) {
     statements.push(db.prepare(`UPDATE partners SET allocated_seats =
       (SELECT COUNT(*) FROM users WHERE partner_id = ? AND role = 'student' AND staff_role IS NULL) WHERE id = ?`).bind(account.partner_id, account.partner_id));
   }
   const [claimed] = await db.batch(statements);
   if (!claimed.meta.changes) return c.json({ error: "คำขอนี้ดำเนินการไปแล้ว" }, 409);
+  // Private DM attachments the user sent (R2); best effort after the database is anonymized.
+  for (const { attachment_key } of attachments) await c.env.ASSETS.delete(attachment_key).catch(() => undefined);
   await audit(c, "approve", request.id, { user_id: userId });
   return c.json({ message: "ลบข้อมูลส่วนบุคคลและปิดบัญชีแล้ว", request: { id: request.id, status: "approved" } });
 });

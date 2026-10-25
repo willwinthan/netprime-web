@@ -4,6 +4,15 @@ import { usePublicSite, PublicSession } from "../components/site/PublicSections"
 import { formatBaht, formatDate, formatDateRange, MODE_LABEL } from "../components/site-admin/ui";
 import { Link, navigate, useLocation } from "./router";
 import logo from "../../logo/NetPrimeLogo.png";
+import { getLang, LanguageSwitcher, MessageKey, t, useDocumentLang, useI18n } from "../i18n";
+import { useBranding } from "../components/builder/theme";
+import { menuLinks, MenuLink as MenuItem, useSiteNav } from "../components/builder/siteChrome";
+import { InstallAppButton } from "../pwa/pwa";
+import { safeHref } from "./Markdown";
+import { MarketingRuntime } from "../components/marketing/MarketingRuntime";
+import { reopenConsent, sendSignupAttribution, track } from "../components/marketing/runtime";
+import { Stars, useCourseRatings } from "../components/marketing/Ratings";
+import { SsoLoginButton } from "../components/settings/SsoLogin";
 
 // ==========================================
 // Data types and helpers
@@ -16,6 +25,8 @@ export interface Course {
   price: number;
   access_duration_days: number | null;
   lesson_count: number;
+  /** Sales-page slug when the catalog provides one (falls back to id). */
+  slug?: string | null;
 }
 
 export interface Article {
@@ -123,54 +134,70 @@ export const SearchIcon: React.FC = () => (
 // Layout
 // ==========================================
 
-const NAV = [
-  { to: "/courses", label: "หลักสูตร" },
-  { to: "/schedule", label: "ตารางอบรม" },
-  { to: "/blog", label: "บทความ" },
-  { to: "/about", label: "เกี่ยวกับเรา" }
+const NAV: Array<{ to: string; key: MessageKey }> = [
+  { to: "/courses", key: "nav.courses" },
+  { to: "/schedule", key: "nav.schedule" },
+  { to: "/blog", key: "nav.blog" },
+  { to: "/about", key: "nav.about" }
 ];
 
 /** Public legal pages (content edited in the content console; see site/LegalPage.tsx). */
-export const LEGAL_LINKS = [
-  { to: "/privacy", label: "นโยบายความเป็นส่วนตัว" },
-  { to: "/terms", label: "ข้อกำหนดการใช้งาน" },
-  { to: "/refund-policy", label: "นโยบายการคืนเงิน" }
+export const LEGAL_LINKS: Array<{ to: string; label: string; key: MessageKey }> = [
+  { to: "/privacy", label: "นโยบายความเป็นส่วนตัว", key: "legal.privacy" },
+  { to: "/terms", label: "ข้อกำหนดการใช้งาน", key: "legal.terms" },
+  { to: "/refund-policy", label: "นโยบายการคืนเงิน", key: "legal.refund" }
 ];
+
+/** Menu link from the website builder: validated on the server, re-checked here; new_tab opens safely. */
+const MenuLink: React.FC<{ item: MenuItem; current?: boolean; style?: React.CSSProperties }> = ({ item, current, style }) => {
+  const href = safeHref(item.to);
+  if (!href) return null;
+  return item.newTab
+    ? <a href={href} target="_blank" rel="noopener noreferrer" style={style}>{item.label}</a>
+    : <Link to={href} aria-current={current ? "page" : undefined} style={style}>{item.label}</Link>;
+};
 
 export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const site = usePublicSite();
   const { loggedIn, openAuth } = useSite();
+  const { lang, t } = useI18n();
+  const brand = useBranding();
+  const siteNav = useSiteNav();
+  useDocumentLang();
   const announcement = site?.settings.announcement;
   const settings = site?.settings;
   const isCurrent = (to: string) => location.pathname === to || (to !== "/" && location.pathname.startsWith(to + "/"));
+  // Builder menus when available; the built-in menu otherwise (API down, first paint).
+  const headerMenu: MenuItem[] = menuLinks(siteNav, "header", lang) ?? NAV.map(n => ({ to: n.to, label: t(n.key), newTab: false }));
+  const footerMenu: MenuItem[] = menuLinks(siteNav, "footer", lang) ?? [];
+  const year = new Date().getFullYear() + (lang === "th" ? 543 : 0);
 
   return (
     <div className="ps">
-      <a href="#main" className="ps-sr">ข้ามไปยังเนื้อหา</a>
+      <a href="#main" className="ps-sr">{t("a11y.skip")}</a>
       {announcement?.active && announcement.text && (
         announcement.link
           ? <button type="button" className="ps-announce" onClick={() => openSiteLink(announcement.link!)}>
-              <span className="ps-announce-tag">ประกาศ</span><span>{announcement.text}</span><ArrowIcon size={16} />
+              <span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span><ArrowIcon size={16} />
             </button>
-          : <div className="ps-announce" role="note"><span className="ps-announce-tag">ประกาศ</span><span>{announcement.text}</span></div>
+          : <div className="ps-announce" role="note"><span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span></div>
       )}
       <header className="ps-header">
         <div className="ps-container ps-header-inner">
           <Link to="/" className="ps-brand">
-            <img src={logo} alt="" />
-            <span><strong>NetPrime</strong><small>ศูนย์ฝึกอบรมด้าน IT</small></span>
+            <img src={brand.logo || logo} alt="" />
+            <span><strong>{brand.name}</strong><small>{lang === "th" && brand.tagline ? brand.tagline : t("brand.tagline")}</small></span>
           </Link>
-          <nav aria-label="เมนูหลัก" className="ps-nav">
-            {NAV.map(item => (
-              <Link key={item.to} to={item.to} aria-current={isCurrent(item.to) ? "page" : undefined}>{item.label}</Link>
-            ))}
+          <nav aria-label={t("a11y.mainNav")} className="ps-nav">
+            {headerMenu.map(item => <MenuLink key={item.to + item.label} item={item} current={isCurrent(item.to)} />)}
           </nav>
           <div className="ps-actions">
+            <LanguageSwitcher />
             {loggedIn
-              ? <Link to="/dashboard" className="ps-btn ps-btn-ghost">แดชบอร์ดของฉัน</Link>
-              : <button type="button" className="ps-btn ps-btn-ghost" onClick={() => openAuth("login")}>เข้าสู่ระบบ</button>}
-            <Link to="/schedule" className="ps-btn ps-btn-primary">ลงทะเบียนอบรม</Link>
+              ? <Link to="/dashboard" className="ps-btn ps-btn-ghost">{t("header.dashboard")}</Link>
+              : <button type="button" className="ps-btn ps-btn-ghost" onClick={() => openAuth("login")}>{t("header.login")}</button>}
+            <Link to="/schedule" className="ps-btn ps-btn-primary">{t("header.register")}</Link>
           </div>
         </div>
       </header>
@@ -180,30 +207,41 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       <footer className="ps-footer">
         <div className="ps-container ps-footer-grid">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <strong style={{ fontSize: 20 }}>NetPrime</strong>
-            <span style={{ fontSize: 14 }}>ศูนย์ฝึกอบรมด้าน Network, Cloud และ Security</span>
+            <strong style={{ fontSize: 20 }}>{brand.name}</strong>
+            <span style={{ fontSize: 14 }}>{t("brand.footer")}</span>
             {settings?.phone && <a href={`tel:${settings.phone}`} style={{ fontSize: 14 }}>{settings.phone}</a>}
             {settings?.email && <a href={`mailto:${settings.email}`} style={{ fontSize: 14 }}>{settings.email}</a>}
             {settings?.line && <span style={{ fontSize: 14 }}>LINE {settings.line}</span>}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
+              <LanguageSwitcher />
+              <InstallAppButton className="ps-btn ps-btn-ghost" style={{ minHeight: 36, padding: "0 14px", fontSize: 14 }} />
+            </div>
           </div>
-          <nav aria-label="ลิงก์หลักสูตร"><strong>หลักสูตร</strong><Link to="/courses">คอร์สออนไลน์</Link><Link to="/schedule">ตารางอบรม</Link></nav>
-          <nav aria-label="ลิงก์ข้อมูล"><strong>ข้อมูล</strong><Link to="/#verify">ตรวจสอบใบประกาศนียบัตร</Link><Link to="/blog">บทความ</Link><Link to="/about">เกี่ยวกับเรา</Link><Link to="/#contact">ติดต่อเรา</Link></nav>
-          <nav aria-label="ลิงก์บัญชีผู้ใช้"><strong>บัญชีผู้ใช้</strong>
+          <nav aria-label={t("footer.courses")}><strong>{t("footer.courses")}</strong><Link to="/courses">{t("footer.onlineCourses")}</Link><Link to="/schedule">{t("nav.schedule")}</Link></nav>
+          <nav aria-label={t("footer.info")}><strong>{t("footer.info")}</strong><Link to="/#verify">{t("nav.verify")}</Link><Link to="/blog">{t("nav.blog")}</Link><Link to="/about">{t("nav.about")}</Link><Link to="/#contact">{t("nav.contact")}</Link></nav>
+          {footerMenu.length > 0 && (
+            <nav aria-label={t("footer.pages")}><strong>{t("footer.pages")}</strong>
+              {footerMenu.map(item => <MenuLink key={item.to + item.label} item={item} />)}
+            </nav>
+          )}
+          <nav aria-label={t("footer.account")}><strong>{t("footer.account")}</strong>
             {loggedIn
-              ? <Link to="/dashboard">แดชบอร์ดของฉัน</Link>
+              ? <Link to="/dashboard">{t("header.dashboard")}</Link>
               : <>
-                  <button type="button" className="ps-linkbtn" style={{ color: "#d7deec", textAlign: "left", minHeight: 0 }} onClick={() => openAuth("login")}>เข้าสู่ระบบ</button>
-                  <button type="button" className="ps-linkbtn" style={{ color: "#d7deec", textAlign: "left", minHeight: 0 }} onClick={() => openAuth("register")}>สมัครสมาชิก</button>
+                  <button type="button" className="ps-linkbtn" style={{ color: "#d7deec", textAlign: "left", minHeight: 0 }} onClick={() => openAuth("login")}>{t("header.login")}</button>
+                  <button type="button" className="ps-linkbtn" style={{ color: "#d7deec", textAlign: "left", minHeight: 0 }} onClick={() => openAuth("register")}>{t("footer.signup")}</button>
                 </>}
           </nav>
         </div>
         <div className="ps-container ps-footer-bottom" style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-          <span>© {new Date().getFullYear() + 543} NetPrime Training Center</span>
-          <nav aria-label="นโยบายและข้อกำหนด" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            {LEGAL_LINKS.map(l => <Link key={l.to} to={l.to} style={{ color: "#d7deec" }}>{l.label}</Link>)}
+          <span>{t("footer.copyright", { year, name: brand.name === "NetPrime" ? "NetPrime Training Center" : brand.name })}</span>
+          <nav aria-label={t("footer.legal")} style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            {LEGAL_LINKS.map(l => <Link key={l.to} to={l.to} style={{ color: "#d7deec" }}>{t(l.key)}</Link>)}
+            <button type="button" className="ps-linkbtn" style={{ color: "#d7deec", minHeight: 0 }} onClick={reopenConsent}>ตั้งค่าคุกกี้</button>
           </nav>
         </div>
       </footer>
+      <MarketingRuntime />
     </div>
   );
 };
@@ -247,6 +285,7 @@ export const AuthDialog: React.FC<{ mode: "login" | "register"; onClose: () => v
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<Record<string, { enabled: boolean }>>({});
+  const { t } = useI18n();
 
   useEffect(() => {
     api.get<{ providers: Record<string, { enabled: boolean }> }>("/auth/oauth/providers")
@@ -280,6 +319,9 @@ export const AuthDialog: React.FC<{ mode: "login" | "register"; onClose: () => v
       setError(null);
       const res = await api.post<{ token: string; user: User }>(registering ? "/auth/register" : "/auth/login",
         registering ? { email, password, name } : { email, password });
+      // Referral + first-touch UTM (server keeps it once, for new accounts only).
+      void sendSignupAttribution(res.token);
+      if (registering) track("sign_up", { method: "email" });
       onLogin(res.token, res.user);
     } catch (err: any) {
       setError(err.message || "เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอีเมลและรหัสผ่าน");
@@ -305,66 +347,70 @@ export const AuthDialog: React.FC<{ mode: "login" | "register"; onClose: () => v
   const oauthLabel = { google: "Google", github: "GitHub", microsoft: "Microsoft" };
 
   return (
-    <Dialog label={view === "forgot" ? "ลืมรหัสผ่าน" : registering ? "สมัครสมาชิก" : "เข้าสู่ระบบ"} onClose={onClose} width={440}>
-      <h2 style={{ margin: "0 0 6px", fontSize: 24 }}>{view === "forgot" ? "ลืมรหัสผ่าน" : registering ? "สร้างบัญชีผู้เรียน" : "เข้าสู่ระบบ"}</h2>
+    <Dialog label={view === "forgot" ? t("auth.forgot") : registering ? t("auth.register") : t("auth.login")} onClose={onClose} width={440}>
+      <h2 style={{ margin: "0 0 6px", fontSize: 24 }}>{view === "forgot" ? t("auth.forgot") : registering ? t("auth.createAccount") : t("auth.login")}</h2>
       <p className="ps-muted" style={{ margin: "0 0 20px", fontSize: 14 }}>
-        {view === "forgot" ? "กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์สำหรับตั้งรหัสผ่านใหม่ให้" : "เข้าถึงคอร์สของคุณ หรือคอนโซลสำหรับผู้สอนและองค์กร"}
+        {view === "forgot" ? t("auth.leadForgot") : t("auth.leadLogin")}
       </p>
       {error && <p role="alert" style={{ margin: "0 0 16px", padding: "10px 12px", borderRadius: 12, background: "#fdecec", color: "#b42318", fontSize: 14 }}>{error}</p>}
       {notice && <p role="status" style={{ margin: "0 0 16px", padding: "10px 12px", borderRadius: 12, background: "#e8f6ee", color: "#146c43", fontSize: 14 }}>{notice}</p>}
       {view === "forgot" ? (
         <>
           <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>อีเมล
+            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>{t("auth.email")}
               <input className="form-input" type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} style={{ background: "#fff", borderColor: "#d9cfc5" }} />
             </label>
-            <button type="submit" className="ps-btn ps-btn-primary ps-btn-lg" disabled={loading}>{loading ? "กรุณารอสักครู่…" : "ส่งลิงก์ตั้งรหัสผ่านใหม่"}</button>
+            <button type="submit" className="ps-btn ps-btn-primary ps-btn-lg" disabled={loading}>{loading ? t("auth.wait") : t("auth.sendReset")}</button>
           </form>
           <button type="button" className="ps-btn ps-btn-outline" style={{ width: "100%", marginTop: 12 }} disabled={loading} onClick={() => switchView("login")}>
-            กลับไปเข้าสู่ระบบ
+            {t("auth.backToLogin")}
           </button>
         </>
       ) : <>
+      {!registering && <SsoLoginButton disabled={loading} email={email} />}
       {oauth.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
           {oauth.map(p => (
-            <button key={p} type="button" className="ps-btn ps-btn-ghost" disabled={loading} onClick={() => startOAuth(p)}>ดำเนินการต่อด้วย {oauthLabel[p]}</button>
+            <button key={p} type="button" className="ps-btn ps-btn-ghost" disabled={loading} onClick={() => startOAuth(p)}>{t("auth.continueWith", { provider: oauthLabel[p] })}</button>
           ))}
-          <span className="ps-muted" style={{ textAlign: "center", fontSize: 13 }}>หรือใช้อีเมล</span>
+          <span className="ps-muted" style={{ textAlign: "center", fontSize: 13 }}>{t("auth.orEmail")}</span>
         </div>
       )}
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {registering && (
-          <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>ชื่อ
+          <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>{t("auth.name")}
             <input className="form-input" required maxLength={120} autoComplete="name" value={name} onChange={e => setName(e.target.value)} style={{ background: "#fff", borderColor: "#d9cfc5" }} />
           </label>
         )}
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>อีเมล
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>{t("auth.email")}
           <input className="form-input" type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} style={{ background: "#fff", borderColor: "#d9cfc5" }} />
         </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>รหัสผ่าน
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, fontWeight: 600 }}>{t("auth.password")}
           <input className="form-input" type="password" required minLength={registering ? 12 : 1} maxLength={256}
             autoComplete={registering ? "new-password" : "current-password"} value={password} onChange={e => setPassword(e.target.value)} style={{ background: "#fff", borderColor: "#d9cfc5" }} />
-          {registering && <span className="ps-muted" style={{ fontWeight: 400, fontSize: 13 }}>อย่างน้อย 12 ตัวอักษร</span>}
+          {registering && <span className="ps-muted" style={{ fontWeight: 400, fontSize: 13 }}>{t("auth.passwordHint")}</span>}
         </label>
         {!registering && (
           <button type="button" className="ps-linkbtn" style={{ alignSelf: "flex-end", fontSize: 14, minHeight: 0, marginTop: -6 }} onClick={() => switchView("forgot")}>
-            ลืมรหัสผ่าน?
+            {t("auth.forgotQ")}
           </button>
         )}
         {registering && (
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, lineHeight: 1.5 }}>
             <input type="checkbox" required checked={consent} onChange={e => setConsent(e.target.checked)} style={{ marginTop: 4, width: 18, height: 18, flexShrink: 0 }} />
             <span>
-              ฉันได้อ่านและยอมรับ <a href="/privacy" target="_blank" rel="noopener">นโยบายความเป็นส่วนตัว</a> และ <a href="/terms" target="_blank" rel="noopener">ข้อกำหนดการใช้งาน</a>
+              {t("auth.consent", { privacy: "\u0001", terms: "\u0002" }).split(/(\u0001|\u0002)/).map((part, i) =>
+                part === "\u0001" ? <a key={i} href="/privacy" target="_blank" rel="noopener">{t("legal.privacy")}</a>
+                  : part === "\u0002" ? <a key={i} href="/terms" target="_blank" rel="noopener">{t("legal.terms")}</a>
+                  : <React.Fragment key={i}>{part}</React.Fragment>)}
             </span>
           </label>
         )}
-        <button type="submit" className="ps-btn ps-btn-primary ps-btn-lg" disabled={loading}>{loading ? "กรุณารอสักครู่…" : registering ? "สร้างบัญชี" : "เข้าสู่ระบบ"}</button>
+        <button type="submit" className="ps-btn ps-btn-primary ps-btn-lg" disabled={loading}>{loading ? t("auth.wait") : registering ? t("auth.submitRegister") : t("auth.submitLogin")}</button>
       </form>
       <button type="button" className="ps-btn ps-btn-outline" style={{ width: "100%", marginTop: 12 }} disabled={loading}
         onClick={() => switchView(registering ? "login" : "register")}>
-        {registering ? "มีบัญชีอยู่แล้ว? เข้าสู่ระบบ" : "ยังไม่มีบัญชี? สมัครสมาชิก"}
+        {registering ? t("auth.haveAccount") : t("auth.noAccount")}
       </button>
       </>}
     </Dialog>
@@ -375,42 +421,49 @@ export const AuthDialog: React.FC<{ mode: "login" | "register"; onClose: () => v
 // Courses
 // ==========================================
 
-export const CourseCard: React.FC<{ course: Course; onOpen: () => void }> = ({ course, onOpen }) => (
-  <button type="button" className="ps-card ps-course" onClick={onOpen}>
-    <span className="ps-course-vendor">{vendorOf(course.title)}</span>
-    <strong>{course.title}</strong>
-    {course.description && <span className="ps-course-desc">{course.description}</span>}
-    <span className="ps-course-foot"><span>{course.lesson_count} บทเรียน</span><strong>{formatBaht(course.price)}</strong></span>
-  </button>
-);
+/** Course card linking to the sales page (/courses/:id); `onOpen` is kept for older callers. */
+export const CourseCard: React.FC<{ course: Course; onOpen?: () => void }> = ({ course }) => {
+  const { t } = useI18n();
+  const rating = useCourseRatings()[course.id];
+  return (
+    <Link to={`/courses/${encodeURIComponent(course.slug || course.id)}`} className="ps-card ps-course" style={{ textDecoration: "none" }}>
+      <span className="ps-course-vendor">{vendorOf(course.title)}</span>
+      <strong>{course.title}</strong>
+      {rating && <Stars value={rating.average} count={rating.count} size={14} />}
+      {course.description && <span className="ps-course-desc">{course.description}</span>}
+      <span className="ps-course-foot"><span>{t("course.lessons", { count: course.lesson_count })}</span><strong>{formatBaht(course.price)}</strong></span>
+    </Link>
+  );
+};
 
 export const CourseDialog: React.FC<{ course: Course; onClose: () => void }> = ({ course, onClose }) => {
   const { loggedIn, openAuth } = useSite();
+  const { t } = useI18n();
   return (
     <Dialog label={course.title} onClose={onClose}>
       <span className="ps-course-vendor">{vendorOf(course.title)}</span>
       <h2 style={{ margin: "6px 44px 10px 0", fontSize: 24, lineHeight: 1.3 }}>{course.title}</h2>
       {course.description && <p className="ps-muted" style={{ margin: 0, fontSize: 16 }}>{course.description}</p>}
       <dl className="ps-facts">
-        <div><dt>ราคา</dt><dd>{formatBaht(course.price)}</dd></div>
-        <div><dt>บทเรียน</dt><dd>{course.lesson_count} บท</dd></div>
-        <div><dt>ระยะเวลาเข้าถึง</dt><dd>{course.access_duration_days ? `${course.access_duration_days} วัน` : "ตลอดชีพ"}</dd></div>
+        <div><dt>{t("course.price")}</dt><dd>{formatBaht(course.price)}</dd></div>
+        <div><dt>{t("course.lessonCount")}</dt><dd>{t("course.lessonUnit", { count: course.lesson_count })}</dd></div>
+        <div><dt>{t("course.access")}</dt><dd>{course.access_duration_days ? t("course.days", { count: course.access_duration_days }) : t("course.lifetime")}</dd></div>
       </dl>
       {course.price > 0 ? (
         <>
-          <p className="ps-note">ตอนนี้ยังไม่เปิดชำระเงินออนไลน์ ส่งคำถามถึงเจ้าหน้าที่ แล้วเราจะติดต่อกลับเพื่อเปิดสิทธิ์เรียนให้ องค์กรที่ซื้อที่นั่งไว้แล้วเข้าเรียนได้ทันทีหลังเข้าสู่ระบบ</p>
+          <p className="ps-note">{t("course.paymentNote")}</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-            <button type="button" className="ps-btn ps-btn-primary" onClick={() => { onClose(); navigate("/#contact"); }}>สอบถามคอร์สนี้</button>
+            <button type="button" className="ps-btn ps-btn-primary" onClick={() => { onClose(); navigate("/#contact"); }}>{t("course.ask")}</button>
             {loggedIn
-              ? <Link to="/dashboard" className="ps-btn ps-btn-ghost" onClick={onClose}>ไปที่แดชบอร์ด</Link>
-              : <button type="button" className="ps-btn ps-btn-ghost" onClick={() => { onClose(); openAuth("login"); }}>เข้าสู่ระบบ</button>}
+              ? <Link to="/dashboard" className="ps-btn ps-btn-ghost" onClick={onClose}>{t("course.toDashboard")}</Link>
+              : <button type="button" className="ps-btn ps-btn-ghost" onClick={() => { onClose(); openAuth("login"); }}>{t("header.login")}</button>}
           </div>
         </>
       ) : (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
           {loggedIn
-            ? <Link to="/dashboard" className="ps-btn ps-btn-primary" onClick={onClose}>เริ่มเรียนในแดชบอร์ด</Link>
-            : <button type="button" className="ps-btn ps-btn-primary" onClick={() => { onClose(); openAuth("register"); }}>สมัครสมาชิกเพื่อเริ่มเรียน</button>}
+            ? <Link to="/dashboard" className="ps-btn ps-btn-primary" onClick={onClose}>{t("course.startLearning")}</Link>
+            : <button type="button" className="ps-btn ps-btn-primary" onClick={() => { onClose(); openAuth("register"); }}>{t("course.signupToStart")}</button>}
         </div>
       )}
     </Dialog>
@@ -442,10 +495,11 @@ export const ArticleCard: React.FC<{ article: Article }> = ({ article }) => (
 );
 
 export function sessionSummary(s: PublicSession): string {
-  return `${formatDateRange(s.start_date, s.end_date)} · ${MODE_LABEL[s.mode]} · ${formatBaht(s.price)}`;
+  const mode = getLang() === "th" ? MODE_LABEL[s.mode] : t(`mode.${s.mode}` as MessageKey);
+  return `${formatDateRange(s.start_date, s.end_date)} · ${mode} · ${formatBaht(s.price)}`;
 }
 
 export function seatsText(s: PublicSession): string {
-  if (!s.registration_open) return "ปิดรับสมัคร";
-  return s.seats_left === 0 ? "เต็มแล้ว · รับรอคิว" : `เหลือ ${s.seats_left} ที่นั่ง`;
+  if (!s.registration_open) return t("schedule.closed");
+  return s.seats_left === 0 ? t("schedule.full") : t("schedule.seatsLeft", { count: s.seats_left });
 }

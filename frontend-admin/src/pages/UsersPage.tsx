@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { UserPlus, Search, ShieldCheck, Users, KeyRound, LogOut, RotateCcw, Save, Mail } from "lucide-react";
+import { UserPlus, Search, ShieldCheck, Users, KeyRound, LogOut, RotateCcw, Save, Mail, Upload, Filter, ListChecks, Download } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { Chip, Modal, Field, ErrorBox, Empty, grid2, tableStyle, thStyle, tdStyle, formatDateTime } from "../components/site-admin/ui";
+import { UserDetailPage } from "../components/people/UserDetailPage";
+import { ImportUsersDialog } from "../components/people/ImportUsersDialog";
+import { SegmentsPanel } from "../components/people/SegmentsPanel";
+import { ProfileFieldsPanel } from "../components/people/ProfileFieldsPanel";
+import { PeopleMeta, postForDownload } from "../components/people/shared";
 
 type Role = "admin" | "coordinator" | "instructor" | "partner" | "student";
 type Api = ReturnType<typeof useApi>;
@@ -13,6 +18,7 @@ interface Account {
   email_verified_at?: string | null;
   /** Expiry of the newest unused invitation link; set while the person has not chosen a password yet. */
   invite_expires_at?: string | null;
+  tags?: string[];
 }
 interface Partner { id: string; company_name: string; partner_type: "company" | "university"; total_seats: number; allocated_seats: number }
 interface Meta { roles: Array<{ key: Role; label: string; description: string }>; partners: Partner[]; canManage: boolean; actorRole: Role; actorRoles?: Role[] }
@@ -28,13 +34,24 @@ export const ROLE_TONE: Record<Role, { color: string; bg: string }> = {
 const ROLE_ORDER: Role[] = ["admin", "coordinator", "instructor", "partner", "student"];
 const STAFF: Role[] = ["admin", "coordinator", "instructor"];
 
-/** Users and the role permission matrix. */
+type Tab = "users" | "segments" | "fields" | "roles";
+
+/** Users (with tags, segments, CSV import, bulk actions and the user 360 page), custom profile fields and the role permission matrix. */
 export const UsersPage: React.FC = () => {
   const api = useApi();
-  const [tab, setTab] = useState<"users" | "roles">("users");
+  const [tab, setTab] = useState<Tab>("users");
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [peopleMeta, setPeopleMeta] = useState<PeopleMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.get<Meta>("/admin/accounts/meta").then(setMeta).catch(err => setError(err.message)); }, [api.token]);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [segmentFilter, setSegmentFilter] = useState("");
+  const loadPeopleMeta = () => { if (can(api.user, "users.view")) api.get<PeopleMeta>("/admin/people-meta").then(setPeopleMeta).catch(() => undefined); };
+  useEffect(() => { api.get<Meta>("/admin/accounts/meta").then(setMeta).catch(err => setError(err.message)); loadPeopleMeta(); }, [api.token]);
+  const tabButton = (key: Tab, icon: React.ReactNode, label: string) => (
+    <button role="tab" aria-selected={tab === key} onClick={() => { setTab(key); setDetailId(null); }} className={tab === key ? "tech-button-primary" : "tech-button-outline"} style={{ padding: "8px 14px", fontSize: 13 }}>{icon}{label}</button>
+  );
+
+  if (detailId) return <UserDetailPage userId={detailId} onBack={() => { setDetailId(null); loadPeopleMeta(); }} />;
 
   return (
     <div>
@@ -44,15 +61,23 @@ export const UsersPage: React.FC = () => {
           <p className="header-desc">เพิ่มผู้ใช้ กำหนดบทบาท (1 บัญชีมีได้หลายบทบาท) ระงับบัญชี และกำหนดว่าแต่ละบทบาทใช้ฟีเจอร์ใดได้บ้าง</p>
         </div>
       </div>
-      <nav role="tablist" style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        {can(api.user, "users.view") && (
-          <button role="tab" aria-selected={tab === "users"} onClick={() => setTab("users")} className={tab === "users" ? "tech-button-primary" : "tech-button-outline"} style={{ padding: "8px 14px", fontSize: 13 }}><Users size={16} />ผู้ใช้</button>
-        )}
-        <button role="tab" aria-selected={tab === "roles"} onClick={() => setTab("roles")} className={tab === "roles" ? "tech-button-primary" : "tech-button-outline"} style={{ padding: "8px 14px", fontSize: 13 }}><ShieldCheck size={16} />บทบาทและสิทธิ์</button>
+      <nav role="tablist" style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+        {can(api.user, "users.view") && tabButton("users", <Users size={16} />, "ผู้ใช้")}
+        {can(api.user, "users.view") && tabButton("segments", <Filter size={16} />, "กลุ่มผู้ใช้")}
+        {can(api.user, "users.view", "users.import") && tabButton("fields", <ListChecks size={16} />, "ฟิลด์โปรไฟล์")}
+        {tabButton("roles", <ShieldCheck size={16} />, "บทบาทและสิทธิ์")}
       </nav>
       <ErrorBox message={error} />
-      {meta && tab === "users" && can(api.user, "users.view") && <UsersTab api={api} meta={meta} />}
-      {(tab === "roles" || !can(api.user, "users.view")) && <RolesTab api={api} />}
+      {meta && tab === "users" && can(api.user, "users.view") && (
+        <UsersTab api={api} meta={meta} people={peopleMeta} onOpen={setDetailId} onPeopleChanged={loadPeopleMeta}
+          segmentFilter={segmentFilter} setSegmentFilter={setSegmentFilter} />
+      )}
+      {tab === "segments" && can(api.user, "users.view") && (
+        <SegmentsPanel meta={peopleMeta} partners={meta?.partners ?? []} canEdit={can(api.user, "users.import", "users.manage")}
+          onOpenSegment={id => { setSegmentFilter(id); setTab("users"); loadPeopleMeta(); }} />
+      )}
+      {tab === "fields" && can(api.user, "users.view", "users.import") && <ProfileFieldsPanel canEdit={can(api.user, "users.import")} />}
+      {(tab === "roles" || (!can(api.user, "users.view") && tab !== "fields")) && <RolesTab api={api} />}
     </div>
   );
 };
@@ -63,8 +88,14 @@ export const UsersPage: React.FC = () => {
 
 const PAGE = 25;
 
-const UsersTab: React.FC<{ api: Api; meta: Meta }> = ({ api, meta }) => {
+const UsersTab: React.FC<{
+  api: Api; meta: Meta; people: PeopleMeta | null; onOpen: (id: string) => void; onPeopleChanged: () => void;
+  segmentFilter: string; setSegmentFilter: (id: string) => void;
+}> = ({ api, meta, people, onOpen, onPeopleChanged, segmentFilter, setSegmentFilter }) => {
   const [query, setQuery] = useState("");
+  const [tag, setTag] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");
   const [status, setStatus] = useState("");
@@ -81,9 +112,17 @@ const UsersTab: React.FC<{ api: Api; meta: Meta }> = ({ api, meta }) => {
     if (search) params.set("q", search);
     if (role) params.set("role", role);
     if (status) params.set("status", status);
+    if (tag) params.set("tag", tag);
+    if (segmentFilter) params.set("segment_id", segmentFilter);
     api.get<typeof data>(`/admin/accounts?${params}`).then(d => { setData(d); setError(null); }).catch(err => setError(err.message));
   };
-  useEffect(load, [search, role, status, page, api.token]);
+  useEffect(load, [search, role, status, tag, segmentFilter, page, api.token]);
+  const canImport = can(api.user, "users.import");
+  const canTag = meta.canManage || canImport;
+  const pageIds = data?.users.map(u => u.id) ?? [];
+  const allOnPage = pageIds.length > 0 && pageIds.every(id => selected.has(id));
+  const toggle = (id: string) => setSelected(s => { const next = new Set(s); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const togglePage = () => setSelected(s => { const next = new Set(s); pageIds.forEach(id => allOnPage ? next.delete(id) : next.add(id)); return next; });
   const pages = data ? Math.ceil(data.total / PAGE) : 0;
 
   return (
@@ -111,27 +150,50 @@ const UsersTab: React.FC<{ api: Api; meta: Meta }> = ({ api, meta }) => {
         <select className="form-input" aria-label="กรองตามสถานะ" value={status} onChange={e => { setStatus(e.target.value); setPage(0); }} style={{ width: "auto", background: "#fff", borderColor: "rgba(15,23,42,0.12)" }}>
           <option value="">ทุกสถานะ</option><option value="active">ใช้งานอยู่</option><option value="suspended">ถูกระงับ</option>
         </select>
-        {meta.canManage && <button className="tech-button-primary" style={{ marginLeft: "auto" }} onClick={() => setEditing("new")}><UserPlus size={16} />เพิ่มผู้ใช้</button>}
+        {people && people.tags.length > 0 && (
+          <select className="form-input" aria-label="กรองตามแท็ก" value={tag} onChange={e => { setTag(e.target.value); setPage(0); }} style={{ width: "auto", background: "#fff", borderColor: "rgba(15,23,42,0.12)" }}>
+            <option value="">ทุกแท็ก</option>
+            {people.tags.map(t => <option key={t.tag} value={t.tag}>{t.tag} ({t.users})</option>)}
+          </select>
+        )}
+        {people && people.segments.length > 0 && (
+          <select className="form-input" aria-label="กรองตามกลุ่มผู้ใช้" value={segmentFilter} onChange={e => { setSegmentFilter(e.target.value); setPage(0); }} style={{ width: "auto", background: "#fff", borderColor: "rgba(15,23,42,0.12)" }}>
+            <option value="">ทุกกลุ่ม</option>
+            {people.segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {canImport && <button className="tech-button-outline" onClick={() => setImporting(true)}><Upload size={16} />นำเข้า CSV</button>}
+          {meta.canManage && <button className="tech-button-primary" onClick={() => setEditing("new")}><UserPlus size={16} />เพิ่มผู้ใช้</button>}
+        </div>
       </div>
+      {selected.size > 0 && (
+        <BulkBar api={api} ids={Array.from(selected)} people={people} canManage={meta.canManage} canTag={canTag}
+          onClear={() => setSelected(new Set())} onDone={message => { setNotice(message); load(); onPeopleChanged(); }} onError={setError} />
+      )}
 
       <ErrorBox message={error} />
       {notice && <div role="status" style={{ padding: "10px 14px", borderRadius: 10, background: "var(--accent-glow)", color: "var(--accent)", marginBottom: 14, fontSize: 14 }}>{notice}</div>}
       <div className="glass-card" style={{ padding: 8, overflowX: "auto" }}>
         {!data ? <Empty text="กำลังโหลด…" /> : data.users.length === 0 ? <Empty text="ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข" /> : (
           <table style={tableStyle}>
-            <thead><tr><th style={thStyle}>ผู้ใช้</th><th style={thStyle}>บทบาท</th><th style={thStyle}>องค์กร</th><th style={thStyle}>สถานะ</th><th style={thStyle}>เข้าสู่ระบบล่าสุด</th><th style={thStyle}></th></tr></thead>
+            <thead><tr><th style={{ ...thStyle, width: 32 }}><input type="checkbox" aria-label="เลือกทุกคนในหน้านี้" checked={allOnPage} onChange={togglePage} /></th><th style={thStyle}>ผู้ใช้</th><th style={thStyle}>บทบาท</th><th style={thStyle}>องค์กร</th><th style={thStyle}>สถานะ</th><th style={thStyle}>เข้าสู่ระบบล่าสุด</th><th style={thStyle}></th></tr></thead>
             <tbody>
               {data.users.map(u => (
-                <tr key={u.id} style={{ opacity: u.status === "suspended" ? 0.6 : 1 }}>
-                  <td style={tdStyle}><strong>{u.name}</strong>{u.id === api.user?.id && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}> (คุณ)</span>}<div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{u.email}</div>
+                <tr key={u.id} style={{ opacity: u.status === "suspended" ? 0.6 : 1, background: selected.has(u.id) ? "rgba(59,130,246,0.05)" : undefined }}>
+                  <td style={tdStyle}><input type="checkbox" aria-label={`เลือก ${u.name}`} checked={selected.has(u.id)} onChange={() => toggle(u.id)} /></td>
+                  <td style={tdStyle}><button onClick={() => onOpen(u.id)} title="ดูรายละเอียดผู้ใช้" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", color: "inherit", textAlign: "left" }}><strong style={{ textDecoration: "underline", textDecorationColor: "rgba(15,23,42,0.2)" }}>{u.name}</strong></button>{u.id === api.user?.id && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}> (คุณ)</span>}<div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{u.email}</div>
                     {u.invite_expires_at && !u.last_login_at
                       ? <div style={{ fontSize: 12, color: "#9a5b00" }}>รอตั้งรหัสผ่านจากคำเชิญ</div>
-                      : u.email_verified_at === null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>ยังไม่ยืนยันอีเมล</div>}</td>
+                      : u.email_verified_at === null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>ยังไม่ยืนยันอีเมล</div>}
+                    {u.tags && u.tags.length > 0 && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>{u.tags.map(t => <span key={t} style={{ fontSize: 11, padding: "1px 8px", borderRadius: 99, background: "var(--secondary-glow)", color: "var(--secondary)" }}>{t}</span>)}</div>}</td>
                   <td style={tdStyle}><div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{(u.roles?.length ? u.roles : [u.role]).map(r => <Chip key={r} label={roleLabel(r)} {...ROLE_TONE[r]} />)}</div></td>
                   <td style={tdStyle}>{u.company_name || "-"}</td>
                   <td style={tdStyle}>{u.status === "active" ? <Chip label="ใช้งานอยู่" color="var(--accent)" bg="var(--accent-glow)" /> : <Chip label="ถูกระงับ" color="#b42318" bg="rgba(239,68,68,0.1)" />}</td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap", fontSize: 13 }}>{u.last_login_at ? formatDateTime(u.last_login_at) : "ยังไม่เคย"}</td>
-                  <td style={tdStyle}>{meta.canManage && <button className="tech-button-outline" style={{ padding: "4px 12px", fontSize: 12, borderWidth: 1 }} onClick={() => setEditing(u)}>จัดการ</button>}</td>
+                  <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                    <button className="tech-button-outline" style={{ padding: "4px 12px", fontSize: 12, borderWidth: 1 }} onClick={() => onOpen(u.id)}>ดูข้อมูล</button>{" "}
+                    {meta.canManage && <button className="tech-button-outline" style={{ padding: "4px 12px", fontSize: 12, borderWidth: 1 }} onClick={() => setEditing(u)}>จัดการ</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -145,7 +207,57 @@ const UsersTab: React.FC<{ api: Api; meta: Meta }> = ({ api, meta }) => {
           <button className="tech-button-outline" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} style={{ padding: "6px 14px" }}>ถัดไป</button>
         </div>
       )}
+      {importing && <ImportUsersDialog fields={people?.fields ?? []} onClose={() => setImporting(false)} onDone={() => { load(); onPeopleChanged(); }} />}
       {editing && <AccountDialog api={api} meta={meta} account={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={message => { setEditing(null); setNotice(message ?? null); load(); }} />}
+    </div>
+  );
+};
+
+// ==========================================
+// Bulk actions on the selection
+// ==========================================
+
+const BulkBar: React.FC<{
+  api: Api; ids: string[]; people: PeopleMeta | null; canManage: boolean; canTag: boolean;
+  onClear: () => void; onDone: (message: string) => void; onError: (message: string | null) => void;
+}> = ({ api, ids, people, canManage, canTag, onClear, onDone, onError }) => {
+  const [tag, setTag] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async (body: Record<string, unknown>, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return;
+    try {
+      setBusy(true);
+      onError(null);
+      const res = await api.post<{ message: string; failed: Array<{ user_id: string; error: string }> }>("/admin/people/bulk", { ...body, user_ids: ids });
+      onDone(res.failed.length ? `${res.message}: ${Array.from(new Set(res.failed.map(f => f.error))).join(" · ")}` : res.message);
+    } catch (err: any) { onError(err.message); } finally { setBusy(false); }
+  };
+  const exportSelected = async () => {
+    try { setBusy(true); await postForDownload("/admin/people/export", api.token, { user_ids: ids }, `netprime-users-${new Date().toISOString().slice(0, 10)}.csv`); }
+    catch (err: any) { onError(err.message); } finally { setBusy(false); }
+  };
+  const small: React.CSSProperties = { padding: "6px 12px", fontSize: 13 };
+  return (
+    <div className="glass-card" role="region" aria-label="จัดการผู้ใช้ที่เลือก" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", padding: "10px 14px", marginBottom: 14 }}>
+      <strong style={{ fontSize: 14 }}>เลือก {ids.length} คน</strong>
+      <button className="tech-button-outline" style={small} onClick={onClear}>ล้างการเลือก</button>
+      {canTag && <>
+        <input className="form-input" list="bulk-tags" placeholder="แท็ก" maxLength={50} value={tag} onChange={e => setTag(e.target.value)} style={{ width: 160, minHeight: 36 }} />
+        <datalist id="bulk-tags">{people?.tags.map(t => <option key={t.tag} value={t.tag} />)}</datalist>
+        <button className="tech-button-outline" style={small} disabled={busy || !tag.trim()} onClick={() => run({ action: "add_tag", tag })}>เพิ่มแท็ก</button>
+        <button className="tech-button-outline" style={small} disabled={busy || !tag.trim()} onClick={() => run({ action: "remove_tag", tag })}>ลบแท็ก</button>
+      </>}
+      {canManage && <>
+        <select className="form-input" aria-label="คอร์สที่จะลงทะเบียนให้" value={courseId} onChange={e => setCourseId(e.target.value)} style={{ width: 220, minHeight: 36 }}>
+          <option value="">— คอร์ส —</option>
+          {people?.courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+        </select>
+        <button className="tech-button-outline" style={small} disabled={busy || !courseId} onClick={() => run({ action: "enroll", course_id: courseId }, `ลงทะเบียนเรียนให้ ${ids.length} คน?`)}>ลงทะเบียนเรียน</button>
+        <button className="tech-button-outline" style={small} disabled={busy} onClick={() => run({ action: "suspend" }, `ระงับบัญชี ${ids.length} คน?`)}>ระงับบัญชี</button>
+        <button className="tech-button-outline" style={small} disabled={busy} onClick={() => run({ action: "activate" })}>เปิดใช้งาน</button>
+      </>}
+      <button className="tech-button-outline" style={small} disabled={busy} onClick={exportSelected}><Download size={14} />ส่งออก CSV</button>
     </div>
   );
 };

@@ -8,6 +8,8 @@ import { parseRoles, permissionsForRoles, primaryRole, rolesColumn } from "../ut
 import { issueAccountToken, consumeAccountToken } from "../utils/tokens";
 import { clientIp, hit, isLimited, rateLimited, tooManyRequests } from "../utils/ratelimit";
 import { appUrl, sendPasswordChangedEmail, sendPasswordResetEmail, sendVerificationEmail } from "../utils/email";
+import { trackEvent } from "../utils/events";
+import { signupPolicyError } from "../utils/school";
 
 export const authRouter = new Hono<Env>();
 const validEmail = (value: unknown): value is string => typeof value === "string" && value.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -34,7 +36,7 @@ const validNewPassword = (value: unknown): value is string => typeof value === "
 
 async function sendVerificationLink(c: Context<Env>, user: { id: string; email: string; name: string }): Promise<string> {
   const url = appUrl(c.env, "/verify-email?token=" + await issueAccountToken(c.env.DB, user.id, "verify"));
-  await deliver(c, "Verification", () => sendVerificationEmail(user.email, user.name, url, c.env.RESEND_API_KEY));
+  await deliver(c, "Verification", () => sendVerificationEmail(user.email, user.name, url, c.env.RESEND_API_KEY, c.env.DB));
   return url;
 }
 
@@ -62,6 +64,9 @@ authRouter.post("/register", async (c) => {
     return c.json({ error: "การสมัครสมาชิกทั่วไปสำหรับผู้เรียนบุคคลเท่านั้น" }, 403);
   }
   if (await rateLimited(c.env.SESSIONS, "register", clientIp(c), LIMITS.register)) return tooManyRequests(c);
+  // School sign-up terms (settings page): open sign-up and allowed email domains.
+  const signupBlocked = await signupPolicyError(c.env.DB, email);
+  if (signupBlocked) return c.json({ error: signupBlocked, code: "signup_closed" }, 403);
   const user: UserPayload = { id: "usr_" + crypto.randomUUID(), email: email.trim().toLowerCase(), name: name.trim(), role: "student", roles: ["student"], partner_id: null };
   try {
     await c.env.DB.prepare("INSERT INTO users (id, email, password_hash, name, role, partner_id) VALUES (?, ?, ?, ?, 'student', NULL)")
@@ -70,6 +75,7 @@ authRouter.post("/register", async (c) => {
     if (error.message?.includes("UNIQUE constraint failed")) return c.json({ error: "อีเมลนี้ถูกใช้สมัครสมาชิกแล้ว" }, 409);
     throw error;
   }
+  await trackEvent(c.env.DB, user.id, "signup", { data: { method: "password" } });
   // Verification is soft: the new account can sign in and study right away.
   let verifyUrl = "";
   try { verifyUrl = await sendVerificationLink(c, user); } catch (error) { console.error("Verification link failed", error); }
@@ -104,6 +110,7 @@ authRouter.post("/login", async (c) => {
   }
   if (user.status !== "active") return c.json({ error: "บัญชีนี้ถูกระงับ กรุณาติดต่อผู้ดูแลระบบ" }, 403);
   await c.env.DB.prepare("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?").bind(user.id).run();
+  await trackEvent(c.env.DB, user.id, "login", { data: { method: "password" } });
   if (needsPasswordUpgrade(user.password_hash)) {
     await c.env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?")
       .bind(await hashPassword(password), user.id, user.password_hash).run();
@@ -129,7 +136,7 @@ authRouter.post("/forgot-password", async (c) => {
     .first<{ id: string; email: string; name: string; status: string }>();
   if (!user || user.status !== "active") return c.json({ message: FORGOT_MESSAGE });
   const url = appUrl(c.env, "/reset-password?token=" + await issueAccountToken(c.env.DB, user.id, "reset"));
-  await deliver(c, "Password reset", () => sendPasswordResetEmail(user.email, user.name, url, c.env.RESEND_API_KEY));
+  await deliver(c, "Password reset", () => sendPasswordResetEmail(user.email, user.name, url, c.env.RESEND_API_KEY, c.env.DB));
   return c.json({ message: FORGOT_MESSAGE, ...debugLink(c, url) });
 });
 
@@ -154,7 +161,7 @@ authRouter.post("/reset-password", async (c) => {
     db.prepare("UPDATE account_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND purpose IN ('reset', 'invite') AND used_at IS NULL").bind(user.id)
   ]);
   if (consumed.purpose === "reset") {
-    await deliver(c, "Password changed", () => sendPasswordChangedEmail(user.email, user.name, appUrl(c.env, "/dashboard"), c.env.RESEND_API_KEY));
+    await deliver(c, "Password changed", () => sendPasswordChangedEmail(user.email, user.name, appUrl(c.env, "/dashboard"), c.env.RESEND_API_KEY, c.env.DB));
   }
   return c.json({
     message: consumed.purpose === "invite" ? "ตั้งรหัสผ่านเรียบร้อย เข้าสู่ระบบด้วยอีเมลและรหัสผ่านใหม่ได้เลย" : "ตั้งรหัสผ่านใหม่แล้ว กรุณาเข้าสู่ระบบอีกครั้ง",
@@ -262,7 +269,7 @@ authRouter.post("/change-password", rbac(), async (c) => {
   const revokedMs = Date.now();
   await c.env.DB.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ? WHERE id = ?")
     .bind(await hashPassword(next), new Date(revokedMs).toISOString(), user.id).run();
-  await deliver(c, "Password changed", () => sendPasswordChangedEmail(user.email, user.name, appUrl(c.env, "/dashboard"), c.env.RESEND_API_KEY));
+  await deliver(c, "Password changed", () => sendPasswordChangedEmail(user.email, user.name, appUrl(c.env, "/dashboard"), c.env.RESEND_API_KEY, c.env.DB));
   const { exp, ...identity } = user;
   const fresh = await session(identity, c.env.JWT_SECRET, c.env.DB, { iat_ms: revokedMs + 1, email_verified: !!row.email_verified_at });
   return c.json({ message: "เปลี่ยนรหัสผ่านแล้ว อุปกรณ์อื่นถูกออกจากระบบ", ...fresh });
@@ -302,6 +309,8 @@ authRouter.get("/oauth/:provider/url", async (c) => {
   return c.json({ url, state, provider });
 });
 
+class SignupBlockedError extends Error {}
+
 /**
  * Helper to authenticate or auto-provision OAuth profile in D1
  */
@@ -339,6 +348,9 @@ async function handleOAuthUserProfile(
   } else {
     const existing = await db.prepare("SELECT id FROM users WHERE email = ?").bind(normalizedEmail).first();
     if (existing) throw new Error("ACCOUNT_LINK_REQUIRED");
+    // A new account through Google/GitHub is a self-service sign-up: the school's sign-up terms apply.
+    const signupBlocked = await signupPolicyError(db, normalizedEmail);
+    if (signupBlocked) throw new SignupBlockedError(signupBlocked);
     userId = "usr_" + crypto.randomUUID();
     await db.batch([
       // The provider only returns verified addresses, so OAuth accounts start verified.
@@ -349,11 +361,14 @@ async function handleOAuthUserProfile(
     ]);
     try {
       const { sendWelcomeEmail } = await import("../utils/email");
-      await sendWelcomeEmail(normalizedEmail, displayName, resendApiKey, appBase);
+      await sendWelcomeEmail(normalizedEmail, displayName, resendApiKey, appBase, db);
     } catch (error) { console.error("Welcome email delivery failed", error); }
   }
 
   const userRole = primaryRole(userRoles);
+  if (!linked) await trackEvent(db, userId, "signup", { data: { method: profile.provider } });
+  await db.prepare("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run().catch(() => undefined);
+  await trackEvent(db, userId, "login", { data: { method: profile.provider } });
 
   // 3. Issue 24-hour Netprime JWT Token
   const exp = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
@@ -553,6 +568,7 @@ authRouter.post("/oauth/:provider/callback", async (c) => {
 
   } catch (error: any) {
     console.error("OAuth callback processing error:", error);
+    if (error instanceof SignupBlockedError) return c.json({ error: error.message, code: "signup_closed" }, 403);
     if (error.message === "ACCOUNT_LINK_REQUIRED") return c.json({ error: "โปรดเข้าสู่ระบบด้วยรหัสผ่าน ต้องเชื่อมบัญชีก่อนใช้ผู้ให้บริการนี้" }, 409);
     if (error.message === "ACCOUNT_SUSPENDED") return c.json({ error: "บัญชีนี้ถูกระงับ กรุณาติดต่อผู้ดูแลระบบ" }, 403);
     return c.json({ error: "ยืนยัน OAuth ไม่สำเร็จ" }, 502);

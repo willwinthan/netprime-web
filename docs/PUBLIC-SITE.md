@@ -82,3 +82,11 @@ LINE/Facebook ไม่รัน JavaScript จึงต้องได้ tag �
 2. **แบรนด์ของคอร์ส:** เดาจากชื่อคอร์ส เพราะตาราง `courses` ไม่มีคอลัมน์ vendor
 3. **ผู้เขียนบทความ:** แสดงชื่อบัญชีที่สร้างบทความ ถ้าไม่มีจะแสดง "ทีมงาน NetPrime"
 4. **หน้าแรกเดิม:** `pages/Landing.tsx` ไม่ถูกใช้แล้ว แต่ยังไม่ได้ลบ เพราะโปรเจกต์ไม่มี Git ลบได้หลังตรวจรับเว็บใหม่
+
+## Website builder pages, theme, i18n and PWA (v0.5)
+
+- Custom pages from "ออกแบบเว็บไซต์" render at `/p/:slug` (`src/site/CustomPage.tsx`, blocks in `src/components/builder/PageBlocks.tsx`). API: `GET /api/public/website/pages/:slug` (published only), `/api/public/website/pages` (sitemap list), `/api/public/website/nav`, `/api/public/website/theme`, `/api/public/website/certificate-template?course_id=|code=`; console API under `/api/website/*` (`website.design`), see `backend/src/handlers/website.ts`.
+- The frontend Worker adds share tags for `/p/:slug`, lists published pages in `sitemap.xml`, and serves `/manifest.webmanifest` with the school name from the theme. **`wrangler.jsonc` must add `"/p/*"` and `"/manifest.webmanifest"` to `assets.run_worker_first`** for those to run; without it the SPA still renders the pages and the static `public/manifest.webmanifest` is served.
+- Theme: CSS variables `--np-primary`, `--np-primary-dark`, `--np-primary-tint`, `--np-accent`, `--np-secondary`, `--np-radius`, `--np-font` on `<html>` (set by `src/components/builder/theme.tsx`; cached in localStorage and re-applied by an inline script in `index.html`). `site.css` falls back to the built-in colors when unset; the console's `--color-brand-primary` is overridden too.
+- i18n: `src/i18n/dictionary.ts` (th/en, every key in both — `node --test tests/i18n-keys.test.mjs`), `useI18n()` / `t()` / `<LanguageSwitcher />` from `src/i18n`. The choice is stored in localStorage `netprime.lang`; `<html lang>` follows it on the public site.
+- PWA: `public/manifest.webmanifest`, `public/sw.js` (network-first HTML with `/offline.html`, cache-first static assets, never `/api` or other origins; imports `/push-handler.js` when deployed), icons in `public/icons/` (generated from `logo/NetPrimeLogo.png`: 192, 512, maskable 512, apple-touch 180, favicon 32). `public/_headers` keeps `sw.js` uncached. Registration and the "มีเวอร์ชันใหม่ — รีโหลด" banner live in `src/pwa/` (second entry module in `index.html`, production builds only).

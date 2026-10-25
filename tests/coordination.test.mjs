@@ -223,7 +223,12 @@ test('a deletion request, once approved, anonymizes the account and blocks sign-
   const list = await expectStatus('/api/admin/privacy/requests?status=pending', 200, { token: admin.token });
   assert.ok(list.requests.some(r => r.id === created.request.id && r.user_email === email));
 
+  // Personal tables beyond the account row are cleared too (tags here; profile values, SSO identities, push, LINE, webhooks in code).
+  const tagged = await expectStatus(`/api/admin/people/${account.user.id}/tags`, 200, { method: 'POST', token: admin.token, body: { tag: 'pdpa-tag' } });
+  assert.ok(tagged.tags.includes('pdpa-tag'));
   await expectStatus(`/api/admin/privacy/requests/${created.request.id}/approve`, 200, { method: 'POST', token: admin.token, body: { note: 'ดำเนินการตามคำขอ' } });
+  const anonymized = await expectStatus(`/api/admin/people/${account.user.id}`, 200, { token: admin.token });
+  assert.deepEqual(anonymized.user.tags || [], [], 'tags deleted');
   await expectStatus(`/api/admin/privacy/requests/${created.request.id}/approve`, 409, { method: 'POST', token: admin.token, body: {} });
   await expectStatus('/api/auth/login', 401, { method: 'POST', body: { email, password: 'long-test-password-123' } });
   await expectStatus('/api/auth/me', 401, { token });

@@ -27,9 +27,13 @@ export function recountSeats(db: D1Database, partnerId: string) {
 /**
  * SQL condition: enrollment `e` (aliased) is one the learner paid for personally, through a
  * bank-transfer course order or a legacy completed payment. Such courses are never the organization's.
+ * An order suspended for an overdue installment does not count (its access is closed until paid).
  */
 export const personallyPaidSql = (e: string) => `(EXISTS (SELECT 1 FROM course_orders o
-    WHERE o.user_id = ${e}.user_id AND o.course_id = ${e}.course_id AND o.status = 'paid')
+    WHERE o.user_id = ${e}.user_id AND o.course_id = ${e}.course_id AND o.status = 'paid' AND o.suspended_at IS NULL)
+  OR EXISTS (SELECT 1 FROM order_items oi JOIN course_orders o ON o.id = oi.order_id
+    WHERE o.user_id = ${e}.user_id AND oi.course_id = ${e}.course_id AND o.kind != 'organization' AND o.suspended_at IS NULL
+      AND (o.status = 'paid' OR (o.status = 'partial' AND o.access_granted_at IS NOT NULL)))
   OR EXISTS (SELECT 1 FROM payments p WHERE p.user_id = ${e}.user_id AND p.course_id = ${e}.course_id AND p.status = 'completed'))`;
 
 /**

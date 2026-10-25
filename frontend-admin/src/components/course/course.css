@@ -1,0 +1,57 @@
+/* Course builder (instructor console) and lesson player (learner dashboard). */
+
+.np-cb-tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--border-subtle); margin-bottom: 20px; }
+.np-cb-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-secondary); cursor: pointer; }
+.np-cb-tab[aria-selected="true"] { color: var(--color-brand-primary, var(--primary)); border-bottom-color: var(--primary); }
+
+.np-cb-section { border: 1px solid var(--border-subtle); border-radius: 1rem; padding: 12px; margin-bottom: 14px; background: rgba(255,255,255,0.5); }
+.np-cb-section.is-over, .np-cb-lesson.is-over { outline: 2px dashed var(--primary); outline-offset: 2px; }
+.np-cb-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.np-cb-section-head input { flex: 1; font-weight: 700; font-size: 15px; border: 1px solid transparent; background: transparent; padding: 4px 8px; border-radius: 8px; color: var(--text-primary); font-family: inherit; }
+.np-cb-section-head input:hover, .np-cb-section-head input:focus { border-color: var(--border-subtle); background: #fff; }
+.np-cb-lesson { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 0.75rem; background: #fff; margin-bottom: 6px; }
+.np-cb-lesson[draggable="true"] { cursor: grab; }
+.np-cb-lesson.is-dragging { opacity: 0.4; }
+.np-cb-grip { color: var(--text-muted); flex-shrink: 0; }
+.np-cb-meta { font-size: 12px; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.np-cb-empty { padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center; border: 1px dashed var(--border-subtle); border-radius: 0.75rem; }
+.np-cb-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.np-cb-btn { padding: 5px 10px; font-size: 12px; border-radius: 0.6rem; border: 1px solid var(--border-subtle); background: #fff; cursor: pointer; color: var(--text-primary); font-family: inherit; }
+.np-cb-btn:hover { border-color: var(--border-active, var(--primary)); }
+.np-cb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.np-cb-btn.danger { color: var(--danger); }
+.np-cb-type { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--primary-glow); color: var(--color-brand-primary, var(--primary)); white-space: nowrap; }
+.np-cb-list-input { display: flex; gap: 6px; margin-bottom: 6px; }
+.np-cb-list-input input, .np-cb-list-input textarea { flex: 1; }
+
+/* Lesson editor modal: BlockNote canvas */
+.np-lesson-editor { border: 1px solid var(--border-subtle); border-radius: 12px; min-height: 280px; padding: 12px 0; background: #fff; }
+.np-lesson-editor .bn-editor { padding-inline: 18px; font-size: 15px; }
+
+/* Learner: rendered text lessons (BlockRenderer / Markdown output) */
+.np-lesson-prose { font-size: 16px; line-height: 1.8; color: var(--text-primary); max-width: 760px; }
+.np-lesson-prose h1, .np-lesson-prose h2 { font-size: 24px; margin: 28px 0 10px; }
+.np-lesson-prose h3, .np-lesson-prose h4 { font-size: 19px; margin: 22px 0 8px; }
+.np-lesson-prose p { margin: 0 0 14px; white-space: pre-line; }
+.np-lesson-prose ul, .np-lesson-prose ol { margin: 0 0 14px; padding-left: 1.4em; }
+.np-lesson-prose pre { padding: 16px 18px; border-radius: 12px; background: #0f172a; color: #e8edf7; overflow-x: auto; font-size: 14px; }
+.np-lesson-prose :not(pre) > code { background: rgba(15,23,42,0.06); padding: 2px 6px; border-radius: 6px; font-size: 0.9em; }
+.np-lesson-prose blockquote { margin: 0 0 14px; padding: 12px 18px; border-left: 4px solid var(--primary); background: rgba(0,0,0,0.02); border-radius: 8px; }
+.np-lesson-prose img { max-width: 100%; border-radius: 10px; }
+.np-lesson-prose table { border-collapse: collapse; margin-bottom: 14px; }
+.np-lesson-prose td, .np-lesson-prose th { border: 1px solid var(--border-subtle); padding: 6px 10px; }
+.np-lesson-prose iframe { width: 100%; min-height: 480px; border: 0; border-radius: 10px; }
+
+.np-lesson-frame { width: 100%; aspect-ratio: 16 / 10; min-height: 420px; border: 1px solid var(--border-subtle); border-radius: 1.25rem; background: #fff; display: block; }
+.np-lesson-frame.tall { aspect-ratio: auto; height: 75vh; }
+
+/* Learner: curriculum outline */
+.np-outline-section { margin-bottom: 14px; }
+.np-outline-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 4px 2px 8px; }
+.np-outline-count { font-size: 11px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.np-outline-bar { height: 4px; border-radius: 4px; background: rgba(0,0,0,0.06); margin: -4px 2px 10px; overflow: hidden; }
+.np-outline-bar > div { height: 100%; background: var(--accent); }
+
+.np-category-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.np-category-chip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-subtle); background: #fff; font: inherit; font-size: 13px; cursor: pointer; color: var(--text-secondary); }
+.np-category-chip[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: #fff; }

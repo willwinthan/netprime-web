@@ -1,6 +1,10 @@
 import type { Env } from "./middleware/rbac";
 import { sendSessionReminders } from "./handlers/site";
 import { purgeExpiredTokens } from "./utils/tokens";
+import { processBroadcastQueue } from "./handlers/communication";
+import { runWebhookRetries } from "./handlers/platform";
+import { syncAffiliateConversions } from "./handlers/marketing";
+import { runCommerceJobs } from "./handlers/commerce";
 
 export interface DailyJobResult {
   reminders: { sent: number; registration_ids: string[] };
@@ -13,6 +17,10 @@ export async function runDailyJobs(env: Env["Bindings"]): Promise<DailyJobResult
   // Each job is isolated so one failure does not skip the others.
   try { result.reminders = await sendSessionReminders(env); } catch (error) { console.error("Session reminders failed:", error); }
   try { await purgeExpiredTokens(env.DB); result.tokens_purged = true; } catch (error) { console.error("Token purge failed:", error); }
+  try { await processBroadcastQueue(env, { maxBatches: 20 }); } catch (error) { console.error("Broadcast queue failed:", error); }
+  try { await syncAffiliateConversions(env.DB); } catch (error) { console.error("Affiliate conversion sync failed:", error); }
+  try { await runWebhookRetries(env); } catch (error) { console.error("Webhook retries failed:", error); }
+  try { await runCommerceJobs(env); } catch (error) { console.error("Commerce jobs failed:", error); }
   return result;
 }
 

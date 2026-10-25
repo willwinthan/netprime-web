@@ -10,16 +10,70 @@ export interface BankTransfer {
   bank_name: string; account_name: string; account_number: string; promptpay_id: string; note: string;
 }
 
+export interface VatSplit { total: number; base: number; vat: number; rate: number }
+
+export interface OrderInstallment {
+  id: string; seq: number; amount: number; due_at: string; status: "pending" | "paid" | "cancelled" | "refunded";
+  has_slip: boolean; slip_uploaded_at: string | null; amount_received: number | null; paid_at: string | null;
+  receipt_no: string | null; tax_invoice_no: string | null; vat_rate: number | null; overdue: boolean; vat: VatSplit | null;
+}
+
 export interface CourseOrder {
-  id: string; reference: string; course_id: string; course_title: string; list_price: number; amount: number;
-  voucher_code: string | null; status: "pending" | "paid" | "rejected" | "cancelled" | "expired" | "refunded";
+  id: string; reference: string; course_id: string | null; course_title: string; list_price: number; amount: number;
+  voucher_code: string | null; status: "pending" | "partial" | "paid" | "rejected" | "cancelled" | "expired" | "refunded";
   expires_at: string; has_slip: boolean; slip_uploaded_at: string | null; amount_received: number | null;
   paid_at: string | null; receipt_no: string | null; staff_note: string | null; voucher_note: string | null;
   user_name: string; user_email: string; created_at: string; refunded_at: string | null;
+  // Commerce (products, installments, tax invoices)
+  product_id?: string | null; kind?: "course" | "bundle" | "membership" | "organization"; partner_name?: string | null; seats?: number | null;
+  installment_count?: number; installments?: OrderInstallment[]; total_received?: number | null;
+  access_granted_at?: string | null; suspended_at?: string | null; vat_rate?: number | null; vat?: VatSplit | null;
+  tax_invoice_requested?: number; buyer_name?: string | null; buyer_tax_id?: string | null; buyer_branch?: string | null; buyer_address?: string | null;
+  tax_invoice_no?: string | null; tax_invoice_at?: string | null;
+  credit_note_no?: string | null; credit_note_at?: string | null; credit_note_amount?: number | null; reminder_sent_at?: string | null;
 }
+
+export const ORDER_KIND: Record<string, string> = { course: "คอร์ส", bundle: "ชุดคอร์ส", membership: "สมาชิก", organization: "องค์กร" };
+
+/** Buyer details for a full tax invoice (ใบกำกับภาษีเต็มรูป). */
+export interface BuyerTax { buyer_name: string; buyer_tax_id: string; buyer_branch: string; buyer_address: string }
+export const EMPTY_BUYER: BuyerTax = { buyer_name: "", buyer_tax_id: "", buyer_branch: "สำนักงานใหญ่", buyer_address: "" };
+
+/** Same 13-digit check digit rule as the server (utils/tax.ts). */
+export function isValidThaiTaxId(value: string): boolean {
+  const id = value.replace(/[\s-]/g, "");
+  if (!/^\d{13}$/.test(id)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(id[i]) * (13 - i);
+  return (11 - (sum % 11)) % 10 === Number(id[12]);
+}
+
+/** Form fields for a tax invoice request; shows the checksum error inline. */
+export const TaxInvoiceFields: React.FC<{ value: BuyerTax; onChange: (next: BuyerTax) => void }> = ({ value, onChange }) => {
+  const set = (key: keyof BuyerTax) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange({ ...value, [key]: e.target.value });
+  const id = value.buyer_tax_id.replace(/[\s-]/g, "");
+  return (
+    <div style={{ display: "grid", gap: "8px" }}>
+      <input className="form-input" placeholder="ชื่อผู้ซื้อหรือชื่อบริษัท" value={value.buyer_name} onChange={set("buyer_name")} maxLength={200} aria-label="ชื่อผู้ซื้อ" />
+      <div style={{ display: "flex", gap: "8px" }}>
+        <input className="form-input" placeholder="เลขประจำตัวผู้เสียภาษี 13 หลัก" value={value.buyer_tax_id} onChange={set("buyer_tax_id")} inputMode="numeric"
+          maxLength={17} aria-label="เลขประจำตัวผู้เสียภาษี" style={{ flex: 2 }} />
+        <input className="form-input" placeholder="สำนักงานใหญ่ หรือเลขสาขา 5 หลัก" value={value.buyer_branch} onChange={set("buyer_branch")} maxLength={50}
+          aria-label="สาขา" style={{ flex: 1 }} />
+      </div>
+      {id.length > 0 && !isValidThaiTaxId(id) && (
+        <p style={{ color: "var(--danger)", fontSize: "12px" }}>{id.length !== 13 ? "ต้องเป็นตัวเลข 13 หลัก" : "เลขประจำตัวผู้เสียภาษีไม่ถูกต้อง (ตรวจสอบหลักสุดท้าย)"}</p>
+      )}
+      <textarea className="form-input" rows={2} placeholder="ที่อยู่สำหรับออกใบกำกับภาษี" value={value.buyer_address} onChange={set("buyer_address")} maxLength={500} aria-label="ที่อยู่" />
+    </div>
+  );
+};
+
+export const buyerReady = (b: BuyerTax) => !!b.buyer_name.trim() && isValidThaiTaxId(b.buyer_tax_id) && !!b.buyer_address.trim();
 
 export const ORDER_STATUS: Record<CourseOrder["status"], { label: string; color: string; bg: string }> = {
   pending: { label: "รอชำระ/รอตรวจสอบ", color: "var(--primary)", bg: "var(--primary-glow)" },
+  partial: { label: "ผ่อนชำระอยู่", color: "var(--warning)", bg: "rgba(245,158,11,0.12)" },
   paid: { label: "ชำระแล้ว", color: "var(--accent)", bg: "var(--accent-glow)" },
   rejected: { label: "ไม่ผ่านการตรวจสอบ", color: "var(--danger)", bg: "rgba(239,68,68,0.1)" },
   cancelled: { label: "ยกเลิก", color: "var(--text-secondary)", bg: "rgba(100,116,139,0.12)" },
@@ -50,15 +104,15 @@ const CopyValue: React.FC<{ value: string }> = ({ value }) => {
 };
 
 /** Where and how much to transfer for one order. */
-export const TransferInstructions: React.FC<{ order: CourseOrder; instructions: BankTransfer }> = ({ order, instructions }) => (
+export const TransferInstructions: React.FC<{ order: CourseOrder; instructions: BankTransfer; amount?: number; label?: string; dueAt?: string }> = ({ order, instructions, amount, label, dueAt }) => (
   <div style={{ ...box, background: "rgba(229,107,37,0.04)" }}>
-    <div style={row}><span>ยอดที่ต้องโอน</span><strong style={{ fontSize: "16px", color: "var(--primary)" }}>{baht(order.amount)}</strong></div>
+    <div style={row}><span>ยอดที่ต้องโอน{label ? ` (${label})` : ""}</span><strong style={{ fontSize: "16px", color: "var(--primary)" }}>{baht(amount ?? order.amount)}</strong></div>
     <div style={row}><span>เลขที่คำสั่งซื้อ (ใส่ในบันทึกการโอน)</span><CopyValue value={order.reference} /></div>
     {instructions.bank_name && <div style={row}><span>ธนาคาร</span><span>{instructions.bank_name}</span></div>}
     {instructions.account_name && <div style={row}><span>ชื่อบัญชี</span><span>{instructions.account_name}</span></div>}
     {instructions.account_number && <div style={row}><span>เลขที่บัญชี</span><CopyValue value={instructions.account_number} /></div>}
     {instructions.promptpay_id && <div style={row}><span>พร้อมเพย์</span><CopyValue value={instructions.promptpay_id} /></div>}
-    <div style={row}><span>โอนภายใน</span><span>{formatThaiDateTime(order.expires_at)}</span></div>
+    <div style={row}><span>โอนภายใน</span><span>{formatThaiDateTime(dueAt ?? order.expires_at)}</span></div>
     {!instructions.account_number && !instructions.promptpay_id && (
       <p style={{ color: "var(--warning)", marginTop: "6px" }}>ยังไม่ได้ตั้งค่าบัญชีรับโอน กรุณาติดต่อเจ้าหน้าที่</p>
     )}
@@ -67,7 +121,8 @@ export const TransferInstructions: React.FC<{ order: CourseOrder; instructions: 
 );
 
 /** Slip upload for a pending order (PNG/JPG/WEBP/PDF ≤ 5 MB). */
-export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: CourseOrder) => void }> = ({ order, onUploaded }) => {
+export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: CourseOrder) => void; installment?: OrderInstallment }> = ({ order, onUploaded, installment }) => {
+  const target = installment ?? order;
   const api = useApi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +136,7 @@ export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: Cour
     form.append("file", file);
     try {
       setBusy(true);
-      const res = await api.request<{ order: CourseOrder }>(`/student/orders/${order.id}/slip`, { method: "POST", body: form });
+      const res = await api.request<{ order: CourseOrder }>(installment ? `/student/orders/${order.id}/installments/${installment.seq}/slip` : `/student/orders/${order.id}/slip`, { method: "POST", body: form });
       onUploaded(res.order);
     } catch (err: any) {
       setError(err.message || "อัปโหลดสลิปไม่สำเร็จ");
@@ -94,12 +149,12 @@ export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: Cour
     <div style={{ ...box, borderStyle: "dashed" }}>
       <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: busy ? "wait" : "pointer", fontWeight: 600 }}>
         <Upload size={16} color="var(--primary)" />
-        {busy ? "กำลังอัปโหลด..." : order.has_slip ? "แนบสลิปแล้ว — เปลี่ยนไฟล์" : "แนบสลิปการโอน"}
+        {busy ? "กำลังอัปโหลด..." : target.has_slip ? "แนบสลิปแล้ว — เปลี่ยนไฟล์" : installment ? `แนบสลิปงวดที่ ${installment.seq}` : "แนบสลิปการโอน"}
         <input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" disabled={busy}
           onChange={e => { upload(e.target.files?.[0]); e.target.value = ""; }} style={{ display: "none" }} />
       </label>
       <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
-        {order.has_slip ? `ส่งเมื่อ ${formatThaiDateTime(order.slip_uploaded_at)} เจ้าหน้าที่จะตรวจสอบและเปิดสิทธิ์ให้` : "PNG, JPG, WEBP หรือ PDF ไม่เกิน 5 MB"}
+        {target.has_slip ? `ส่งเมื่อ ${formatThaiDateTime(target.slip_uploaded_at)} เจ้าหน้าที่จะตรวจสอบและเปิดสิทธิ์ให้` : "PNG, JPG, WEBP หรือ PDF ไม่เกิน 5 MB"}
       </p>
       {error && <p style={{ color: "var(--danger)", fontSize: "12px", marginTop: "6px" }}>{error}</p>}
     </div>
@@ -119,6 +174,8 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
   const [order, setOrder] = useState<CourseOrder | null>(null);
   const [instructions, setInstructions] = useState<BankTransfer | null>(null);
   const [enrolled, setEnrolled] = useState(false);
+  const [wantTax, setWantTax] = useState(false);
+  const [buyer, setBuyer] = useState<BuyerTax>(EMPTY_BUYER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,7 +204,7 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
       setBusy(true);
       setError(null);
       const res = await api.post<{ order: CourseOrder; enrolled: boolean; instructions?: BankTransfer }>("/student/orders",
-        { course_id: course.id, voucher_code: voucher?.code || undefined });
+        { course_id: course.id, voucher_code: voucher?.code || undefined, tax_invoice: wantTax ? buyer : undefined });
       setOrder(res.order);
       if (res.instructions) setInstructions(res.instructions);
       if (res.enrolled) { setEnrolled(true); onEnrolled(); }
@@ -225,9 +282,17 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
             <div style={{ ...box, display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
               <span>ยอดที่ต้องชำระ</span><span style={{ color: "var(--primary)" }}>{baht(voucher ? voucher.final_price : price)}</span>
             </div>
+            {(voucher ? voucher.final_price : price) > 0 && (
+              <div style={{ ...box }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: 600 }}>
+                  <input type="checkbox" checked={wantTax} onChange={e => setWantTax(e.target.checked)} /> ต้องการใบกำกับภาษีเต็มรูป
+                </label>
+                {wantTax && <div style={{ marginTop: "10px" }}><TaxInvoiceFields value={buyer} onChange={setBuyer} /></div>}
+              </div>
+            )}
             <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>ชำระด้วยการโอนเงินผ่านธนาคารหรือพร้อมเพย์ ไม่มีการเก็บข้อมูลบัตร</p>
             {error && <p role="alert" style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</p>}
-            <button type="button" className="tech-button-primary" onClick={createOrder} disabled={busy} style={{ width: "100%" }}>
+            <button type="button" className="tech-button-primary" onClick={createOrder} disabled={busy || (wantTax && !buyerReady(buyer))} style={{ width: "100%" }}>
               {busy ? "กำลังสร้างคำสั่งซื้อ..." : voucher?.final_price === 0 ? "ลงทะเบียนเรียน" : "สร้างคำสั่งซื้อและดูวิธีโอนเงิน"}
             </button>
           </>

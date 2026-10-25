@@ -24,6 +24,8 @@
 //         internship_*, user_gamification, user_achievements, it_projects, training_sessions,
 //         session_registrations, articles, promotions, inquiries  -> ข้อมูลเดโม/บุคคลสมมติ
 //   ตารางที่มี seed แต่ไม่อยู่ในรายการเก็บจะถูกตัดอัตโนมัติและพิมพ์รายชื่อเตือน
+//   เก็บ  affiliate_programs โปรแกรมแนะนำเพื่อนเริ่มต้น aff_default (migration 0024 ใส่ให้เหมือนกัน)
+//   เก็บ  community_spaces   ห้องรวมทั่วไป space_general (migration 0022 ใส่ให้เหมือนกัน)
 //   ถ้ามีตารางอ้างอิงใหม่ที่ระบบต้องมีข้อมูลตั้งต้น ให้เพิ่มชื่อใน REFERENCE_TABLES
 //
 // ใช้:  node scripts/build-init-sql.mjs            สร้าง backend/init.sql
@@ -32,7 +34,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
-const REFERENCE_TABLES = new Set(['role_permissions', 'achievements']);
+const REFERENCE_TABLES = new Set(['role_permissions', 'achievements', 'affiliate_programs', 'community_spaces']);
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const schemaPath = resolve(root, 'backend/schema.sql');

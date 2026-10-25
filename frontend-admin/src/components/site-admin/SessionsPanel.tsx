@@ -3,6 +3,7 @@ import { CalendarPlus, Copy, Download, Pencil, Trash2, Users, UserPlus, ArrowLef
 import { SessionCalendar, CalendarEvent } from "../calendar/SessionCalendar";
 import { YearMonth, monthOf, todayYmd } from "../calendar/calendarDates";
 import { useApi } from "../../hooks/useApi";
+import { SessionMeetingCard } from "../settings/SessionMeetingCard";
 import {
   AdminSession, Registration, RegistrationStatus, MODE_LABEL, SESSION_STATUS, REG_STATUS,
   Chip, SeatBar, Modal, Field, ErrorBox, Empty, grid2, tableStyle, thStyle, tdStyle,
@@ -413,6 +414,7 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
           </div>
         </div>
       )}
+      {session && <SessionMeetingCard session={session} />}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

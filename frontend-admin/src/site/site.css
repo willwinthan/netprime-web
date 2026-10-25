@@ -1,16 +1,17 @@
 /* Public website (/, /courses, /schedule, /blog, /about). Scoped under .ps so the LMS consoles are unaffected. */
 
 .ps {
-  --ps-ink: #182443;
+  /* Brand theme from the website builder (--np-*, set on <html> by components/builder/theme.tsx) with built-in defaults. */
+  --ps-ink: var(--np-secondary, #182443);
   --ps-ink-2: #4a5775;
   --ps-line: #efe8e1;
   --ps-field: #d9cfc5;
   --ps-bg: #fdfcfb;
   --ps-cream: #faf6f2;
-  --ps-brand: #e56b25;          /* decorative brand orange (existing theme) */
-  --ps-brand-strong: #c2541a;   /* buttons/links: passes 4.5:1 with white text */
-  --ps-brand-dark: #9a3f12;
-  --ps-brand-tint: #fcefe7;
+  --ps-brand: var(--np-accent, #e56b25);          /* decorative brand orange (existing theme) */
+  --ps-brand-strong: var(--np-primary, #c2541a);   /* buttons/links: passes 4.5:1 with white text */
+  --ps-brand-dark: var(--np-primary-dark, #9a3f12);
+  --ps-brand-tint: var(--np-primary-tint, #fcefe7);
   --ps-blue: #1d4ea8;
   --ps-blue-tint: #e7f0ff;
   --ps-green: #1f6b45;
@@ -18,7 +19,7 @@
   min-height: 100vh;
   background: var(--ps-bg);
   color: var(--ps-ink);
-  font-family: 'Anuphan', 'Inter', system-ui, sans-serif;
+  font-family: var(--np-font, 'Anuphan', 'Inter', system-ui, sans-serif);
   line-height: 1.55;
   display: flex;
   flex-direction: column;
@@ -62,7 +63,7 @@
 /* Buttons */
 .ps-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px;
-  border-radius: 14px; border: 1.5px solid transparent; font: inherit; font-size: 15px; font-weight: 600;
+  border-radius: var(--np-radius, 14px); border: 1.5px solid transparent; font: inherit; font-size: 15px; font-weight: 600;
   text-decoration: none; cursor: pointer; white-space: nowrap; transition: background 0.15s ease, border-color 0.15s ease;
 }
 .ps .ps-btn-primary { background: var(--ps-brand-strong); color: #ffffff; }
@@ -82,7 +83,7 @@
 .ps-section-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .ps-kicker { display: block; font-size: 13px; font-weight: 700; color: var(--ps-brand-dark); }
 .ps-section-head h2, .ps-h2 { margin: 6px 0 0; font-size: clamp(26px, 3.4vw, 34px); line-height: 1.25; }
-.ps-card { background: #ffffff; border: 1px solid var(--ps-line); border-radius: 18px; }
+.ps-card { background: #ffffff; border: 1px solid var(--ps-line); border-radius: calc(var(--np-radius, 14px) + 4px); }
 .ps-eyebrow { align-self: flex-start; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--ps-brand-tint); color: var(--ps-brand-dark); font-size: 13px; font-weight: 700; }
 .ps-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; }
 

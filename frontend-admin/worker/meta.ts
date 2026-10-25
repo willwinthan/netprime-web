@@ -138,13 +138,92 @@ export function sitemapXml(entries: SitemapEntry[]): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
 }
 
-export function sitemapEntries(origin: string, articles: Array<Pick<PublicArticle, "slug" | "published_at">>): SitemapEntry[] {
+export function sitemapEntries(origin: string, articles: Array<Pick<PublicArticle, "slug" | "published_at">>,
+  courses: Array<Pick<PublicCourse, "id"> & { slug?: string | null }> = []): SitemapEntry[] {
   return [
     ...Object.keys(STATIC_PAGES).map(path => ({ loc: origin + path })),
-    ...articles.map(a => ({ loc: `${origin}/blog/${encodeURIComponent(a.slug)}`, lastmod: toIso(a.published_at).slice(0, 10) }))
+    ...articles.map(a => ({ loc: `${origin}/blog/${encodeURIComponent(a.slug)}`, lastmod: toIso(a.published_at).slice(0, 10) })),
+    ...courses.map(c => ({ loc: `${origin}/courses/${encodeURIComponent(c.slug || c.id)}` }))
   ];
+}
+
+/** Public course sales page (/courses/:id) as returned by /api/public/marketing/courses/:id. */
+export interface PublicCourse {
+  id: string;
+  title: string;
+  slug?: string | null;
+  subtitle?: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  price?: number;
+}
+
+export function coursePageMeta(course: PublicCourse, origin: string): PageMeta {
+  return {
+    title: `${course.title} | ${SITE_NAME}`,
+    description: summarize(course.subtitle?.trim() || course.description?.trim() || "") || DEFAULT_DESCRIPTION,
+    url: `${origin}/courses/${encodeURIComponent(course.slug || course.id)}`,
+    image: absoluteUrl(course.cover_image_url, origin) || origin + DEFAULT_IMAGE_PATH,
+    type: "website"
+  };
+}
+
+export function missingCourseMeta(pathname: string, origin: string): PageMeta {
+  return { title: `ไม่พบคอร์ส | ${SITE_NAME}`, description: DEFAULT_DESCRIPTION, url: origin + pathname, image: origin + DEFAULT_IMAGE_PATH, type: "website", noindex: true };
 }
 
 export function robotsTxt(origin: string): string {
   return `User-agent: *\nAllow: /\nDisallow: /dashboard\n\nSitemap: ${origin}/sitemap.xml\n`;
+}
+
+// ---------- Website builder pages (/p/:slug) and the web app manifest ----------
+
+/** Published custom page as returned by /api/public/website/pages/:slug. */
+export interface PublicCustomPage {
+  slug: string;
+  title: string;
+  seo_title: string | null;
+  seo_description: string | null;
+  og_image_url: string | null;
+  published_at?: string | null;
+  updated_at?: string | null;
+}
+
+export function customPageMeta(page: PublicCustomPage, origin: string): PageMeta {
+  return {
+    title: `${page.seo_title?.trim() || page.title} | ${SITE_NAME}`,
+    description: page.seo_description?.trim() || DEFAULT_DESCRIPTION,
+    url: `${origin}/p/${encodeURIComponent(page.slug)}`,
+    image: absoluteUrl(page.og_image_url, origin) || origin + DEFAULT_IMAGE_PATH,
+    type: "website"
+  };
+}
+
+export function missingCustomPageMeta(pathname: string, origin: string): PageMeta {
+  return { title: `ไม่พบหน้า | ${SITE_NAME}`, description: DEFAULT_DESCRIPTION, url: origin + pathname, image: origin + DEFAULT_IMAGE_PATH, type: "website", noindex: true };
+}
+
+export function customPageSitemapEntries(origin: string, pages: Array<Pick<PublicCustomPage, "slug" | "updated_at" | "published_at">>): SitemapEntry[] {
+  return pages.map(p => {
+    const stamp = p.updated_at || p.published_at;
+    return { loc: `${origin}/p/${encodeURIComponent(p.slug)}`, ...(stamp ? { lastmod: toIso(stamp).slice(0, 10) } : {}) };
+  });
+}
+
+/** Web app manifest with the school name from the website builder theme (falls back to the static file's values). */
+export function manifestJson(theme: { school_name?: string | null; primary_color?: string | null } | null): string {
+  const name = theme?.school_name?.trim() || SITE_NAME;
+  const color = theme?.primary_color && /^#[0-9a-f]{6}$/i.test(theme.primary_color) ? theme.primary_color : "#c2541a";
+  return JSON.stringify({
+    name: name === SITE_NAME ? "NetPrime LMS" : name,
+    short_name: name.length > 12 ? name.slice(0, 12) : name,
+    description: DEFAULT_DESCRIPTION,
+    lang: "th", dir: "ltr", id: "/", start_url: "/?source=pwa", scope: "/", display: "standalone",
+    background_color: "#fdfcfb", theme_color: color, categories: ["education"],
+    icons: [
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+    ]
+  });
 }

@@ -4,6 +4,9 @@ import { discountedPrice, findUsableVoucher } from "../utils/vouchers";
 import { ordersRouter } from "./orders";
 import { certificatesRouter, newCertificateCode } from "./certificates";
 import { verifiedTokenUserId } from "./courses";
+import { finalExamBlock } from "./assessments";
+import { trackEvent } from "../utils/events";
+import { completionState, lessonGateFor, lessonLockResponse, trackCompletionChange } from "../utils/courseContent";
 
 export const studentRouter = new Hono<Env>();
 
@@ -255,6 +258,8 @@ studentRouter.get("/student/lessons/:lessonId/handout", rbac(["student", "admin"
         return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: ต้องลงทะเบียนเรียนก่อนจึงจะดาวน์โหลดเอกสารได้" }, 403);
       }
     }
+    const locked = await lessonLockResponse(c, lessonId);
+    if (locked) return locked;
 
     const r2Key = lesson.handout_r2_key;
     const object = await c.env.ASSETS.get(r2Key);
@@ -422,9 +427,9 @@ studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admi
   try {
     // 1. Fetch course_id from lesson
     const lesson = await db
-      .prepare("SELECT course_id FROM lessons WHERE id = ?")
+      .prepare("SELECT course_id, type FROM lessons WHERE id = ?")
       .bind(lessonId)
-      .first<{ course_id: string }>();
+      .first<{ course_id: string; type: string }>();
 
     if (!lesson) {
       return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
@@ -432,9 +437,13 @@ studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admi
     const enrolled = await db.prepare("SELECT id FROM enrollments WHERE user_id = ? AND course_id = ? AND status IN ('active', 'completed') AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)")
       .bind(user.id, lesson.course_id).first();
     if (!enrolled) return c.json({ error: "ต้องมีการลงทะเบียนเรียนที่ใช้งานอยู่" }, 403);
+    // Locked (drip / sequential) lessons cannot be completed; SCORM lessons complete from the package only.
+    const locked = await lessonLockResponse(c, lessonId);
+    if (locked) return locked;
+    const before = await completionState(db, user.id, lessonId, lesson.course_id);
 
     // 2. Upsert progress record
-    const compVal = completed ? 1 : 0;
+    const compVal = completed && lesson.type !== "scorm" ? 1 : 0;
     await db
       .prepare(`
         INSERT INTO lesson_progress (user_id, lesson_id, course_id, resume_seconds, completed)
@@ -454,6 +463,7 @@ studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admi
       status = CASE WHEN ? = 100 THEN 'completed' ELSE 'active' END
       WHERE user_id = ? AND course_id = ?`)
       .bind(progress.progressPercent, progress.progressPercent, progress.progressPercent, user.id, lesson.course_id).run();
+    await trackCompletionChange(db, user.id, lesson.course_id, lessonId, before, compVal === 1, progress.progressPercent);
 
     return c.json({
       message: "บันทึกความคืบหน้าการดูบทเรียนเรียบร้อยแล้ว",
@@ -517,6 +527,9 @@ studentRouter.post("/student/courses/:courseId/certificate", rbac(["student", "a
     if (progress.totalLessons === 0 || progress.completedLessons !== progress.totalLessons || progress.quizPercent < 80) {
       return c.json({ error: "ต้องเรียนจบทุกบทเรียนและได้คะแนนแบบทดสอบอย่างน้อย 80% ก่อนรับใบประกาศนียบัตร", progress }, 400);
     }
+    // Courses flagged requires_final_exam also need a passed final exam (handlers/assessments.ts).
+    const finalExamError = await finalExamBlock(db, user.id, courseId);
+    if (finalExamError) return c.json({ error: finalExamError, progress }, 400);
 
     // Return the active certificate; a revoked one can only be replaced by staff.
     const existing = await db
@@ -545,6 +558,7 @@ studentRouter.post("/student/courses/:courseId/certificate", rbac(["student", "a
       `)
       .bind(certificateId, enrollment.id, user.id, courseId, certificateCode)
       .run();
+    await trackEvent(db, user.id, "certificate_issued", { courseId, data: { certificate_id: certificateId, code: certificateCode } });
 
     // Trigger Mock Email Notification
     try {
@@ -561,7 +575,8 @@ studentRouter.post("/student/courses/:courseId/certificate", rbac(["student", "a
         courseTitle,
         certificateCode,
         c.env.RESEND_API_KEY,
-        appUrl(c.env, "")
+        appUrl(c.env, ""),
+        c.env.DB
       );
     } catch (emailErr) {
       console.error("Failed to send certificate notification email:", emailErr);
@@ -635,7 +650,10 @@ studentRouter.get("/student/video", async (c) => {
     if (!userId) {
       return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ: โทเค็นเล่นวิดีโอไม่ถูกต้อง หมดอายุ หรือเซสชันถูกยกเลิก" }, 401);
     }
-    const access = await c.env.DB.prepare(`SELECT l.id FROM lessons l
+    const access = await c.env.DB.prepare(`SELECT l.id, l.course_id,
+        (EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'admin') OR
+         (co.instructor_id = u.id AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'instructor'))) AS staff
+      FROM lessons l
       JOIN courses co ON co.id = l.course_id
       JOIN users u ON u.id = ?
       LEFT JOIN enrollments e ON e.course_id = l.course_id AND e.user_id = u.id
@@ -644,8 +662,15 @@ studentRouter.get("/student/video", async (c) => {
         (co.instructor_id = u.id AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'instructor')) OR
         ((u.staff_role IS NULL OR EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'student'))
           AND e.status IN ('active', 'completed') AND (e.expires_at IS NULL OR e.expires_at > CURRENT_TIMESTAMP)))
-      LIMIT 1`).bind(userId, key).first();
-    if (!access) return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: สิทธิ์ดูวิดีโอไม่ได้เปิดใช้งาน" }, 403);
+      LIMIT 20`).bind(userId, key).all<{ id: string; course_id: string; staff: number }>();
+    if (!access.results.length) return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: สิทธิ์ดูวิดีโอไม่ได้เปิดใช้งาน" }, 403);
+    // Same drip / date / sequential locks as the other lesson endpoints: learners need at least one unlocked lesson using this video.
+    let open = access.results.some(l => l.staff);
+    for (const l of access.results) {
+      if (open) break;
+      open = !(await lessonGateFor(c.env.DB, { id: userId }, l.id, l.course_id)).locked;
+    }
+    if (!open) return c.json({ error: "บทเรียนนี้ยังล็อกอยู่ จึงยังดูวิดีโอไม่ได้", locked: true }, 403);
 
     const head = await c.env.ASSETS.head(key);
     const size = head?.size;

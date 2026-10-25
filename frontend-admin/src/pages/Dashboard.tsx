@@ -5,8 +5,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import Confetti from "react-confetti";
 import { CourseOrderModal } from "../components/learner/CourseOrder";
 import { MyPayments } from "../components/learner/MyPayments";
-import { CertificateDocument, PrintPortal } from "../components/learner/PrintView";
+import { CommunityPage } from "./CommunityPage";
+import { Inbox, useInboxUnread } from "../components/communication/Inbox";
+import { CourseAnnouncements, MyAnnouncements } from "../components/communication/CourseAnnouncements";
+import { CertificatePrint } from "../components/learner/PrintView";
 import { runInSandbox } from "../components/learner/codeSandbox";
+import { LessonContentView } from "../components/course/LessonContentView";
+import { CurriculumOutline } from "../components/course/CurriculumOutline";
+import { MyLiveClasses } from "../components/settings/MyLiveClasses";
+import { CourseReviewForm } from "../components/marketing/CourseReviewForm";
+import { CategoryFilter } from "../components/course/CategoryFilter";
+import type { CourseSection, LessonType } from "../components/course/types";
+import { InteractiveVideo } from "../components/assessment/InteractiveVideo";
+import { LearnerAssessments } from "../components/assessment/LearnerAssessments";
+import { LessonAiSummary } from "../components/ai/LessonAiSummary";
 import { 
   BookOpen, 
   PlayCircle, 
@@ -53,6 +65,7 @@ interface Course {
   progress_percent: number | null;
   completed_at: string | null;
   expires_at?: string | null;
+  category_id?: string | null;
 }
 
 interface Lesson {
@@ -61,7 +74,16 @@ interface Lesson {
   video_stream_uid: string;
   video_provider?: string;
   sort_order: number;
-  handout_r2_key?: string | null;
+  handout_r2_key?: string | null; // course staff only
+  has_handout?: boolean;
+  handout_name?: string | null;
+  /** Course structure (components/course): type, chapter, completion and drip/sequential lock. */
+  type?: LessonType;
+  section_id?: string | null;
+  completed?: number;
+  locked?: boolean;
+  lock_reason?: "date" | "drip" | "sequence" | null;
+  unlock_at?: string | null;
 }
 
 interface VideoResponse {
@@ -82,10 +104,17 @@ export const Dashboard: React.FC = () => {
   // Selected course details
   const [courseDetail, setCourseDetail] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [sections, setSections] = useState<CourseSection[]>([]);
+  const [catalogCategory, setCatalogCategory] = useState("");
   const [enrollment, setEnrollment] = useState<{ progress_percent: number; completed_at: string | null; expires_at: string | null; status?: string } | null>(null);
 
   // Student view configuration (my courses vs explorer catalog)
-  const [studentSubView, setStudentSubView] = useState<"my-courses" | "catalog" | "internships" | "freelance" | "payments">("my-courses");
+  const [studentSubView, setStudentSubView] = useState<"my-courses" | "catalog" | "internships" | "freelance" | "payments" | "community" | "inbox">(() => {
+    // Notification links: /dashboard?community=<post id> and /dashboard?inbox=<thread id>
+    const q = new URLSearchParams(window.location.search);
+    return q.get("community") ? "community" : q.get("inbox") ? "inbox" : "my-courses";
+  });
+  const inboxUnread = useInboxUnread();
   const [corporateInfo, setCorporateInfo] = useState<any | null>(null);
   const [studentStats, setStudentStats] = useState<any | null>(null);
   const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false);
@@ -95,7 +124,7 @@ export const Dashboard: React.FC = () => {
   const [videoData, setVideoData] = useState<VideoResponse | null>(null);
   
   // Tab selector state
-  const [activeDetailTab, setActiveDetailTab] = useState<"video" | "resources" | "quizzes" | "notes" | "qa" | "ai" | "sandbox">("video");
+  const [activeDetailTab, setActiveDetailTab] = useState<"video" | "resources" | "quizzes" | "notes" | "qa" | "ai" | "sandbox" | "assessments">("video");
 
   // Q&A state
   const [qaThreads, setQaThreads] = useState<any[]>([]);
@@ -531,9 +560,11 @@ export const Dashboard: React.FC = () => {
       const data = await api.get<{
         course: Course;
         lessons: Lesson[];
+        sections?: CourseSection[];
         enrollment: { progress_percent: number; completed_at: string | null; expires_at: string | null; status?: string } | null;
         sponsored?: boolean;
       }>(`/courses/${courseId}`);
+      setSections(data.sections || []);
 
       setCourseDetail(data.course);
       // The API reports sponsored=true for everyone; only organization learners get sponsored seats.
@@ -544,7 +575,7 @@ export const Dashboard: React.FC = () => {
       // Auto-select the first lesson if enrolled and no active lesson is selected
       if (data.enrollment && data.lessons.length > 0 && !activeLessonId) {
         const firstLesson = data.lessons[0];
-        await loadVideo(firstLesson.id);
+        await loadVideo(firstLesson.id, firstLesson);
       } else if (!data.enrollment) {
         // Clear active video states if user is not enrolled
         setActiveLessonId(null);
@@ -790,11 +821,13 @@ export const Dashboard: React.FC = () => {
   }, [activeLessonId, activeDetailTab]);
 
   // Retrieve Secure Stream URL and Resume playback duration
-  const loadVideo = async (lessonId: string) => {
+  const loadVideo = async (lessonId: string, meta?: Pick<Lesson, "type" | "locked">) => {
     try {
       setVideoLoading(true);
       setActiveLessonId(lessonId);
       setVideoData(null);
+      // Text / PDF / embed / SCORM and locked lessons render in LessonContentView instead
+      if (meta?.locked || (meta?.type && meta.type !== "video")) return;
 
       // Fetch progress
       let resumeTime = 0;
@@ -885,6 +918,20 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Reload lesson completion and locks (sequential unlocks) after a lesson is completed
+  const refreshCurriculum = async (courseId: string) => {
+    try {
+      const data = await api.get<{ lessons: Lesson[]; sections?: CourseSection[]; enrollment: typeof enrollment }>(`/courses/${courseId}`);
+      setLessons(data.lessons);
+      setSections(data.sections || []);
+      if (data.enrollment) setEnrollment(data.enrollment);
+      setCourses(prev => prev.map(course => course.id === courseId && data.enrollment ? { ...course, progress_percent: data.enrollment.progress_percent } : course));
+    } catch (error) {
+      console.error("Failed to refresh curriculum:", error);
+    }
+  };
+  const activeLessonMeta = lessons.find(l => l.id === activeLessonId) || null;
+
   // Triggered when lesson is completed
   const handleVideoCompleted = async () => {
     if (!activeLessonId || !selectedCourseId) return;
@@ -897,6 +944,7 @@ export const Dashboard: React.FC = () => {
         completed_at: result.progress_percent === 100 ? new Date().toISOString() : prev.completed_at } : null);
       setCourses(prev => prev.map(course => course.id === selectedCourseId
         ? { ...course, progress_percent: result.progress_percent } : course));
+      refreshCurriculum(selectedCourseId);
     } catch (error) {
       console.error("Failed to complete lesson:", error);
     }
@@ -2152,7 +2200,29 @@ export const Dashboard: React.FC = () => {
                   <Receipt size={16} />
                   การชำระเงินของฉัน
                 </button>
+                {(["community", "inbox"] as const).map(view => (
+                  <button
+                    key={view}
+                    onClick={() => {
+                      setStudentSubView(view);
+                      setSelectedCourseId(null);
+                      setCourseDetail(null);
+                      setActiveLessonId(null);
+                      setVideoData(null);
+                    }}
+                    className={studentSubView === view ? "tech-button-primary" : "tech-button-outline"}
+                    style={{ borderRadius: "1rem", padding: "8px 16px", display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer" }}
+                  >
+                    {view === "community" ? <Users size={16} /> : <Send size={16} />}
+                    {view === "community" ? "ชุมชน" : "ข้อความ"}
+                    {view === "inbox" && inboxUnread > 0 && (
+                      <span aria-label={`${inboxUnread} ข้อความใหม่`} style={{ background: "var(--danger)", color: "#fff", borderRadius: "99px", fontSize: "11px", padding: "0 7px" }}>{inboxUnread}</span>
+                    )}
+                  </button>
+                ))}
               </div>
+              {studentSubView === "my-courses" && <MyAnnouncements onOpenCourse={id => selectCourse(id)} />}
+              {studentSubView === "my-courses" && <MyLiveClasses />}
 
               {/* Render dynamic profile header (B2B Partner status vs B2C personal metrics) */}
               {api.user?.corporate_id || (api.user as any)?.partner_id ? (
@@ -2364,6 +2434,9 @@ export const Dashboard: React.FC = () => {
                     {courseDetail.description}
                   </p>
 
+                  <CourseAnnouncements courseId={courseDetail.id} compact />
+                  {enrollment && <CourseReviewForm courseId={courseDetail.id} tone="console" />}
+
                   {/* Tab selection menu */}
                   <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px", marginBottom: "24px" }}>
                     <button 
@@ -2421,7 +2494,18 @@ export const Dashboard: React.FC = () => {
                     >
                       พื้นที่ทดลองโค้ด
                     </button>
+                    <button
+                      onClick={() => setActiveDetailTab("assessments")}
+                      style={{ padding: "6px 12px", borderRadius: "0.5rem", background: activeDetailTab === "assessments" ? "var(--primary-glow)" : "none", border: "none", color: activeDetailTab === "assessments" ? "var(--color-brand-primary)" : "var(--text-secondary)", fontWeight: "600", cursor: "pointer" }}
+                    >
+                      ข้อสอบและงาน
+                    </button>
                   </div>
+
+                  {/* Tab Contents: Exams and assignments (components/assessment) */}
+                  {activeDetailTab === "assessments" && (enrollment ? <LearnerAssessments courseId={courseDetail.id} lessonId={activeLessonId} /> : (
+                    <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)" }}>ลงทะเบียนเรียนคอร์สนี้ก่อนจึงจะทำข้อสอบและส่งงานได้</div>
+                  ))}
 
                   {/* Tab Contents: Video Player */}
                   {activeDetailTab === "video" && (
@@ -2444,12 +2528,15 @@ export const Dashboard: React.FC = () => {
                                 ซื้อ/ต่ออายุสิทธิ์เข้าถึง
                               </button>
                             </div>
+                          ) : activeLessonMeta && (activeLessonMeta.locked || (activeLessonMeta.type && activeLessonMeta.type !== "video")) ? (
+                            <LessonContentView lesson={activeLessonMeta} onCompleted={() => selectedCourseId && refreshCurriculum(selectedCourseId)} />
                           ) : videoLoading ? (
                             <div style={{ width: "100%", aspectRatio: "16/9", background: "#05070f", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "12px" }}>
                               <div className="spinner" style={{ border: "2px solid rgba(255,255,255,0.05)", borderTop: "2px solid var(--primary)", borderRadius: "50%", width: "32px", height: "32px", animation: "spin 1s linear infinite" }} />
                               <span style={{ fontSize: "12px", color: "#94a3b8" }}>กำลังสร้างโทเค็นสำหรับสตรีมวิดีโอแบบปลอดภัย...</span>
                             </div>
                           ) : videoData ? (
+                            <InteractiveVideo lessonId={videoData.lessonId}>
                             <VideoPlayer
                               lessonId={videoData.lessonId}
                               lessonTitle={videoData.title}
@@ -2462,6 +2549,7 @@ export const Dashboard: React.FC = () => {
                               initialTime={playbackResumeSeconds}
                               onTimeUpdate={handleTimeProgressUpdate}
                             />
+                            </InteractiveVideo>
                           ) : (
                             <div style={{ width: "100%", aspectRatio: "16/9", background: "#05070f", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "32px" }}>
                               <PlayCircle size={48} color="#94a3b8" />
@@ -2493,6 +2581,8 @@ export const Dashboard: React.FC = () => {
                     </div>
                   )}
 
+                  {activeDetailTab === "video" && enrollment && activeLessonId && <LessonAiSummary lessonId={activeLessonId} />}
+
                   {/* Tab Contents: Resources */}
                   {activeDetailTab === "resources" && (
                     <div style={{ paddingTop: "12px" }}>
@@ -2502,8 +2592,8 @@ export const Dashboard: React.FC = () => {
                       </div>
                       
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                        {lessons.filter(l => l.handout_r2_key).map((lesson) => {
-                          const filename = lesson.handout_r2_key?.split("/").pop() || "Handout.pdf";
+                        {lessons.filter(l => l.handout_r2_key || l.has_handout).map((lesson) => {
+                          const filename = lesson.handout_name || lesson.handout_r2_key?.split("/").pop() || "Handout.pdf";
                           return (
                             <div key={lesson.id} className="glass-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "rgba(255,255,255,0.3)", borderRadius: "1rem" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -2523,7 +2613,7 @@ export const Dashboard: React.FC = () => {
                             </div>
                           );
                         })}
-                        {lessons.filter(l => l.handout_r2_key).length === 0 && (
+                        {lessons.filter(l => l.handout_r2_key || l.has_handout).length === 0 && (
                           <div style={{ gridColumn: "span 2", padding: "24px", textAlign: "center", color: "var(--text-muted)", background: "rgba(0,0,0,0.01)", border: "1px dashed var(--border-subtle)", borderRadius: "1rem" }}>
                             ยังไม่มีเอกสารประกอบการเรียนแนบในบทเรียนของคอร์สนี้
                           </div>
@@ -3156,9 +3246,15 @@ export const Dashboard: React.FC = () => {
                     if (studentSubView === "payments") {
                       return <MyPayments />;
                     }
+                    if (studentSubView === "community") {
+                      return <CommunityPage initialPostId={new URLSearchParams(window.location.search).get("community") ?? undefined} />;
+                    }
+                    if (studentSubView === "inbox") {
+                      return <Inbox initialThreadId={new URLSearchParams(window.location.search).get("inbox") ?? undefined} />;
+                    }
                     const displayedCourses = studentSubView === "my-courses"
                       ? courses.filter(c => c.progress_percent !== null)
-                      : courses;
+                      : courses.filter(c => !catalogCategory || c.category_id === catalogCategory);
 
                     if (studentSubView === "my-courses" && displayedCourses.length === 0) {
                       return (
@@ -3207,6 +3303,7 @@ export const Dashboard: React.FC = () => {
                             </>
                           )}
                         </div>
+                        {studentSubView === "catalog" && <CategoryFilter value={catalogCategory} onChange={setCatalogCategory} />}
                         
                         <div className="courses-grid">
                           {displayedCourses.map((course) => {
@@ -3395,62 +3492,9 @@ export const Dashboard: React.FC = () => {
                   </div>
                 )}
 
-                {/* Lessons List Checklist */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {lessons.map((lesson, index) => {
-                    const isActive = activeLessonId === lesson.id;
-                    
-                    // Simple logic to mock complete state:
-                    // If course progress is 100%, all lessons are complete.
-                    // If progress is 66%, first 2 of 3 are complete.
-                    // If progress is 33%, first 1 of 3 is complete.
-                    const totalLessons = lessons.length;
-                    const completedThreshold = enrollment ? Math.round((enrollment.progress_percent / 100) * totalLessons) : 0;
-                    const isCompleted = index < completedThreshold;
-
-                    return (
-                      <button
-                        key={lesson.id}
-                        onClick={() => enrollment && loadVideo(lesson.id)}
-                        disabled={!enrollment}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          width: "100%",
-                          background: isActive ? "var(--primary-glow)" : "rgba(255, 255, 255, 0.3)",
-                          border: `1px solid ${isActive ? "var(--primary)" : "var(--border-subtle)"}`,
-                          borderRadius: "1rem",
-                          padding: "12px 16px",
-                          textAlign: "left",
-                          cursor: enrollment ? "pointer" : "not-allowed",
-                          transition: "var(--transition-fast)"
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                          <span style={{ fontSize: "12px", fontWeight: "700", color: isActive ? "var(--primary)" : "var(--text-muted)" }}>
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
-                          <div>
-                            <p style={{ fontSize: "13px", fontWeight: "600", color: isActive ? "var(--color-brand-primary)" : "var(--text-primary)" }}>{lesson.title}</p>
-                            <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px", display: "flex", alignItems: "center", gap: "4px" }}>
-                              <Clock size={10} />
-                              วิดีโอสตรีม • CF Stream
-                            </p>
-                          </div>
-                        </div>
-
-                        {isCompleted ? (
-                          <CheckCircle size={16} color="var(--accent)" style={{ flexShrink: 0 }} />
-                        ) : enrollment ? (
-                          <PlayCircle size={16} color={isActive ? "var(--primary)" : "var(--text-secondary)"} style={{ flexShrink: 0 }} />
-                        ) : (
-                          <Lock size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                {/* Lessons grouped by chapter with completion and locks (components/course/CurriculumOutline.tsx) */}
+                <CurriculumOutline lessons={lessons} sections={sections} activeLessonId={activeLessonId} enrolled={!!enrollment}
+                  onSelect={lesson => loadVideo(lesson.id, lesson as Lesson)} />
               </div>
             )}
 
@@ -3702,8 +3746,9 @@ export const Dashboard: React.FC = () => {
       </dialog>
       {/* Cert Dialog Ends */}
       {printingCertificate && certificate && (
-        <PrintPortal orientation="landscape" onDone={() => setPrintingCertificate(false)}>
-          <CertificateDocument
+        <CertificatePrint
+            courseId={selectedCourseId}
+            onDone={() => setPrintingCertificate(false)}
             cert={{
               certificate_code: certificate.certificate_code,
               issued_at: certificate.issued_at,
@@ -3713,7 +3758,6 @@ export const Dashboard: React.FC = () => {
             }}
             verifyUrl={`${window.location.origin}/verify-certificates?code=${certificate.certificate_code}`}
           />
-        </PrintPortal>
       )}
       {showConfetti && <Confetti recycle={false} numberOfPieces={500} onConfettiComplete={() => setShowConfetti(false)} style={{ zIndex: 9999 }} />}
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { BadgeCheck, KeyRound, Mail, Save, UserRound } from "lucide-react";
 import { useApi, User } from "../hooks/useApi";
 import { ErrorBox, Field, grid2 } from "../components/site-admin/ui";
+import { MyProfileFields } from "../components/people/MyProfileFields";
 
 const noticeStyle: React.CSSProperties = { padding: "10px 14px", borderRadius: 10, background: "var(--accent-glow)", color: "var(--accent)", marginBottom: 14, fontSize: 14 };
 const sectionTitle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 17, margin: "0 0 14px" };
@@ -51,6 +52,8 @@ export const ProfilePage: React.FC<{ children?: React.ReactNode }> = ({ children
       <div style={{ display: "grid", gap: 20, maxWidth: 760 }}>
         {user && <NameSection user={user} />}
         {user && <EmailSection user={user} />}
+        {/* Custom profile fields defined by admins (hidden when none are shown to users). */}
+        {user && <MyProfileFields />}
         <PasswordSection />
         {/* PDPA panel slot: export data / request account deletion (provided by the coordinator). */}
         {children}

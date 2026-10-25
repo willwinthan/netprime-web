@@ -7,6 +7,8 @@ import { generateStreamSignedUrl } from "../utils/stream";
 import { createNotification } from "./notifications";
 import { appUrl, escapeHtml, sendEmail } from "../utils/email";
 import { clientIp, rateLimited, tooManyRequests } from "../utils/ratelimit";
+import { trackEvent } from "../utils/events";
+import { checkCoursePrerequisites, courseLessonGates, isCourseStaff, LESSON_ORDER, lessonLockResponse, OPEN_GATE, prerequisiteMessage } from "../utils/courseContent";
 
 export const coursesRouter = new Hono<Env>();
 
@@ -67,23 +69,29 @@ coursesRouter.get("/courses", async (c) => {
     }
   }
 
+  // Optional catalog filter: ?category=<category id or slug>
+  const category = (c.req.query("category") || "").trim().slice(0, 80);
+  const categoryFilter = category ? " AND (cat.id = ? OR cat.slug = ?)" : "";
+  const categoryBinds = category ? [category, category] : [];
+  const columns = `c.id, c.title, c.description, c.price, c.cover_image_url, c.access_duration_days,
+                 c.subtitle, c.level, c.language, c.duration_hours, c.category_id, cat.name AS category_name, cat.slug AS category_slug,
+                 (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id) AS lesson_count`;
+
   try {
     const query = userId
       ? db.prepare(`
-          SELECT c.id, c.title, c.description, c.price, c.cover_image_url, c.access_duration_days,
-                 e.progress_percent, e.completed_at, e.expires_at,
-                 (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id) AS lesson_count
+          SELECT ${columns}, e.progress_percent, e.completed_at, e.expires_at
           FROM courses c
+          LEFT JOIN course_categories cat ON cat.id = c.category_id
           LEFT JOIN enrollments e ON c.id = e.course_id AND e.user_id = ?
-          WHERE c.status = 'published' OR e.id IS NOT NULL
-        `).bind(userId)
+          WHERE (c.status = 'published' OR e.id IS NOT NULL)${categoryFilter}
+        `).bind(userId, ...categoryBinds)
       : db.prepare(`
-          SELECT c.id, c.title, c.description, c.price, c.cover_image_url, c.access_duration_days,
-                 NULL as progress_percent, NULL as completed_at, NULL as expires_at,
-                 (SELECT COUNT(*) FROM lessons l WHERE l.course_id = c.id) AS lesson_count
+          SELECT ${columns}, NULL as progress_percent, NULL as completed_at, NULL as expires_at
           FROM courses c
-          WHERE c.status = 'published'
-        `);
+          LEFT JOIN course_categories cat ON cat.id = c.category_id
+          WHERE c.status = 'published'${categoryFilter}
+        `).bind(...categoryBinds);
 
     const courses = await query.all();
     return c.json(courses.results);
@@ -118,10 +126,32 @@ coursesRouter.get("/courses/:id", rbac(), async (c) => {
       return c.json({ error: "ไม่พบคอร์สนี้" }, 404);
     }
 
-    const lessons = await db
-      .prepare("SELECT id, title, video_stream_uid, video_provider, sort_order, handout_r2_key FROM lessons WHERE course_id = ? ORDER BY sort_order ASC")
-      .bind(courseId)
-      .all();
+    // Lessons in learner order (outside chapters first, then by chapter) with chapter and type
+    const [lessons, sections, prerequisites] = await db.batch([
+      db.prepare(`SELECT l.id, l.title, l.video_stream_uid, l.video_provider, l.sort_order, l.handout_r2_key,
+          l.type, l.section_id, l.available_after_days, l.available_on
+        FROM lessons l LEFT JOIN course_sections s ON s.id = l.section_id
+        WHERE l.course_id = ? ORDER BY ${LESSON_ORDER}`).bind(courseId),
+      db.prepare("SELECT id, title, sort_order FROM course_sections WHERE course_id = ? ORDER BY sort_order, id").bind(courseId),
+      db.prepare(`SELECT co.id, co.title, EXISTS (SELECT 1 FROM enrollments e WHERE e.user_id = ? AND e.course_id = co.id
+          AND (e.status = 'completed' OR e.completed_at IS NOT NULL)) AS completed
+        FROM course_prerequisites p JOIN courses co ON co.id = p.prerequisite_id WHERE p.course_id = ? ORDER BY co.title`).bind(user.id, courseId)
+    ]);
+
+    // Per-lesson completion and lock state for the learner (staff see everything unlocked)
+    const staff = await isCourseStaff(c, course.instructor_id);
+    const { gates, completed } = enrollment ? await courseLessonGates(db, user.id, courseId) : { gates: new Map(), completed: new Set<string>() };
+    const lessonList = (lessons.results as { id: string; video_stream_uid: string | null; handout_r2_key: string | null }[]).map(l => {
+      const gate = staff ? OPEN_GATE : gates.get(l.id) ?? OPEN_GATE;
+      const row = { ...l, completed: completed.has(l.id) ? 1 : 0, locked: gate.locked, lock_reason: gate.reason, unlock_at: gate.unlock_at,
+        has_video: !!l.video_stream_uid, has_handout: !!l.handout_r2_key, handout_name: l.handout_r2_key ? l.handout_r2_key.split("/").pop() || null : null };
+      // Storage keys / Stream ids are for course staff only; learners play and download through the lesson endpoints
+      // (which check enrollment and locks), never by key.
+      if (staff) return row;
+      const { video_stream_uid: _video, handout_r2_key: _handout, ...publicRow } = row;
+      return publicRow;
+    });
+    await trackEvent(db, user.id, "course_view", { courseId });
 
     let sponsored = true;
     if (user.role === "student" && user.partner_id) {
@@ -134,7 +164,9 @@ coursesRouter.get("/courses/:id", rbac(), async (c) => {
 
     return c.json({
       course,
-      lessons: lessons.results,
+      lessons: lessonList,
+      sections: sections.results,
+      prerequisites: prerequisites.results,
       enrollment: enrollment || null,
       sponsored
     });
@@ -160,6 +192,12 @@ coursesRouter.post("/courses/:id/enroll", rbac(["student", "admin"]), async (c) 
     }
     if (course.status !== "published") {
       return c.json({ error: "คอร์สนี้ยังไม่เปิดให้ลงทะเบียนเรียน" }, 403);
+    }
+
+    // Prerequisite courses must be completed first (admins may enroll regardless)
+    if (!user.roles.includes("admin")) {
+      const prerequisites = await checkCoursePrerequisites(db, user.id, courseId);
+      if (!prerequisites.ok) return c.json({ error: prerequisiteMessage(prerequisites.missing), missing_prerequisites: prerequisites.missing }, 403);
     }
 
     // Enforce B2B organization course constraints
@@ -191,6 +229,7 @@ coursesRouter.post("/courses/:id/enroll", rbac(["student", "admin"]), async (c) 
     if (!inserted.meta.changes) {
       return c.json({ error: "คุณลงทะเบียนเรียนคอร์สนี้แล้ว" }, 400);
     }
+    await trackEvent(db, user.id, "enroll", { courseId, data: { sponsored: !!sponsored } });
 
     return c.json({
       message: "ลงทะเบียนเรียนสำเร็จ",
@@ -244,6 +283,11 @@ async function handleLessonVideo(c: Context<Env>) {
         return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: ระยะเวลาเข้าถึงคอร์สนี้ของคุณหมดอายุแล้ว" }, 403);
       }
     }
+
+    // Drip / sequential locks (staff are never locked)
+    const locked = await lessonLockResponse(c, lessonId!);
+    if (locked) return locked;
+    if (lesson) await trackEvent(db, user.id, "lesson_view", { courseId: lesson.course_id, lessonId, data: { type: "video" } });
 
     // Admins and assigned Instructors bypass course enrollment verification check
     let hasAccess = !!lesson;

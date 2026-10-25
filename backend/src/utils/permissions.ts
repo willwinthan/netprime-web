@@ -38,7 +38,16 @@ export const PERMISSIONS = [
   { key: "payments.manage", group: "การเงินและคอร์ส", label: "ยืนยันการชำระเงิน ออกใบเสร็จ และยกเลิก/คืนเงินคำสั่งซื้อคอร์ส" },
   { key: "courses.approve", group: "การเงินและคอร์ส", label: "ตรวจ อนุมัติ และเผยแพร่คอร์สของผู้สอน" },
   { key: "certificates.manage", group: "การเงินและคอร์ส", label: "เพิกถอนและออกใบประกาศใหม่" },
-  { key: "privacy.manage", group: "ผู้ใช้และสิทธิ์", label: "ดำเนินการคำขอข้อมูลส่วนบุคคล (PDPA)" }
+  { key: "privacy.manage", group: "ผู้ใช้และสิทธิ์", label: "ดำเนินการคำขอข้อมูลส่วนบุคคล (PDPA)" },
+  { key: "users.import", group: "ผู้ใช้และสิทธิ์", label: "นำเข้าผู้ใช้จากไฟล์ CSV และจัดการแท็ก/ฟิลด์โปรไฟล์" },
+  { key: "reports.view", group: "รายงาน", label: "ดูแดชบอร์ด รายงาน และบันทึกกิจกรรมของผู้เรียน" },
+  { key: "communication.manage", group: "การสื่อสาร", label: "ส่งประกาศ/อีเมลถึงกลุ่มผู้ใช้ และแก้แม่แบบอีเมล" },
+  { key: "community.moderate", group: "การสื่อสาร", label: "ดูแลกระดานสนทนา (ปักหมุด ซ่อน ลบโพสต์)" },
+  { key: "commerce.manage", group: "การเงินและคอร์ส", label: "จัดการชุดคอร์ส สมาชิกรายช่วง ผ่อนชำระ และใบเสนอราคา" },
+  { key: "marketing.manage", group: "การตลาด", label: "จัดการ affiliate ฟอร์มเก็บ lead popup และ tracking" },
+  { key: "website.design", group: "เว็บไซต์", label: "สร้างหน้าเว็บ แก้ธีม และแม่แบบใบประกาศ" },
+  // Admin-only: SSO providers, API keys and webhooks can impersonate or export every account.
+  { key: "integrations.manage", group: "ระบบ", label: "ตั้งค่าโรงเรียน webhook API key SSO และการเชื่อมต่อภายนอก", adminOnly: true }
 ] as const;
 
 export type Permission = typeof PERMISSIONS[number]["key"];
@@ -48,8 +57,9 @@ const ADMIN_ONLY = new Set<string>(PERMISSIONS.filter(p => "adminOnly" in p && p
 /** Defaults written by the migration and schema seed; admins edit them in the console afterwards. */
 export const DEFAULT_GRANTS: Record<Exclude<Role, "admin">, Permission[]> = {
   coordinator: ["site.dashboard", "site.sessions", "site.inquiries", "site.promotions", "site.settings", "site.media", "site.audit",
-    "articles.write", "articles.publish", "articles.manage", "articles.import_notion", "payments.manage"],
-  instructor: ["articles.write", "articles.import_notion", "site.media"],
+    "articles.write", "articles.publish", "articles.manage", "articles.import_notion", "payments.manage",
+    "reports.view", "communication.manage", "community.moderate", "marketing.manage", "website.design"],
+  instructor: ["articles.write", "articles.import_notion", "site.media", "community.moderate"],
   partner: [],
   student: []
 };

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const suite = process.argv[2] || 'smoke';
-if (!['smoke', 'readiness', 'auth', 'outsource', 'business', 'learning', 'site', 'access', 'accounts', 'teaching', 'payments', 'coordination', 'partners'].includes(suite)) throw new Error('Unknown test suite');
+if (!['smoke', 'readiness', 'auth', 'outsource', 'business', 'learning', 'site', 'access', 'accounts', 'teaching', 'payments', 'coordination', 'partners', 'content', 'assessments', 'analytics', 'people', 'communication', 'commerce', 'marketing', 'website', 'platform', 'aiassist'].includes(suite)) throw new Error('Unknown test suite');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'netprime-test-'));
 const configPath = join(temp, 'wrangler.json');

@@ -19,7 +19,7 @@ const STREAM_OWNER_TTL_SECONDS = 30 * 24 * 60 * 60;
  * without Stream (local/dev) any UID not used by another instructor's lesson is accepted.
  * Returns an error message or null.
  */
-async function checkLessonAssets(c: Context<Env>, handoutKey: string | null | undefined, videoUid: string | null | undefined, provider: string): Promise<string | null> {
+export async function checkLessonAssets(c: Context<Env>, handoutKey: string | null | undefined, videoUid: string | null | undefined, provider: string): Promise<string | null> {
   const user = c.get("user");
   if (user.roles.includes("admin")) return null;
   const db = c.env.DB;
