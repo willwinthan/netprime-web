@@ -2,6 +2,7 @@ import { Hono, Context } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { canApproveCourses, notifyCourseApprovers } from "./courses";
 import { createStreamDirectUpload } from "../utils/stream";
+import { courseHasRecords, dangerAudit, requireDeleteConfirmation } from "../utils/dangerConfirm";
 
 export const instructorRouter = new Hono<Env>();
 
@@ -366,9 +367,13 @@ instructorRouter.delete("/instructor/courses/:id", rbac(["instructor", "admin"])
 
   try {
     const course = await db
-      .prepare("SELECT instructor_id FROM courses WHERE id = ?")
+      .prepare(`SELECT instructor_id, title, status,
+          (SELECT COUNT(*) FROM enrollments WHERE course_id = courses.id) AS learners,
+          (SELECT COUNT(*) FROM course_orders WHERE course_id = courses.id) + (SELECT COUNT(*) FROM payments WHERE course_id = courses.id) AS orders,
+          (SELECT COUNT(*) FROM certificates WHERE course_id = courses.id) AS certificates
+        FROM courses WHERE id = ?`)
       .bind(courseId)
-      .first<{ instructor_id: string }>();
+      .first<{ instructor_id: string; title: string; status: string; learners: number; orders: number; certificates: number }>();
 
     if (!course) {
       return c.json({ error: "ไม่พบคอร์ส" }, 404);
@@ -378,9 +383,26 @@ instructorRouter.delete("/instructor/courses/:id", rbac(["instructor", "admin"])
       return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: คุณไม่ได้เป็นเจ้าของคอร์สนี้" }, 403);
     }
 
-    await db.prepare("DELETE FROM courses WHERE id = ?").bind(courseId).run();
+    // Learner, money and certificate records are kept: such a course is archived, never hard-deleted.
+    const keep = courseHasRecords(course);
+    if (keep && course.status === "archived") {
+      return c.json({ error: "คอร์สนี้อยู่ในคลังแล้ว และมีข้อมูลผู้เรียนหรือการเงิน จึงลบถาวรไม่ได้" }, 409);
+    }
 
-    return c.json({ message: "ลบคอร์สและเนื้อหาหลักสูตรเรียบร้อยแล้ว" });
+    // Always needs an emailed code from the course owner or an admin (utils/dangerConfirm.ts).
+    const denied = await requireDeleteConfirmation(c, "course.delete", courseId!);
+    if (denied) return denied;
+
+    if (keep) {
+      await db.prepare("UPDATE courses SET status = 'archived' WHERE id = ?").bind(courseId).run();
+      await dangerAudit(c, "archive", "course", courseId!, { title: course.title, reason: "delete_with_records", learners: course.learners, orders: course.orders });
+      return c.json({ message: "คอร์สนี้มีข้อมูลผู้เรียนหรือการเงิน จึงเก็บเข้าคลังแทนการลบถาวร", archived: true, status: "archived" });
+    }
+
+    await db.prepare("DELETE FROM courses WHERE id = ?").bind(courseId).run();
+    await dangerAudit(c, "delete", "course", courseId!, { title: course.title });
+
+    return c.json({ message: "ลบคอร์สและเนื้อหาหลักสูตรเรียบร้อยแล้ว", archived: false });
   } catch (error) {
     console.error("Delete course failed:", error);
     return c.json({ error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์ขณะลบคอร์ส" }, 500);
@@ -487,7 +509,12 @@ instructorRouter.delete("/instructor/lessons/:id", rbac(["instructor", "admin"])
       return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: คุณไม่ได้เป็นผู้สอนคอร์สของบทเรียนนี้" }, 403);
     }
 
+    // A course with learners needs an emailed code (owner or admin) before a lesson disappears.
+    const denied = await requireDeleteConfirmation(c, "lesson.delete", lessonId!);
+    if (denied) return denied;
+
     await db.prepare("DELETE FROM lessons WHERE id = ?").bind(lessonId).run();
+    await dangerAudit(c, "delete", "lesson", lessonId!);
 
     return c.json({ message: "ลบบทเรียนเรียบร้อยแล้ว" });
   } catch (error) {

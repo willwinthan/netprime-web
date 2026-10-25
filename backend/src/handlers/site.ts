@@ -4,6 +4,7 @@ import { allowedOrigins } from "../utils/origins";
 import { appUrl, escapeHtml, sendEmail } from "../utils/email";
 import { issueAccountToken } from "../utils/tokens";
 import { currentPermissions, permit, Permission } from "../utils/permissions";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { createNotification } from "./notifications";
 import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
 
@@ -627,6 +628,9 @@ adminSiteRouter.delete("/sessions/:id", async (c) => {
   if ((counts?.n ?? 0) > 0) {
     return c.json({ error: "รอบนี้มีผู้ลงทะเบียนอยู่ ให้เปลี่ยนสถานะเป็น 'ยกเลิก' แทนการลบ เพื่อเก็บประวัติไว้" }, 409);
   }
+  // Published or with registration history → an emailed code from the creator or an admin.
+  const denied = await requireDeleteConfirmation(c, "session.delete", id);
+  if (denied) return denied;
   const result = await c.env.DB.prepare("DELETE FROM training_sessions WHERE id = ?").bind(id).run();
   if (!result.meta.changes) return c.json({ error: "ไม่พบรอบอบรม" }, 404);
   await audit(c, "delete", "session", id);
@@ -1220,6 +1224,9 @@ adminSiteRouter.delete("/articles/:id", async (c) => {
   if (!canManage && !(existing.author_id === user.id && existing.status !== "published")) {
     return c.json({ error: "ลบได้เฉพาะบทความของตัวเองที่ยังไม่เผยแพร่" }, 403);
   }
+  // A published article needs an emailed code from its author or an admin.
+  const denied = await requireDeleteConfirmation(c, "article.delete", id);
+  if (denied) return denied;
   await c.env.DB.prepare("DELETE FROM articles WHERE id = ?").bind(id).run();
   await audit(c, "delete", "article", id);
   return c.json({ message: "ลบบทความแล้ว" });

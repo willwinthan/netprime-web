@@ -1,42 +1,54 @@
 import React, { Suspense, lazy, useState } from "react";
-import { Award, ExternalLink, FileText, Menu, Palette } from "lucide-react";
+import { ExternalLink, FileText, Home, Megaphone, Menu, Palette, Settings2 } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { Empty } from "../components/site-admin/ui";
+import { PromotionsPanel, SettingsPanel } from "../components/site-admin/ContentPanels";
+import { HomeContentPanel } from "../components/site-admin/HomeContentPanel";
 import { InstallAppButton } from "../pwa/pwa";
 
-// Panels are split so the BlockNote editor and certificate designer load only when opened.
+// Builder panels are split so the BlockNote editor loads only when opened.
 const PagesPanel = lazy(() => import("../components/builder/PagesPanel"));
 const NavPanel = lazy(() => import("../components/builder/NavPanel"));
 const ThemePanel = lazy(() => import("../components/builder/ThemePanel"));
-const CertificatesPanel = lazy(() => import("../components/builder/CertificatesPanel"));
 
-type Tab = "pages" | "nav" | "theme" | "certificates";
+type Tab = "home" | "pages" | "nav" | "theme" | "promotions" | "settings";
 
-/** Permission that opens this console page (coordinators by default; editable per role). */
+const TAB_PERMISSION: Record<Tab, string> = {
+  home: "site.settings", pages: "website.design", nav: "website.design", theme: "website.design",
+  promotions: "site.promotions", settings: "site.settings"
+};
+
+/** Permission that designs pages, menus and theme (coordinators by default; editable per role). */
 export const WEBSITE_BUILDER_PERMISSION = "website.design";
+/** Any of these opens the "เว็บไซต์" console page. */
+export const WEBSITE_PERMISSIONS = Array.from(new Set(Object.values(TAB_PERMISSION)));
 
 /**
- * "ออกแบบเว็บไซต์" (website.design): custom pages with blocks, header/footer menus,
- * theme & branding, and certificate templates. Content is applied on the public site at /p/:slug.
+ * "เว็บไซต์": everything visitors see on the public site in one place — homepage and policy pages,
+ * custom pages built from blocks, header/footer menus, theme & branding, promotions, and the
+ * announcement bar/contact details. Training rounds and registrants are managed on their own page.
  */
 export const WebsiteBuilderPage: React.FC = () => {
   const api = useApi();
-  const [tab, setTab] = useState<Tab>("pages");
-  if (!can(api.user, WEBSITE_BUILDER_PERMISSION)) {
-    return <div className="glass-card" style={{ padding: 40, textAlign: "center" }}><h2>บัญชีของคุณไม่มีสิทธิ์ออกแบบเว็บไซต์</h2></div>;
+  const allowed = (Object.keys(TAB_PERMISSION) as Tab[]).filter(t => can(api.user, TAB_PERMISSION[t]));
+  const [tab, setTab] = useState<Tab>(allowed[0] ?? "home");
+  if (allowed.length === 0) {
+    return <div className="glass-card" style={{ padding: 40, textAlign: "center" }}><h2>บัญชีของคุณไม่มีสิทธิ์จัดการเว็บไซต์</h2></div>;
   }
-  const tabs: Array<[Tab, string, React.ReactNode]> = [
-    ["pages", "หน้าเว็บ", <FileText size={16} />],
+  const tabs = ([
+    ["home", "หน้าแรกและหน้านโยบาย", <Home size={16} />],
+    ["pages", "หน้าเว็บอื่น ๆ", <FileText size={16} />],
     ["nav", "เมนู", <Menu size={16} />],
     ["theme", "ธีมและแบรนด์", <Palette size={16} />],
-    ["certificates", "แม่แบบใบประกาศ", <Award size={16} />]
-  ];
+    ["promotions", "โปรโมชั่น", <Megaphone size={16} />],
+    ["settings", "ประกาศและข้อมูลติดต่อ", <Settings2 size={16} />]
+  ] as Array<[Tab, string, React.ReactNode]>).filter(([key]) => allowed.includes(key));
   return (
     <div>
       <div className="header-row">
         <div>
-          <h1 className="header-title">ออกแบบเว็บไซต์</h1>
-          <p className="header-desc">สร้างหน้าเว็บด้วยบล็อก แก้เมนู สี โลโก้ ฟอนต์ และออกแบบใบประกาศนียบัตร โดยไม่ต้องเขียนโค้ด</p>
+          <h1 className="header-title">เว็บไซต์</h1>
+          <p className="header-desc">แก้ทุกอย่างที่ผู้เข้าชมเห็นบนหน้าเว็บ: เนื้อหาหน้าแรก หน้าเว็บที่สร้างเอง เมนู สีและโลโก้ โปรโมชั่น แถบประกาศ และข้อมูลติดต่อ</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <InstallAppButton />
@@ -52,10 +64,12 @@ export const WebsiteBuilderPage: React.FC = () => {
         ))}
       </nav>
       <Suspense fallback={<Empty text="กำลังโหลด…" />}>
+        {tab === "home" && <HomeContentPanel />}
         {tab === "pages" && <PagesPanel />}
         {tab === "nav" && <NavPanel />}
         {tab === "theme" && <ThemePanel />}
-        {tab === "certificates" && <CertificatesPanel />}
+        {tab === "promotions" && <PromotionsPanel />}
+        {tab === "settings" && <SettingsPanel />}
       </Suspense>
     </div>
   );

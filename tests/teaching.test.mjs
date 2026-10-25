@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 let admin, coord, instructor, other, student;
 const base = process.env.NETPRIME_TEST_BASE;
@@ -219,4 +219,112 @@ test('instructors see only their own students and assign organizations only to c
   const sponsored = await expectStatus('/api/instructor/courses/course_cf_workers/assign', 200, { method: 'POST', token: instructor.token,
     body: { target_type: 'partner', target_id: 'partner_acme' } });
   assert.ok(sponsored.enrolledCount >= 1);
+});
+
+// ==========================================
+// Dangerous deletes: emailed confirmation codes (utils/dangerConfirm.ts)
+// ==========================================
+
+const addLesson = async (token, courseId, title, order = 1) => (await expectStatus('/api/instructor/lessons', 201, { method: 'POST', token,
+  body: { course_id: courseId, title, video_stream_uid: `danger-${order}-${Date.now()}`, sort_order: order } })).lesson.id;
+const del = (path, token, code, headers) => request(path, { method: 'DELETE', token, headers, body: code === undefined ? undefined : { confirmation_code: code } });
+
+test('course delete always needs an emailed code bound to the course and the requester', async () => {
+  const title = `Danger draft ${Date.now()}`;
+  const courseId = await newCourse(instructor.token, title);
+  const keepLesson = await addLesson(instructor.token, courseId, 'บทที่เก็บไว้', 1);
+  // Low-risk: a lesson of a course without learners is deleted with the simple confirm.
+  const extra = await addLesson(instructor.token, courseId, 'บทที่ลบ', 2);
+  assert.equal((await del(`/api/instructor/lessons/${extra}`, instructor.token)).status, 200);
+  assert.ok(keepLesson);
+
+  const missing = await del(`/api/instructor/courses/${courseId}`, instructor.token);
+  assert.equal(missing.status, 428);
+  assert.equal(missing.data.code, 'confirmation_required');
+
+  const preview = await expectStatus(`/api/security/delete-preview?action=course.delete&target_id=${courseId}`, 200, { token: instructor.token });
+  assert.equal(preview.required, true);
+  assert.equal(preview.confirm_text, title);
+  assert.equal(preview.default_approver, 'owner');
+  assert.deepEqual(preview.approvers.map(a => a.kind), ['owner', 'admin']);
+  assert.ok(!JSON.stringify(preview).includes('instructor@netprime.com'), 'only a masked hint');
+
+  // Someone who may not delete the course cannot trigger emails either.
+  await expectStatus(`/api/security/delete-preview?action=course.delete&target_id=${courseId}`, 403, { token: other.token });
+  await expectStatus('/api/security/delete-codes', 403, { method: 'POST', token: other.token, body: { action: 'course.delete', target_id: courseId } });
+  await expectStatus(`/api/security/delete-preview?action=course.delete&target_id=${courseId}`, 403, { token: coord.token });
+  await expectStatus('/api/security/delete-codes', 400, { method: 'POST', token: instructor.token, body: { action: 'nope', target_id: courseId } });
+
+  // Owner path: code to the owner's own (masked) address; 5 wrong tries invalidate it.
+  const first = await dangerCode(instructor.token, 'course.delete', courseId);
+  assert.equal(first.approver, 'owner');
+  assert.equal(first.sent_to, 'in***@netprime.com');
+  assert.match(first.debug_code, /^\d{6}$/);
+  const wrong = first.debug_code === '000000' ? '111111' : '000000';
+  for (let i = 1; i <= 5; i++) {
+    const res = await del(`/api/instructor/courses/${courseId}`, instructor.token, wrong);
+    assert.equal(res.status, 403);
+    assert.equal(res.data.code, 'confirmation_invalid');
+    assert.equal(res.data.attempts_left, 5 - i);
+  }
+  assert.equal((await del(`/api/instructor/courses/${courseId}`, instructor.token, first.debug_code)).status, 403, 'invalidated after 5 wrong tries');
+
+  // A new request replaces the previous code.
+  const older = await dangerCode(instructor.token, 'course.delete', courseId);
+  const code = (await dangerCode(instructor.token, 'course.delete', courseId)).debug_code;
+  if (older.debug_code !== code) assert.equal((await del(`/api/instructor/courses/${courseId}`, instructor.token, older.debug_code)).status, 403);
+
+  // Bound to the target and the requesting user.
+  const otherCourse = await newCourse(instructor.token, `Danger other ${Date.now()}`);
+  assert.equal((await del(`/api/instructor/courses/${otherCourse}`, instructor.token, code)).status, 403, 'not valid for another course');
+  assert.equal((await del(`/api/instructor/courses/${courseId}`, admin.token, code)).status, 403, 'not valid for another user');
+  // Expired after 10 minutes (local test clock), also via the header.
+  const later = new Date(Date.now() + 11 * 60 * 1000).toISOString();
+  assert.equal((await del(`/api/instructor/courses/${courseId}`, instructor.token, undefined, { 'X-Test-Now': later, 'X-Confirmation-Code': code })).status, 403);
+
+  const done = await del(`/api/instructor/courses/${courseId}`, instructor.token, code);
+  assert.equal(done.status, 200, JSON.stringify(done.data));
+  assert.equal(done.data.archived, false);
+  await expectStatus(`/api/courses/${courseId}`, 404, { token: instructor.token });
+
+  const log = await expectStatus('/api/admin/site/audit', 200, { token: admin.token });
+  const actions = JSON.stringify(log);
+  for (const event of ['danger.code_requested', 'danger.code_failed', 'danger.code_verified']) assert.ok(actions.includes(event), event);
+});
+
+test('a course with learners is archived (not hard-deleted); its lessons need a code; codes work once', async () => {
+  const courseId = await newCourse(instructor.token, `Danger live ${Date.now()}`);
+  const lessonA = await addLesson(instructor.token, courseId, 'บทที่ 1', 1);
+  const lessonB = await addLesson(instructor.token, courseId, 'บทที่ 2', 2);
+  await expectStatus(`/api/instructor/courses/${courseId}/submit`, 200, { method: 'POST', token: instructor.token });
+  await expectStatus(`/api/admin/courses/${courseId}/approve`, 200, { method: 'POST', token: admin.token });
+  await expectStatus(`/api/courses/${courseId}/enroll`, 201, { method: 'POST', token: student.token });
+
+  assert.equal((await del(`/api/instructor/lessons/${lessonB}`, instructor.token)).status, 428, 'learners → code required');
+  const preview = await expectStatus(`/api/security/delete-preview?action=lesson.delete&target_id=${lessonB}`, 200, { token: instructor.token });
+  assert.equal(preview.required, true);
+  assert.ok(preview.counts.some(c => c.value === 1), 'shows the enrolled learner');
+  const lessonCode = (await dangerCode(instructor.token, 'lesson.delete', lessonB)).debug_code;
+  assert.equal((await del(`/api/instructor/lessons/${lessonB}`, instructor.token, lessonCode)).status, 200);
+  assert.ok(lessonA);
+  const section = (await expectStatus(`/api/instructor/courses/${courseId}/sections`, 201, { method: 'POST', token: instructor.token, body: { title: 'บทใหม่' } })).section;
+  assert.equal((await del(`/api/instructor/sections/${section.id}`, instructor.token)).status, 428);
+  const sectionCode = (await dangerCode(instructor.token, 'section.delete', section.id)).debug_code;
+  assert.equal((await del(`/api/instructor/sections/${section.id}`, instructor.token, sectionCode)).status, 200);
+
+  // Admin deleting someone else's course: code goes to the admin's own address.
+  const issued = await dangerCode(admin.token, 'course.delete', courseId);
+  assert.equal(issued.approver, 'admin');
+  assert.equal(issued.sent_to, 'ad***@netprime.com');
+  const archived = await del(`/api/instructor/courses/${courseId}`, admin.token, issued.debug_code);
+  assert.equal(archived.status, 200, JSON.stringify(archived.data));
+  assert.equal(archived.data.archived, true);
+  await expectStatus(`/api/courses/${courseId}`, 200, { token: student.token });
+  assert.equal((await del(`/api/instructor/courses/${courseId}`, admin.token, issued.debug_code)).status, 409, 'archived course with learners cannot be removed');
+
+  // Re-published: the used code does not work a second time.
+  await expectStatus(`/api/admin/courses/${courseId}/approve`, 200, { method: 'POST', token: admin.token });
+  const reused = await del(`/api/instructor/courses/${courseId}`, admin.token, issued.debug_code);
+  assert.equal(reused.status, 403);
+  assert.equal(reused.data.code, 'confirmation_invalid');
 });

@@ -1,6 +1,7 @@
 import { Context, Hono } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { permit } from "../utils/permissions";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 
 /**
  * Website builder (website.design): custom pages (/p/:slug), header/footer menus, theme & branding,
@@ -774,6 +775,9 @@ websiteRouter.post("/website/pages/reorder", async (c) => {
 });
 
 websiteRouter.delete("/website/pages/:id", async (c) => {
+  // A published page needs an emailed code from its creator or an admin.
+  const denied = await requireDeleteConfirmation(c, "page.delete", c.req.param("id"));
+  if (denied) return denied;
   const result = await c.env.DB.prepare("DELETE FROM site_pages WHERE id = ?").bind(c.req.param("id")).run();
   if (!result.meta.changes) return c.json({ error: "ไม่พบหน้านี้" }, 404);
   await audit(c, "delete", "page", c.req.param("id"));

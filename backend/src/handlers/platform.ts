@@ -5,6 +5,7 @@ import { parseRoles, permissionsForRoles, permit, primaryRole, rolesColumn, stor
 import { onEvent, trackEvent, TrackOptions } from "../utils/events";
 import { allowedOrigins } from "../utils/origins";
 import { appUrl } from "../utils/email";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { clientIp, rateLimited, tooManyRequests } from "../utils/ratelimit";
 import { decryptSecret, encryptSecret, randomToken, sha256Hex } from "../utils/secretbox";
 import {
@@ -332,6 +333,9 @@ platformRouter.post("/admin/platform/webhooks/:id/rotate-secret", async (c) => {
 
 platformRouter.delete("/admin/platform/webhooks/:id", async (c) => {
   const id = c.req.param("id");
+  // Security-critical: always an emailed code (admins only).
+  const denied = await requireDeleteConfirmation(c, "webhook.delete", id);
+  if (denied) return denied;
   await c.env.DB.prepare("DELETE FROM webhook_deliveries WHERE endpoint_id = ?").bind(id).run();
   const res = await c.env.DB.prepare("DELETE FROM webhook_endpoints WHERE id = ?").bind(id).run();
   if (!res.meta.changes) return c.json({ error: "ไม่พบปลายทาง webhook" }, 404);
@@ -421,6 +425,8 @@ platformRouter.post("/admin/platform/api-keys", async (c) => {
 
 platformRouter.delete("/admin/platform/api-keys/:id", async (c) => {
   const id = c.req.param("id");
+  const denied = await requireDeleteConfirmation(c, "api_key.revoke", id);
+  if (denied) return denied;
   const res = await c.env.DB.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(nowIso(), id).run();
   if (!res.meta.changes) return c.json({ error: "ไม่พบ API key หรือถูกเพิกถอนไปแล้ว" }, 404);
   await audit(c, "revoke", "api_key", id);
@@ -560,6 +566,8 @@ platformRouter.patch("/admin/platform/sso/:id", async (c) => {
 
 platformRouter.delete("/admin/platform/sso/:id", async (c) => {
   const id = c.req.param("id");
+  const denied = await requireDeleteConfirmation(c, "sso.delete", id);
+  if (denied) return denied;
   await c.env.DB.prepare("DELETE FROM sso_identities WHERE provider_id = ?").bind(id).run();
   const res = await c.env.DB.prepare("DELETE FROM sso_providers WHERE id = ?").bind(id).run();
   if (!res.meta.changes) return c.json({ error: "ไม่พบการตั้งค่า SSO" }, 404);

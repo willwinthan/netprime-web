@@ -8,6 +8,7 @@ import { IconBtn, ImageInput, Notice, TextInput } from "./adminKit";
 import { PageBlocks } from "./PageBlocks";
 import { refreshSiteNav } from "./siteChrome";
 import "../../site/site.css";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 type Api = ReturnType<typeof useApi>;
 
@@ -26,6 +27,7 @@ const STATUS = {
 /** Tab "หน้าเว็บ": list of custom pages; opens the page editor. */
 export const PagesPanel: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [pages, setPages] = useState<AdminPage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -46,9 +48,10 @@ export const PagesPanel: React.FC = () => {
   };
 
   const remove = async (page: AdminPage) => {
-    if (!window.confirm(`ลบหน้า "${page.title}" ถาวร? ลิงก์ /p/${page.slug} จะใช้ไม่ได้อีก`)) return;
     try {
-      await api.request(`/website/pages/${page.id}`, { method: "DELETE" });
+      const done = await confirmDelete({ action: "page.delete", targetId: page.id, path: `/website/pages/${page.id}`,
+        confirmMessage: `ลบหน้า "${page.title}" ถาวร? ลิงก์ /p/${page.slug} จะใช้ไม่ได้อีก` });
+      if (!done) return;
       refreshSiteNav();
       load();
     } catch (err: any) { setError(err.message); }
@@ -58,6 +61,7 @@ export const PagesPanel: React.FC = () => {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {dangerDialog}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 14 }}>สร้างหน้าใหม่ เช่น หน้าอบรมองค์กร หน้าโปรโมชั่น หรือหน้าแนะนำหลักสูตร หน้าที่เผยแพร่แล้วอยู่ที่ /p/ชื่อหน้า</p>
         <button type="button" className="tech-button-primary" onClick={() => setCreating(true)}><FilePlus2 size={16} />สร้างหน้าใหม่</button>

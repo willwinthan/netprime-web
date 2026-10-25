@@ -6,14 +6,15 @@ import { Dashboard } from "./pages/Dashboard";
 import { HRConsole } from "./pages/HRConsole";
 import { InstructorConsole } from "./pages/InstructorConsole";
 import { AdminConsole } from "./pages/AdminConsole";
-import { SiteManager, SITE_PERMISSIONS } from "./pages/SiteManager";
+import { SiteManager, TRAINING_PERMISSIONS } from "./pages/SiteManager";
 import { UsersPage } from "./pages/UsersPage";
 import { ArticlesStudio } from "./pages/ArticlesStudio";
 import { ProfilePage, VerifyEmailBanner } from "./pages/ProfilePage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { CoursesAdminPage } from "./pages/CoursesAdminPage";
 import { PrivacyPanel, PrivacyRequestsPage } from "./pages/PrivacyPages";
-import { CertificatesAdminPanel } from "./components/site-admin/CertificatesAdminPanel";
+import { CertificatesPage, CERTIFICATE_PERMISSIONS } from "./pages/CertificatesPage";
+import { AuditPage } from "./pages/AuditPage";
 import { VerifyCertificate } from "./pages/VerifyCertificate";
 import { AnalyticsDashboard } from "./pages/AnalyticsDashboard";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -24,7 +25,7 @@ import { AffiliateDashboard } from "./components/marketing/AffiliateDashboard";
 import { sendSignupAttribution } from "./components/marketing/runtime";
 import { AssessmentsConsole } from "./components/assessment/CourseAssessments";
 import { CourseCategoriesPanel } from "./components/course/CourseCategoriesPanel";
-import { WebsiteBuilderPage } from "./pages/WebsiteBuilderPage";
+import { WebsiteBuilderPage, WEBSITE_PERMISSIONS } from "./pages/WebsiteBuilderPage";
 import { CommunicationPage } from "./pages/CommunicationPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SsoCompletePage } from "./components/settings/SsoLogin";
@@ -62,13 +63,15 @@ import {
   Sparkles,
   Gift,
   ShoppingBag,
-  ChevronDown
+  ChevronDown,
+  CalendarDays,
+  History
 } from "lucide-react";
 
 type ConsoleTab = "dashboard" | "hr" | "instructor" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
-  | "settings" | "ai" | "affiliate" | "commerce";
+  | "settings" | "ai" | "affiliate" | "commerce" | "audit";
 
 type NavItem = { tab: ConsoleTab; label: string; icon: React.ReactNode; show: (user: User | null) => boolean };
 type NavGroup = { id: string; title: string; hint: string; items: NavItem[] };
@@ -102,10 +105,10 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "reports", label: "รายงาน", icon: <FileBarChart size={16} />, show: perm("reports.view") }
   ] },
   { id: "training", title: "งานอบรมและหลักสูตร", hint: "รอบอบรม ผู้สมัคร การอนุมัติคอร์ส หมวดหมู่ และใบประกาศ", items: [
-    { tab: "site", label: "รอบอบรมและผู้สมัคร", icon: <Globe size={16} />, show: perm(...SITE_PERMISSIONS) },
+    { tab: "site", label: "รอบอบรมและผู้สมัคร", icon: <CalendarDays size={16} />, show: perm(...TRAINING_PERMISSIONS) },
     { tab: "courses", label: "ตรวจและเผยแพร่คอร์ส", icon: <GraduationCap size={16} />, show: perm("courses.approve") },
     { tab: "categories", label: "หมวดหมู่คอร์ส", icon: <FolderTree size={16} />, show: perm("courses.approve", "website.design") },
-    { tab: "certificates", label: "ใบประกาศ", icon: <Award size={16} />, show: perm("certificates.manage") }
+    { tab: "certificates", label: "ใบประกาศ", icon: <Award size={16} />, show: perm(...CERTIFICATE_PERMISSIONS) }
   ] },
   { id: "sales", title: "การขาย", hint: "คำสั่งซื้อ สลิปโอน ใบเสร็จ/ใบกำกับภาษี ชุดคอร์ส สมาชิก และใบเสนอราคา", items: [
     { tab: "orders", label: "คำสั่งซื้อและการชำระเงิน", icon: <Receipt size={16} />, show: perm("payments.manage") },
@@ -115,12 +118,13 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "communication", label: "การสื่อสารและชุมชน", icon: <MessagesSquare size={16} />, show: perm("communication.manage") },
     { tab: "marketing", label: "การตลาด", icon: <Megaphone size={16} />, show: perm("marketing.manage") },
     { tab: "articles", label: "บทความ", icon: <Newspaper size={16} />, show: perm("articles.publish", "articles.manage") },
-    { tab: "website", label: "ออกแบบเว็บไซต์", icon: <LayoutTemplate size={16} />, show: perm("website.design") }
+    { tab: "website", label: "เว็บไซต์", icon: <Globe size={16} />, show: perm(...WEBSITE_PERMISSIONS) }
   ] },
   { id: "system", title: "ระบบและผู้ดูแล", hint: "ผู้ใช้ สิทธิ์ องค์กรลูกค้า PDPA AI และการเชื่อมต่อระบบ", items: [
     { tab: "admin", label: "ภาพรวมผู้ดูแลระบบ", icon: <ShieldCheck size={16} />, show: role("admin") },
     { tab: "users", label: "ผู้ใช้และสิทธิ์", icon: <UserCog size={16} />, show: perm("users.view", "roles.manage") },
     { tab: "privacy", label: "คำขอข้อมูลส่วนบุคคล", icon: <ShieldAlert size={16} />, show: perm("privacy.manage") },
+    { tab: "audit", label: "ประวัติการแก้ไข", icon: <History size={16} />, show: perm("site.audit") },
     { tab: "ai", label: "ผู้ช่วย AI", icon: <Sparkles size={16} />, show: perm("integrations.manage") },
     { tab: "settings", label: "ตั้งค่าระบบ", icon: <Settings size={16} />, show: perm("integrations.manage") }
   ] }
@@ -443,7 +447,7 @@ export const App: React.FC = () => {
                 )}
                 {currentTab === "orders" && <motion.div key="orders" {...pageTransition}><OrdersPage /></motion.div>}
                 {currentTab === "courses" && <motion.div key="courses" {...pageTransition}><CoursesAdminPage /></motion.div>}
-                {currentTab === "certificates" && <motion.div key="certificates" {...pageTransition}><CertificatesAdminPanel /></motion.div>}
+                {currentTab === "certificates" && <motion.div key="certificates" {...pageTransition}><CertificatesPage /></motion.div>}
                 {currentTab === "privacy" && <motion.div key="privacy" {...pageTransition}><PrivacyRequestsPage /></motion.div>}
                 {currentTab === "analytics" && <motion.div key="analytics" {...pageTransition}><AnalyticsDashboard onNavigate={t => openTab(t.tab)} onContact={() => setCurrentTab("communication")} /></motion.div>}
                 {currentTab === "reports" && <motion.div key="reports" {...pageTransition}><ReportsPage onNavigate={t => openTab(t.tab)} /></motion.div>}
@@ -454,6 +458,7 @@ export const App: React.FC = () => {
                 {currentTab === "website" && <motion.div key="website" {...pageTransition}><WebsiteBuilderPage /></motion.div>}
                 {currentTab === "ai" && <motion.div key="ai" {...pageTransition}><AiSettingsPanel /></motion.div>}
                 {currentTab === "settings" && <motion.div key="settings" {...pageTransition}><SettingsPage onOpenBranding={() => setCurrentTab("website")} /></motion.div>}
+                {currentTab === "audit" && <motion.div key="audit" {...pageTransition}><AuditPage /></motion.div>}
                 {currentTab === "commerce" && <motion.div key="commerce" {...pageTransition}><CommercePage /></motion.div>}
                 {currentTab === "affiliate" && <motion.div key="affiliate" {...pageTransition}><AffiliateDashboard /></motion.div>}
                 {currentTab === "profile" && (

@@ -9,6 +9,7 @@ import {
   Chip, SeatBar, Modal, Field, ErrorBox, Empty, grid2, tableStyle, thStyle, tdStyle,
   formatDateRange, formatBaht, formatDateTime, downloadWithAuth
 } from "./ui";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 type Api = ReturnType<typeof useApi>;
 
@@ -65,6 +66,7 @@ function toCalendarEvent(s: AdminSession): CalendarEvent {
 
 export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?: () => void }> = ({ openSessionId, onOpened }) => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [scope, setScope] = useState<"upcoming" | "past" | "all">("upcoming");
   const [sessions, setSessions] = useState<AdminSession[]>([]);
   const [courses, setCourses] = useState<Array<{ id: string; title: string }>>([]);
@@ -111,9 +113,11 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
   };
 
   const remove = async (session: AdminSession) => {
-    if (!confirm(`ลบรอบ "${session.title}" (${formatDateRange(session.start_date, session.end_date)}) ?`)) return;
     try {
-      await api.request(`/admin/site/sessions/${session.id}`, { method: "DELETE" });
+      // Published or with registration history → emailed code from the creator or an admin.
+      const done = await confirmDelete({ action: "session.delete", targetId: session.id, path: `/admin/site/sessions/${session.id}`,
+        confirmMessage: `ลบรอบ "${session.title}" (${formatDateRange(session.start_date, session.end_date)}) ?` });
+      if (!done) return;
       await load();
     } catch (err: any) { setError(err.message); }
   };
@@ -132,6 +136,7 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
 
   return (
     <div>
+      {dangerDialog}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
           <div role="group" aria-label="มุมมอง" style={{ display: "flex", gap: "4px", padding: "3px", borderRadius: "12px", background: "rgba(15,23,42,0.05)" }}>

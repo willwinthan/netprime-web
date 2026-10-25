@@ -1,7 +1,7 @@
 // Website builder suite: custom pages, menus, theme & branding, certificate templates (website.design).
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 let admin, coord, student;
 const unique = () => Math.random().toString(36).slice(2, 8);
@@ -71,6 +71,12 @@ test('pages: create draft (hidden publicly), publish, edit draft without leaking
   await expectStatus(`/api/website/pages/${page.id}/publish`, 200, { token: coord, method: 'POST', body: {} });
   pub = await expectStatus(`/api/public/website/pages/${slug}`, 200);
   assert.equal(pub.page.blocks[0].heading, 'ฉบับแก้ไข');
+
+  // A published page needs an emailed code (the coordinator created it, so their own address).
+  await expectStatus(`/api/website/pages/${page.id}`, 428, { token: coord, method: 'DELETE' });
+  const pageCode = await dangerCode(coord, 'page.delete', page.id);
+  assert.equal(pageCode.sent_to, 'co***@netprime.com');
+  await expectStatus(`/api/website/pages/${page.id}`, 403, { token: coord, method: 'DELETE', body: { confirmation_code: pageCode.debug_code === '123456' ? '654321' : '123456' } });
 
   await expectStatus(`/api/website/pages/${page.id}/unpublish`, 200, { token: coord, method: 'POST', body: {} });
   await expectStatus(`/api/public/website/pages/${slug}`, 404);

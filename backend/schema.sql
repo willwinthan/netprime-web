@@ -2094,3 +2094,21 @@ CREATE TABLE IF NOT EXISTS live_attendance (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (live_session_id, user_id)
 );
+
+-- ==========================================
+-- Dangerous deletions: email confirmation codes (see migrations/0029_delete_confirmations.sql)
+-- ==========================================
+DROP TABLE IF EXISTS danger_confirmations;
+CREATE TABLE IF NOT EXISTS danger_confirmations (
+    id TEXT PRIMARY KEY,
+    action TEXT NOT NULL,                 -- e.g. course.delete, webhook.delete, privacy.approve
+    target_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    approver_kind TEXT NOT NULL CHECK(approver_kind IN ('owner', 'admin')),
+    code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,             -- ISO UTC
+    attempts INTEGER NOT NULL DEFAULT 0,  -- wrong tries; 5 = invalidated
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_danger_confirmations_lookup ON danger_confirmations (action, target_id, requested_by, created_at);

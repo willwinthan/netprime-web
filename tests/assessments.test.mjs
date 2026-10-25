@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 const COURSE = 'course_cf_workers';
 const LESSON = 'lesson_cf_workers_intro';
@@ -496,4 +496,34 @@ test('exam report with item statistics and CSV export', async () => {
   const events = await request('/api/student/courses/' + COURSE + '/assessments', { token: learner.token });
   assert.equal(events.status, 200);
   assert.ok(events.data.exams.some(e => e.id === exam.id && e.passed === true));
+});
+
+test('deleting an exam with attempts or an assignment with submissions needs an emailed code', async () => {
+  const ids = await createBank(teacher.token, [{ type: 'single', prompt: 'ลบได้ไหม', options: ['ได้', 'ไม่ได้'], correct: [0] }]);
+  // No attempts yet → simple confirm.
+  const unused = await createExam({ title: 'ยังไม่มีคนสอบ', question_ids: ids });
+  await expectStatus(`/api/instructor/exams/${unused.id}`, 200, { method: 'DELETE', token: teacher.token });
+
+  const exam = await createExam({ title: 'มีคนสอบแล้ว', question_ids: ids });
+  await expectStatus(`/api/student/exams/${exam.id}/start`, 201, { method: 'POST', token: learner.token });
+  const blocked = await request(`/api/instructor/exams/${exam.id}`, { method: 'DELETE', token: teacher.token });
+  assert.equal(blocked.status, 428);
+  assert.equal(blocked.data.code, 'confirmation_required');
+  await expectStatus('/api/security/delete-codes', 403, { method: 'POST', token: otherTeacher.token, body: { action: 'exam.delete', target_id: exam.id } });
+  const preview = await expectStatus(`/api/security/delete-preview?action=exam.delete&target_id=${exam.id}`, 200, { token: teacher.token });
+  assert.ok(preview.counts.some(c => c.value >= 1));
+  // The owner may also ask the admins to approve instead of using their own email.
+  const viaAdmin = await dangerCode(teacher.token, 'exam.delete', exam.id, 'admin');
+  assert.equal(viaAdmin.approver, 'admin');
+  assert.ok(!viaAdmin.sent_to.includes('instructor'), viaAdmin.sent_to);
+  await expectStatus(`/api/instructor/exams/${exam.id}`, 200, { method: 'DELETE', token: teacher.token, body: { confirmation_code: viaAdmin.debug_code } });
+  await expectStatus(`/api/instructor/exams/${exam.id}`, 404, { method: 'DELETE', token: teacher.token });
+
+  const created = await expectStatus(`/api/instructor/courses/${COURSE}/assignments`, 201, { method: 'POST', token: teacher.token, body: {
+    lesson_id: LESSON, title: 'งานที่จะลบ', instructions: 'ส่งข้อความ', due_at: later(60), status: 'published' } });
+  await expectStatus(`/api/student/assignments/${created.assignment.id}/submit`, 201, { method: 'POST', token: learner.token, body: { text: 'ส่งแล้ว' } });
+  await expectStatus(`/api/instructor/assignments/${created.assignment.id}`, 428, { method: 'DELETE', token: teacher.token });
+  const code = (await dangerCode(teacher.token, 'assignment.delete', created.assignment.id)).debug_code;
+  await expectStatus(`/api/instructor/assignments/${created.assignment.id}`, 403, { method: 'DELETE', token: admin.token, body: { confirmation_code: code } });
+  await expectStatus(`/api/instructor/assignments/${created.assignment.id}`, 200, { method: 'DELETE', token: teacher.token, body: { confirmation_code: code } });
 });

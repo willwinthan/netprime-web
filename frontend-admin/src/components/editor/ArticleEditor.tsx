@@ -10,6 +10,7 @@ import { API_BASE_URL, can, useApi } from "../../hooks/useApi";
 import { ErrorBox, Modal, Field, uploadImage, formatDateTime } from "../site-admin/ui";
 import { notionEmbedUrl } from "../../site/notionEmbed";
 import { thaiDictionary } from "./thaiDictionary";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 // ==========================================
 // Editor schema: default blocks (minus uploads we cannot store) + Notion embed
@@ -113,6 +114,7 @@ const ArticleEditor: React.FC<{ articleId: string | null; onClose: () => void }>
 export default ArticleEditor;
 
 const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => void }> = ({ api, initial, onClose }) => {
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const canWrite = can(api.user, "articles.write");
   const canPublish = can(api.user, "articles.publish");
   const canManage = can(api.user, "articles.manage");
@@ -275,8 +277,13 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
   };
 
   const remove = async () => {
-    if (!article || !confirm(`ลบบทความ "${article.title}"? ลบแล้วกู้คืนไม่ได้`)) return;
-    try { await api.request(`/admin/site/articles/${article.id}`, { method: "DELETE" }); onClose(); }
+    if (!article) return;
+    try {
+      // A published article needs an emailed code from its author or an admin.
+      const done = await confirmDelete({ action: "article.delete", targetId: article.id, path: `/admin/site/articles/${article.id}`,
+        confirmMessage: `ลบบทความ "${article.title}"? ลบแล้วกู้คืนไม่ได้` });
+      if (done) onClose();
+    }
     catch (err: any) { setError(err.message); }
   };
 
@@ -285,6 +292,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
 
   return (
     <div className="np-editor-page">
+      {dangerDialog}
       <header className="np-editor-bar">
         <button className="np-icon-button" onClick={() => { if (!dirty || confirm("มีการแก้ไขที่ยังไม่บันทึก ออกจากหน้านี้?")) onClose(); }}>
           <ArrowLeft size={18} /> บทความทั้งหมด

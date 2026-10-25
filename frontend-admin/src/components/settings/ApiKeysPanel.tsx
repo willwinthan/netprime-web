@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Plus, Ban, ExternalLink } from "lucide-react";
 import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { Chip, ErrorBox, Empty, Field, Modal, tableStyle, thStyle, tdStyle } from "../site-admin/ui";
-import { Card, Notice, SecretOnce, Toggle, del, formatInstant } from "./shared";
+import { Card, Notice, SecretOnce, Toggle, formatInstant } from "./shared";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 interface ApiKey {
   id: string; name: string; prefix: string; scopes: string[]; rate_limit_per_minute: number; created_at?: string;
@@ -13,6 +14,7 @@ interface ScopeInfo { name: string; label: string }
 /** School API keys for /api/v1: scopes, per-key rate limit, last used, revoke. The key is shown once. */
 export const ApiKeysPanel: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [scopes, setScopes] = useState<ScopeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -25,12 +27,18 @@ export const ApiKeysPanel: React.FC = () => {
   useEffect(() => { load(); }, [api.token]);
 
   const revoke = async (key: ApiKey) => {
-    if (!confirm(`เพิกถอน ${key.name}? ระบบที่ใช้ key นี้จะเรียก API ไม่ได้ทันที`)) return;
-    try { setNotice((await del<{ message: string }>(api, `/admin/platform/api-keys/${key.id}`)).message); await load(); } catch (err: any) { setError(err.message); }
+    try {
+      const done = await confirmDelete<{ message: string }>({ action: "api_key.revoke", targetId: key.id, path: `/admin/platform/api-keys/${key.id}`,
+        confirmMessage: `เพิกถอน ${key.name}? ระบบที่ใช้ key นี้จะเรียก API ไม่ได้ทันที` });
+      if (!done) return;
+      setNotice(done.message);
+      await load();
+    } catch (err: any) { setError(err.message); }
   };
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
+      {dangerDialog}
       <ErrorBox message={error} />
       <Notice message={notice} />
       {secret && <SecretOnce label="API key ใหม่" value={secret} onDone={() => setSecret(null)} />}

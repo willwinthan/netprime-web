@@ -2,6 +2,7 @@ import { Hono, Context } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { permit, rolesColumn, parseRoles } from "../utils/permissions";
 import { createNotification } from "./notifications";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 
 /**
  * PDPA data subject requests (mounted at /api).
@@ -173,6 +174,9 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
   if (await db.prepare("SELECT 1 FROM user_roles WHERE user_id = ? AND role = 'admin'").bind(userId).first()) {
     return c.json({ error: "บัญชีนี้เป็นผู้ดูแลระบบ ให้ถอดบทบาทผู้ดูแลก่อนลบบัญชี" }, 409);
   }
+  // Irreversible anonymization: an emailed code to an admin (utils/dangerConfirm.ts).
+  const denied = await requireDeleteConfirmation(c, "privacy.approve", request.id);
+  if (denied) return denied;
   const account = await db.prepare("SELECT partner_id, email FROM users WHERE id = ?").bind(userId).first<{ partner_id: string | null; email: string }>();
   const oldEmail = account?.email ?? "";
   const tables = await existingTables(db, ["user_profile_values", "user_tags", "sso_identities", "webhook_deliveries", "push_subscriptions",

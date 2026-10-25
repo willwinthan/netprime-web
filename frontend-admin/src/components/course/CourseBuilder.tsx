@@ -5,6 +5,7 @@ import { ErrorBox, Field, grid2 } from "../site-admin/ui";
 import { LessonEditorModal } from "./LessonEditorModal";
 import { BuilderLesson, CourseOutline, LESSON_TYPE_LABEL, LEVEL_LABEL } from "./types";
 import "./course.css";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 /**
  * Course builder for the instructor console (mounted in InstructorConsole › จัดการเนื้อหาหลักสูตร):
@@ -35,6 +36,7 @@ function layoutOf(outline: CourseOutline): Layout {
 
 export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVideoLesson, onEditVideoLesson, onManageQuizzes, onDeleteLesson }) => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [tab, setTab] = useState<Tab>("structure");
   const [outline, setOutline] = useState<CourseOutline | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
@@ -126,9 +128,11 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
   };
 
   const deleteSection = async (sectionId: string) => {
-    if (!confirm("ลบบทนี้? บทเรียนในบทจะย้ายไปอยู่นอกบท (ไม่ถูกลบ)")) return;
     try {
-      await api.request(`/instructor/sections/${sectionId}`, { method: "DELETE" });
+      // A course with learners needs an emailed code (owner or admin); otherwise the simple confirm.
+      const done = await confirmDelete({ action: "section.delete", targetId: sectionId, path: `/instructor/sections/${sectionId}`,
+        confirmMessage: "ลบบทนี้? บทเรียนในบทจะย้ายไปอยู่นอกบท (ไม่ถูกลบ)" });
+      if (!done) return;
       load();
     } catch (err: any) { setError(err.message); }
   };
@@ -192,6 +196,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
 
   return (
     <div>
+      {dangerDialog}
       <div className="np-cb-tabs" role="tablist">
         {([["structure", "โครงสร้างหลักสูตร"], ["sales", "หน้าขายคอร์ส"], ["access", "หมวดหมู่และเงื่อนไข"]] as [Tab, string][]).map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} className="np-cb-tab" onClick={() => setTab(key)}>{label}</button>

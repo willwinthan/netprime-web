@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Download, ShieldCheck, Trash2, Check, X, RefreshCw } from "lucide-react";
 import { useApi } from "../hooks/useApi";
 import { Chip, ErrorBox, Empty, Field, Modal, downloadWithAuth, formatDateTime, tableStyle, thStyle, tdStyle } from "../components/site-admin/ui";
+import { useDangerousDelete } from "../components/security/DangerConfirmDialog";
 
 interface DeletionRequest {
   id: string; status: "pending" | "approved" | "rejected"; reason: string | null; admin_note: string | null;
@@ -181,18 +182,28 @@ const ProcessDialog: React.FC<{ api: ReturnType<typeof useApi>; request: AdminRe
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const approve = action === "approve";
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setBusy(true);
       setError(null);
-      await api.post(`/admin/privacy/requests/${request.id}/${action}`, { note: note.trim() || undefined });
+      const body = { note: note.trim() || undefined };
+      if (approve) {
+        // Irreversible anonymization: an emailed admin code (backend utils/dangerConfirm.ts).
+        const done = await confirmDelete({ action: "privacy.approve", targetId: request.id, path: `/admin/privacy/requests/${request.id}/approve`,
+          method: "POST", body, confirmMessage: `ลบข้อมูลของ ${request.user_name}? ย้อนกลับไม่ได้` });
+        if (!done) { setBusy(false); return; }
+      } else {
+        await api.post(`/admin/privacy/requests/${request.id}/${action}`, body);
+      }
       onDone();
     } catch (err: any) { setError(err.message); setBusy(false); }
   };
   return (
     <Modal title={approve ? `ลบข้อมูลของ ${request.user_name}?` : "ปฏิเสธคำขอลบบัญชี"} onClose={onClose} width={540}>
+      {dangerDialog}
       <form onSubmit={submit} style={{ display: "grid", gap: "14px" }}>
         <ErrorBox message={error} />
         {approve

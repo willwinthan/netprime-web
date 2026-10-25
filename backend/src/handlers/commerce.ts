@@ -1,6 +1,7 @@
 import { Context, Hono } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { permit } from "../utils/permissions";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { appUrl, escapeHtml, sendEmail } from "../utils/email";
 import { createNotification } from "./notifications";
 import { toCsv } from "../utils/csv";
@@ -360,6 +361,9 @@ commerceRouter.delete("/manage/products/:id", async (c) => {
   const used = await db.prepare("SELECT (SELECT COUNT(*) FROM course_orders WHERE product_id = ?) + (SELECT COUNT(*) FROM memberships WHERE product_id = ?) AS n")
     .bind(id, id).first<{ n: number }>();
   if ((used?.n ?? 0) > 0) return c.json({ error: "แพ็กเกจนี้มีคำสั่งซื้อหรือสมาชิกแล้ว ให้เปลี่ยนสถานะเป็นเลิกขายแทน" }, 409);
+  // A product on sale needs an emailed code from its creator or an admin.
+  const denied = await requireDeleteConfirmation(c, "product.delete", id);
+  if (denied) return denied;
   const result = await db.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
   if (!result.meta.changes) return c.json({ error: "ไม่พบแพ็กเกจ" }, 404);
   await audit(c, "delete", "product", id);

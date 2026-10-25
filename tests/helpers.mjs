@@ -30,3 +30,17 @@ export async function expectStatus(path, status, options) {
   assert.equal(response.status, status, `${path}: ${JSON.stringify(response.data)}`);
   return response.data;
 }
+
+/**
+ * Asks for an email confirmation code for a dangerous delete (handlers/security.ts) and returns the
+ * response body; the local Worker includes `debug_code` because email is only logged.
+ */
+export async function dangerCode(token, action, targetId, approver) {
+  return expectStatus('/api/security/delete-codes', 200, { method: 'POST', token, body: { action, target_id: targetId, ...(approver ? { approver } : {}) } });
+}
+
+/** Requests a code as `token` and performs the DELETE (or other method) with it. */
+export async function confirmedRequest(path, action, targetId, { token, method = 'DELETE', body = {}, approver } = {}) {
+  const issued = await dangerCode(token, action, targetId, approver);
+  return request(path, { token, method, body: { ...body, confirmation_code: issued.debug_code } });
+}

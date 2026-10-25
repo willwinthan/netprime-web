@@ -26,6 +26,7 @@ import { contentRouter } from "./handlers/content";
 import { scormRouter } from "./handlers/scorm";
 import { platformRouter } from "./handlers/platform";
 import { publicApiRouter } from "./handlers/publicapi";
+import { securityRouter } from "./handlers/security";
 import { Env } from "./middleware/rbac";
 import { allowedOrigins } from "./utils/origins";
 import { runScheduledJobs } from "./jobs";
@@ -43,7 +44,7 @@ app.use(
   "/api/*",
   cors({
     origin: (origin, c) => allowedOrigins(c.env.FRONTEND_ORIGINS).includes(origin) ? origin : undefined,
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Confirmation-Code"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
@@ -60,6 +61,7 @@ app.get("/", (c) => {
 // Platform first: its /api/* middleware sends queued webhooks after every response (handlers/platform.ts).
 app.route("/api", platformRouter);
 app.route("/api/v1", publicApiRouter);
+app.route("/api", securityRouter);
 app.route("/api/auth", authRouter);
 app.route("/api/public", publicSiteRouter);
 app.route("/api/admin/site", adminSiteRouter);

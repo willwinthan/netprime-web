@@ -2,7 +2,7 @@
 // organization quotes, abandoned-order reminders and sales reports. All payments are bank transfers confirmed by staff.
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 let admin, coord, student;
 let baseline;
@@ -450,4 +450,18 @@ test('path certificates need a purchased, non-draft path; the public catalog has
   assert.ok(catalog.products.every(p => !('created_by' in p)), 'created_by is not public');
   const one = await expectStatus(`/api/commerce/products/${bundle.id}`, 200);
   assert.equal('created_by' in one.product, false);
+});
+
+test('deleting a product on sale needs an emailed code; drafts keep the simple confirm', async () => {
+  const draft = await createProduct({ kind: 'bundle', title: `Draft delete ${Date.now()}`, price: 100, course_ids: ['course_cisco_ccna', 'course_aws_csa'], status: 'draft' });
+  await expectStatus(`/api/manage/products/${draft.product.id}`, 200, { method: 'DELETE', token: admin.token });
+  const live = await createProduct({ kind: 'bundle', title: `Live delete ${Date.now()}`, price: 100, course_ids: ['course_cisco_ccna', 'course_aws_csa'] });
+  const id = live.product.id;
+  const blocked = await request(`/api/manage/products/${id}`, { method: 'DELETE', token: admin.token });
+  assert.equal(blocked.status, 428);
+  await expectStatus('/api/security/delete-codes', 403, { method: 'POST', token: student.token, body: { action: 'product.delete', target_id: id } });
+  const issued = await dangerCode(admin.token, 'product.delete', id);
+  assert.equal(issued.approver, 'owner', 'the admin created it');
+  await expectStatus(`/api/manage/products/${id}`, 403, { method: 'DELETE', token: admin.token, body: { confirmation_code: 'abcdef' } });
+  await expectStatus(`/api/manage/products/${id}`, 200, { method: 'DELETE', token: admin.token, body: { confirmation_code: issued.debug_code } });
 });

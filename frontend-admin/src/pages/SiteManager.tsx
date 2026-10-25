@@ -1,19 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { LayoutDashboard, CalendarDays, MessageSquare, Megaphone, Settings2, History, ExternalLink, Home } from "lucide-react";
+import { LayoutDashboard, CalendarDays, MessageSquare, ExternalLink } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { SessionsPanel } from "../components/site-admin/SessionsPanel";
-import { InquiriesPanel, PromotionsPanel, SettingsPanel, AuditPanel } from "../components/site-admin/ContentPanels";
-import { HomeContentPanel } from "../components/site-admin/HomeContentPanel";
+import { InquiriesPanel } from "../components/site-admin/ContentPanels";
 import { AdminSession, Chip, REG_STATUS, SeatBar, ErrorBox, Empty, formatDateRange, formatDateTime } from "../components/site-admin/ui";
 
-type Tab = "overview" | "sessions" | "inquiries" | "promotions" | "home" | "settings" | "audit";
+type Tab = "overview" | "sessions" | "inquiries";
 
 const TAB_PERMISSION: Record<Tab, string> = {
-  overview: "site.dashboard", sessions: "site.sessions", inquiries: "site.inquiries",
-  promotions: "site.promotions", home: "site.settings", settings: "site.settings", audit: "site.audit"
+  overview: "site.dashboard", sessions: "site.sessions", inquiries: "site.inquiries"
 };
-/** Any of these opens the website console (site.media alone only allows uploads). */
-export const SITE_PERMISSIONS = Object.values(TAB_PERMISSION);
+/** Any of these opens the training desk. Website content lives in WebsiteBuilderPage; audit in AuditPage. */
+export const TRAINING_PERMISSIONS = Object.values(TAB_PERMISSION);
 
 interface Summary {
   counts: { new_inquiries: number; pending_registrations: number; waitlist_registrations: number; open_sessions: number; published_articles: number };
@@ -22,8 +20,8 @@ interface Summary {
 }
 
 /**
- * Website content console for coordinators: training schedule, registrations,
- * contact inquiries, promotions and contact settings — no developer needed.
+ * Training desk for coordinators: today's work, training rounds with registrants (list or calendar)
+ * and contact inquiries. Everything shown on the public website is edited in "เว็บไซต์" instead.
  * Each tab follows a permission so admins can hand out only what a role needs.
  */
 export const SiteManager: React.FC = () => {
@@ -40,25 +38,21 @@ export const SiteManager: React.FC = () => {
   const goToSession = (id: string) => { setOpenSession(id); setTab("sessions"); };
 
   if (allowed.length === 0) {
-    return <div className="glass-card" style={{ padding: "40px", textAlign: "center" }}><h2>บัญชีของคุณไม่มีสิทธิ์จัดการเว็บไซต์</h2></div>;
+    return <div className="glass-card" style={{ padding: "40px", textAlign: "center" }}><h2>บัญชีของคุณไม่มีสิทธิ์จัดการงานอบรม</h2></div>;
   }
 
   const tabs = ([
     ["overview", "ภาพรวม", <LayoutDashboard size={16} />],
     ["sessions", "รอบอบรม & ผู้สมัคร", <CalendarDays size={16} />, summary?.counts.pending_registrations],
-    ["inquiries", "ข้อความติดต่อ", <MessageSquare size={16} />, summary?.counts.new_inquiries],
-    ["promotions", "โปรโมชั่น", <Megaphone size={16} />],
-    ["home", "เนื้อหาหน้าแรก", <Home size={16} />],
-    ["settings", "ตั้งค่าเว็บไซต์", <Settings2 size={16} />],
-    ["audit", "ประวัติการแก้ไข", <History size={16} />]
+    ["inquiries", "ข้อความติดต่อ", <MessageSquare size={16} />, summary?.counts.new_inquiries]
   ] as Array<[Tab, string, React.ReactNode, number?]>).filter(([key]) => allowed.includes(key));
 
   return (
     <div>
       <div className="header-row">
         <div>
-          <h1 className="header-title">จัดการเว็บไซต์</h1>
-          <p className="header-desc">อัปเดตตารางอบรม ผู้สมัคร โปรโมชั่น และข้อมูลติดต่อได้เอง ข้อมูลขึ้นหน้าเว็บภายใน 1 นาที</p>
+          <h1 className="header-title">รอบอบรมและผู้สมัคร</h1>
+          <p className="header-desc">เปิดรอบอบรม ดูแลผู้สมัคร และตอบข้อความติดต่อ ตารางอบรมขึ้นหน้าเว็บภายใน 1 นาที</p>
         </div>
         <a href="/" target="_blank" rel="noreferrer" className="tech-button-outline"><ExternalLink size={16} />เปิดหน้าเว็บ</a>
       </div>
@@ -117,10 +111,6 @@ export const SiteManager: React.FC = () => {
       )}
       {tab === "sessions" && <SessionsPanel openSessionId={openSession} onOpened={() => setOpenSession(null)} />}
       {tab === "inquiries" && <InquiriesPanel />}
-      {tab === "promotions" && <PromotionsPanel />}
-      {tab === "home" && <HomeContentPanel />}
-      {tab === "settings" && <SettingsPanel />}
-      {tab === "audit" && <AuditPanel />}
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 let admin, coord, student;
 const day = offset => new Date(Date.now() + 7 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
@@ -226,7 +226,16 @@ test('a deletion request, once approved, anonymizes the account and blocks sign-
   // Personal tables beyond the account row are cleared too (tags here; profile values, SSO identities, push, LINE, webhooks in code).
   const tagged = await expectStatus(`/api/admin/people/${account.user.id}/tags`, 200, { method: 'POST', token: admin.token, body: { tag: 'pdpa-tag' } });
   assert.ok(tagged.tags.includes('pdpa-tag'));
-  await expectStatus(`/api/admin/privacy/requests/${created.request.id}/approve`, 200, { method: 'POST', token: admin.token, body: { note: 'ดำเนินการตามคำขอ' } });
+  // Irreversible: an emailed admin code is required (admin-only approver).
+  const noCode = await request(`/api/admin/privacy/requests/${created.request.id}/approve`, { method: 'POST', token: admin.token, body: { note: 'ดำเนินการตามคำขอ' } });
+  assert.equal(noCode.status, 428);
+  await expectStatus('/api/security/delete-codes', 403, { method: 'POST', token: coord.token, body: { action: 'privacy.approve', target_id: created.request.id } });
+  const preview = await expectStatus(`/api/security/delete-preview?action=privacy.approve&target_id=${created.request.id}`, 200, { token: admin.token });
+  assert.equal(preview.admin_only, true);
+  assert.deepEqual(preview.approvers.map(a => a.kind), ['admin']);
+  await expectStatus('/api/security/delete-codes', 400, { method: 'POST', token: admin.token, body: { action: 'privacy.approve', target_id: created.request.id, approver: 'owner' } });
+  const code = (await dangerCode(admin.token, 'privacy.approve', created.request.id)).debug_code;
+  await expectStatus(`/api/admin/privacy/requests/${created.request.id}/approve`, 200, { method: 'POST', token: admin.token, body: { note: 'ดำเนินการตามคำขอ', confirmation_code: code } });
   const anonymized = await expectStatus(`/api/admin/people/${account.user.id}`, 200, { token: admin.token });
   assert.deepEqual(anonymized.user.tags || [], [], 'tags deleted');
   await expectStatus(`/api/admin/privacy/requests/${created.request.id}/approve`, 409, { method: 'POST', token: admin.token, body: {} });
@@ -293,4 +302,45 @@ test('stale article saves get 409 with the latest version, and revisions can be 
 
   // Students cannot see article history.
   await expectStatus(`/api/admin/site/articles/${article.id}/revisions`, 403, { token: student.token });
+});
+
+// ---------- Dangerous deletes: training sessions ----------
+
+test('a session that is published or has registrations needs a code from its creator or an admin', async () => {
+  // Draft without registrations: simple confirm.
+  const draft = await createSession({ status: 'draft' });
+  await expectStatus(`/api/admin/site/sessions/${draft.id}`, 200, { method: 'DELETE', token: coord.token });
+
+  // Created by the admin, one registration (later cancelled): a coordinator cannot approve it alone.
+  const created = await expectStatus('/api/admin/site/sessions', 201, { method: 'POST', token: admin.token, body: {
+    title: 'Admin Session', vendor: 'Cisco', start_date: day(30), end_date: day(31), capacity: 10, price: 9900, status: 'open' } });
+  const session = created.session;
+  await expectStatus(`/api/public/sessions/${session.id}/register`, 201, { method: 'POST', body: applicant(`danger-${Date.now()}@example.invalid`) });
+  await expectStatus(`/api/admin/site/sessions/${session.id}`, 409, { method: 'DELETE', token: coord.token });
+  const [reg] = await registrations(session.id);
+  await expectStatus(`/api/admin/site/registrations/${reg.id}`, 200, { method: 'PATCH', token: coord.token, body: { status: 'cancelled' } });
+
+  const blocked = await request(`/api/admin/site/sessions/${session.id}`, { method: 'DELETE', token: coord.token });
+  assert.equal(blocked.status, 428);
+  const preview = await expectStatus(`/api/security/delete-preview?action=session.delete&target_id=${session.id}`, 200, { token: coord.token });
+  assert.equal(preview.default_approver, 'owner');
+  assert.deepEqual(preview.approvers.map(a => a.kind), ['owner', 'admin']);
+  assert.ok(preview.approvers.every(a => !a.hint.startsWith('co')), 'never the coordinator\'s own address');
+  const issued = await dangerCode(coord.token, 'session.delete', session.id);
+  assert.equal(issued.approver, 'owner');
+  assert.equal(issued.sent_to, 'ad***@netprime.com');
+  const viaAdmins = await dangerCode(coord.token, 'session.delete', session.id, 'admin');
+  assert.ok(!viaAdmins.sent_to.startsWith('co'), viaAdmins.sent_to);
+  // The newest code replaces the previous one; the code the approver passes on works.
+  await expectStatus(`/api/admin/site/sessions/${session.id}`, 403, { method: 'DELETE', token: coord.token, body: { confirmation_code: issued.debug_code === viaAdmins.debug_code ? 'abc' : issued.debug_code } });
+  await expectStatus(`/api/admin/site/sessions/${session.id}`, 403, { method: 'DELETE', token: admin.token, body: { confirmation_code: viaAdmins.debug_code } });
+  await expectStatus(`/api/admin/site/sessions/${session.id}`, 200, { method: 'DELETE', token: coord.token, body: { confirmation_code: viaAdmins.debug_code } });
+
+  // The coordinator's own published session: the code goes to their own address.
+  const own = await createSession({ title: 'Own Session' });
+  await expectStatus('/api/security/delete-codes', 403, { method: 'POST', token: student.token, body: { action: 'session.delete', target_id: own.id } });
+  const mine = await dangerCode(coord.token, 'session.delete', own.id);
+  assert.equal(mine.approver, 'owner');
+  assert.equal(mine.sent_to, 'co***@netprime.com');
+  await expectStatus(`/api/admin/site/sessions/${own.id}`, 200, { method: 'DELETE', token: coord.token, body: { confirmation_code: mine.debug_code } });
 });

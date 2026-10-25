@@ -5,6 +5,7 @@ import { Chip, Empty, ErrorBox, Field, Modal, downloadWithAuth, grid2, tableStyl
 import { Assignment, Criterion, LATE_POLICY_LABEL, LessonRef, SUBMISSION_STATUS, Submission, cardStyle, formatWhen, fromLocalInput,
   mutedText, rowFlex, smallButton, toLocalInput } from "./types";
 import { SubmissionGrader } from "./GradingQueue";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 const ACCEPT = ".pdf,.docx,.zip,.png,.jpg,.jpeg,.gif,.webp";
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -265,6 +266,7 @@ const Submissions: React.FC<{ assignmentId: string }> = ({ assignmentId }) => {
 /** Instructor list of a course's assignments. */
 export const AssignmentManager: React.FC<{ courseId: string; lessons: LessonRef[] }> = ({ courseId, lessons }) => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [items, setItems] = useState<Assignment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Assignment | "new" | null>(null);
@@ -275,9 +277,10 @@ export const AssignmentManager: React.FC<{ courseId: string; lessons: LessonRef[
   useEffect(() => { load(); }, [load]);
 
   const remove = async (a: Assignment) => {
-    if (!confirm(`ลบงาน "${a.title}" พร้อมงานที่ผู้เรียนส่งทั้งหมด?`)) return;
     try {
-      await api.request(`/instructor/assignments/${a.id}`, { method: "DELETE" });
+      const done = await confirmDelete({ action: "assignment.delete", targetId: a.id, path: `/instructor/assignments/${a.id}`,
+        confirmMessage: `ลบงาน "${a.title}" พร้อมงานที่ผู้เรียนส่งทั้งหมด?` });
+      if (!done) return;
       load();
     } catch (err: any) {
       setError(err.message);
@@ -286,6 +289,7 @@ export const AssignmentManager: React.FC<{ courseId: string; lessons: LessonRef[
 
   return (
     <div>
+      {dangerDialog}
       <div style={{ ...rowFlex, justifyContent: "flex-end", marginBottom: "16px" }}>
         <button className="tech-button-primary" style={smallButton} disabled={!lessons.length} onClick={() => setEditing("new")}><Plus size={14} /> สร้างงาน</button>
       </div>

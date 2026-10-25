@@ -6,6 +6,7 @@ import { embedSrc, EMBED_PROVIDERS } from "../utils/embeds";
 import { audit } from "./accounts";
 import { canApproveCourses, verifiedTokenUserId } from "./courses";
 import { checkLessonAssets } from "./instructor";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import {
   activeEnrollmentId, completeLesson, isCourseStaff, isLessonType, jsonList, LESSON_ORDER, lessonLockResponse
 } from "../utils/courseContent";
@@ -461,6 +462,8 @@ contentRouter.patch("/instructor/sections/:id", rbac(["instructor", "admin"]), a
 contentRouter.delete("/instructor/sections/:id", rbac(["instructor", "admin"]), async (c) => {
   const owned = await ownedSection(c, c.req.param("id"));
   if ("error" in owned) return owned.error;
+  const denied = await requireDeleteConfirmation(c, "section.delete", owned.section.id);
+  if (denied) return denied;
   await c.env.DB.batch([
     c.env.DB.prepare("UPDATE lessons SET section_id = NULL WHERE section_id = ?").bind(owned.section.id),
     c.env.DB.prepare("DELETE FROM course_sections WHERE id = ?").bind(owned.section.id)

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, PlugZap, Copy } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
 import { Chip, ErrorBox, Empty, Field, Modal, grid2, tableStyle, thStyle, tdStyle } from "../site-admin/ui";
-import { Card, Notice, Toggle, del, formatInstant } from "./shared";
+import { Card, Notice, Toggle, formatInstant } from "./shared";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 interface SsoProvider {
   id: string; name: string; issuer: string; client_id: string; allowed_domains: string[]; default_role: "student" | "instructor";
@@ -19,6 +20,7 @@ const PRESETS: Array<[string, string]> = [
 /** Enterprise SSO (OpenID Connect) connections, optionally one per partner organization. */
 export const SsoPanel: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [providers, setProviders] = useState<SsoProvider[]>([]);
   const [partners, setPartners] = useState<Array<{ id: string; company_name: string }>>([]);
   const [redirectUri, setRedirectUri] = useState("");
@@ -38,12 +40,16 @@ export const SsoPanel: React.FC = () => {
     } catch (err: any) { setError(err.message); }
   };
   const remove = async (p: SsoProvider) => {
-    if (!confirm(`ลบการเชื่อมต่อ ${p.name}? ผู้ใช้ยังเข้าสู่ระบบด้วยรหัสผ่านได้`)) return;
-    try { await del(api, `/admin/platform/sso/${p.id}`); await load(); } catch (err: any) { setError(err.message); }
+    try {
+      const done = await confirmDelete({ action: "sso.delete", targetId: p.id, path: `/admin/platform/sso/${p.id}`,
+        confirmMessage: `ลบการเชื่อมต่อ ${p.name}? ผู้ใช้ยังเข้าสู่ระบบด้วยรหัสผ่านได้` });
+      if (done) await load();
+    } catch (err: any) { setError(err.message); }
   };
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
+      {dangerDialog}
       <ErrorBox message={error} />
       <Notice message={notice} />
       <Card title="SSO องค์กร (OpenID Connect)" description="ให้พนักงานเข้าสู่ระบบด้วยบัญชีองค์กร รองรับ Microsoft Entra ID (Azure AD), Google Workspace และ Okta ผู้ใช้กดปุ่ม “เข้าสู่ระบบด้วย SSO องค์กร” แล้วกรอกอีเมลงาน"

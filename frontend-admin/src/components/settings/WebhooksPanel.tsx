@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Plus, Send, RefreshCw, Trash2, KeyRound, ArrowLeft, Pencil } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
 import { Chip, ErrorBox, Empty, Field, Modal, tableStyle, thStyle, tdStyle } from "../site-admin/ui";
-import { Card, Notice, SecretOnce, STATUS_TONE, Toggle, del, formatInstant } from "./shared";
+import { Card, Notice, SecretOnce, STATUS_TONE, Toggle, formatInstant } from "./shared";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 interface Endpoint {
   id: string; name: string; url: string; events: string[]; active: boolean; created_at: string;
@@ -17,6 +18,7 @@ interface EventInfo { name: string; label: string }
 /** Outgoing webhooks: endpoints, event subscriptions, signed test ping, delivery log and redeliver. */
 export const WebhooksPanel: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [events, setEvents] = useState<EventInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +52,11 @@ export const WebhooksPanel: React.FC = () => {
     try { setSecret((await api.post<{ secret: string }>(`/admin/platform/webhooks/${endpoint.id}/rotate-secret`, {})).secret); } catch (err: any) { setError(err.message); }
   };
   const remove = async (endpoint: Endpoint) => {
-    if (!confirm(`ลบปลายทาง ${endpoint.name} และประวัติการส่งทั้งหมด?`)) return;
-    try { await del(api, `/admin/platform/webhooks/${endpoint.id}`); await load(); } catch (err: any) { setError(err.message); }
+    try {
+      const done = await confirmDelete({ action: "webhook.delete", targetId: endpoint.id, path: `/admin/platform/webhooks/${endpoint.id}`,
+        confirmMessage: `ลบปลายทาง ${endpoint.name} และประวัติการส่งทั้งหมด?` });
+      if (done) await load();
+    } catch (err: any) { setError(err.message); }
   };
 
   if (selected) return <DeliveryLog endpoint={selected} onBack={() => { setSelected(null); load(); }} />;
@@ -60,6 +65,7 @@ export const WebhooksPanel: React.FC = () => {
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
+      {dangerDialog}
       <ErrorBox message={error} />
       <Notice message={notice} />
       {secret && <SecretOnce label="Signing secret ของ webhook" value={secret} onDone={() => setSecret(null)} />}

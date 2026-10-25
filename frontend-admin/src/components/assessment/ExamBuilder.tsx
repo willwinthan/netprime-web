@@ -5,6 +5,7 @@ import { Chip, Empty, ErrorBox, Field, Modal, grid2 } from "../site-admin/ui";
 import { BankQuestion, DIFFICULTY_LABEL, DrawRule, Exam, LessonRef, SHOW_ANSWERS_LABEL, TYPE_LABEL, cardStyle, formatWhen, fromLocalInput,
   mutedText, rowFlex, smallButton, toLocalInput } from "./types";
 import { ExamReport } from "./ExamReport";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 type Draft = Omit<Exam, "id" | "course_id" | "question_count" | "attempt_count" | "pending_count"> & { question_ids: string[] };
 
@@ -164,6 +165,7 @@ const ExamEditor: React.FC<{ courseId: string; exam: Exam | null; lessons: Lesso
 /** Exams of a course with the "final exam required for certificate" switch. */
 export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> = ({ courseId, lessons }) => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [exams, setExams] = useState<Exam[]>([]);
   const [requiresFinal, setRequiresFinal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,9 +197,11 @@ export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> =
   };
 
   const remove = async (exam: Exam) => {
-    if (!confirm(`ลบข้อสอบ "${exam.title}" และผลสอบทั้งหมด?`)) return;
     try {
-      await api.request(`/instructor/exams/${exam.id}`, { method: "DELETE" });
+      // Attempts exist → emailed code (owner or admin); otherwise the simple confirm.
+      const done = await confirmDelete({ action: "exam.delete", targetId: exam.id, path: `/instructor/exams/${exam.id}`,
+        confirmMessage: `ลบข้อสอบ "${exam.title}" และผลสอบทั้งหมด?` });
+      if (!done) return;
       load();
     } catch (err: any) {
       setError(err.message);
@@ -208,6 +212,7 @@ export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> =
 
   return (
     <div>
+      {dangerDialog}
       <div style={{ ...rowFlex, justifyContent: "space-between", marginBottom: "16px" }}>
         <label style={{ ...rowFlex, fontSize: "14px" }}>
           <input type="checkbox" checked={requiresFinal} onChange={e => toggleFinal(e.target.checked)} />

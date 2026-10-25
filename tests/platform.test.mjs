@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
-import { request, login, expectStatus } from './helpers.mjs';
+import { dangerCode, request, login, expectStatus } from './helpers.mjs';
 
 const base = process.env.NETPRIME_TEST_BASE;
 const FRONT = 'http://localhost:5173';
@@ -169,7 +169,16 @@ test('webhooks: tracked events reach only subscribed endpoints; manual redeliver
   const patched = await expectStatus(`/api/admin/platform/webhooks/${hooks.ok}`, 200, { token: admin, method: 'PATCH', body: { events: ['*'], active: true } });
   assert.deepEqual(patched.endpoint.events, ['*']);
   await expectStatus(`/api/admin/platform/webhooks/${hooks.ok}`, 400, { token: admin, method: 'PATCH', body: { url: 'https://192.168.0.1/x' } });
-  await expectStatus(`/api/admin/platform/webhooks/${hooks.failing}`, 200, { token: admin, method: 'DELETE' });
+  // Security-critical: always an emailed code, admins only, to the requesting admin's own address.
+  const noCode = await request(`/api/admin/platform/webhooks/${hooks.failing}`, { token: admin, method: 'DELETE' });
+  assert.equal(noCode.status, 428);
+  assert.equal(noCode.data.code, 'confirmation_required');
+  await expectStatus(`/api/security/delete-preview?action=webhook.delete&target_id=${hooks.failing}`, 403, { token: coord });
+  await expectStatus('/api/security/delete-codes', 403, { token: coord, method: 'POST', body: { action: 'webhook.delete', target_id: hooks.failing } });
+  const issued = await dangerCode(admin, 'webhook.delete', hooks.failing);
+  assert.equal(issued.approver, 'admin');
+  assert.equal(issued.sent_to, 'ad***@netprime.com');
+  await expectStatus(`/api/admin/platform/webhooks/${hooks.failing}`, 200, { token: admin, method: 'DELETE', body: { confirmation_code: issued.debug_code } });
   await expectStatus(`/api/admin/platform/webhooks/${hooks.failing}`, 404, { token: admin, method: 'DELETE' });
 });
 
@@ -227,7 +236,9 @@ test('v1: authentication, scopes and per-key rate limit', async () => {
   const listed = await expectStatus('/api/admin/platform/api-keys', 200, { token: admin });
   assert.ok(listed.keys.find(k => k.id === keys.limitedId).last_used_at, 'last used is recorded');
 
-  await expectStatus(`/api/admin/platform/api-keys/${keys.limitedId}`, 200, { token: admin, method: 'DELETE' });
+  await expectStatus(`/api/admin/platform/api-keys/${keys.limitedId}`, 428, { token: admin, method: 'DELETE' });
+  const revokeCode = (await dangerCode(admin, 'api_key.revoke', keys.limitedId)).debug_code;
+  await expectStatus(`/api/admin/platform/api-keys/${keys.limitedId}`, 200, { token: admin, method: 'DELETE', headers: { 'X-Confirmation-Code': revokeCode } });
   assert.equal((await api('/api/v1/users', keys.limited)).status, 401, 'revoked key stops working');
   await expectStatus(`/api/admin/platform/api-keys/${keys.limitedId}`, 404, { token: admin, method: 'DELETE' });
 });
@@ -531,4 +542,16 @@ test('scoping: platform/live/v1 middleware never puts auth in front of other pub
   assert.equal(unknown.status, 404, 'unknown /api paths reach the 404 handler, not an auth wall');
   assert.equal((await request('/api/live/my')).status, 401, 'live routes do require a session');
   assert.equal((await request('/api/v1/users')).status, 401, 'v1 routes do require an API key');
+});
+
+test('sso admin: deleting a provider needs an emailed admin code', async () => {
+  const created = await expectStatus('/api/admin/platform/sso', 201, { token: admin, method: 'POST', body: {
+    name: 'To Delete', issuer: 'https://idp.mock.test', client_id: 'np-delete', client_secret: 'mock-secret', allowed_domains: ['delete-sso.example'] } });
+  const id = created.provider.id;
+  await expectStatus(`/api/admin/platform/sso/${id}`, 428, { token: admin, method: 'DELETE' });
+  const preview = await expectStatus(`/api/security/delete-preview?action=sso.delete&target_id=${id}`, 200, { token: admin });
+  assert.equal(preview.admin_only, true);
+  const code = (await dangerCode(admin, 'sso.delete', id)).debug_code;
+  await expectStatus(`/api/admin/platform/sso/${id}`, 200, { token: admin, method: 'DELETE', body: { confirmation_code: code } });
+  await expectStatus(`/api/admin/platform/sso/${id}`, 404, { token: admin, method: 'DELETE' });
 });

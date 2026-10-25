@@ -3,6 +3,7 @@ import { Env, rbac } from "../middleware/rbac";
 import { trackEvent } from "../utils/events";
 import { createNotification } from "./notifications";
 import { lessonLockResponse } from "../utils/courseContent";
+import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 
 /**
  * Assessments: per-course question bank, exams (fixed or random draw, time limit, attempts, pass mark),
@@ -627,6 +628,9 @@ assessmentsRouter.patch("/instructor/exams/:id", rbac(["instructor", "admin"]), 
 assessmentsRouter.delete("/instructor/exams/:id", rbac(["instructor", "admin"]), async (c) => {
   const loaded = await loadExam(c, c.req.param("id"));
   if (loaded instanceof Response) return loaded;
+  // Attempts exist → an emailed code from the course owner or an admin (utils/dangerConfirm.ts).
+  const denied = await requireDeleteConfirmation(c, "exam.delete", loaded.exam.id);
+  if (denied) return denied;
   await c.env.DB.prepare("DELETE FROM exams WHERE id = ?").bind(loaded.exam.id).run();
   await audit(c, "exam.delete", "exam", loaded.exam.id, loaded.exam.title);
   return c.json({ success: true });
@@ -1280,6 +1284,9 @@ assessmentsRouter.patch("/instructor/assignments/:id", rbac(["instructor", "admi
 assessmentsRouter.delete("/instructor/assignments/:id", rbac(["instructor", "admin"]), async (c) => {
   const loaded = await loadAssignment(c, c.req.param("id"));
   if (loaded instanceof Response) return loaded;
+  // Submissions exist → an emailed code from the course owner or an admin (utils/dangerConfirm.ts).
+  const denied = await requireDeleteConfirmation(c, "assignment.delete", loaded.assignment.id);
+  if (denied) return denied;
   const subs = await c.env.DB.prepare("SELECT files_json FROM assignment_submissions WHERE assignment_id = ?").bind(loaded.assignment.id).all<{ files_json: string }>();
   const keys = subs.results.flatMap(s => parseJson<FileRef[]>(s.files_json, []).map(f => f.key));
   await c.env.DB.prepare("DELETE FROM assignments WHERE id = ?").bind(loaded.assignment.id).run();

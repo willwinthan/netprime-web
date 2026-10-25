@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request } from './helpers.mjs';
 
 let admin, coord, instructor;
 const PASSWORD = 'access-test-pass-1';
@@ -254,4 +254,20 @@ test('Notion import validates links and reports missing configuration', async ()
   const res = await post('/api/admin/site/articles/import-notion', instructor.token, { url: 'https://www.notion.so/team/Lab-0123456789abcdef0123456789abcdef' });
   assert.equal(res.status, 503);
   assert.match(res.data.error, /NOTION_TOKEN/);
+});
+
+test('deleting a published article needs a code from its author or an admin; drafts do not', async () => {
+  const draft = await post('/api/admin/site/articles', admin.token, { title: `ร่างที่จะลบ ${Date.now()}`, body: 'x', status: 'draft' });
+  assert.equal(draft.status, 201, JSON.stringify(draft.data));
+  await expectStatus(`/api/admin/site/articles/${draft.data.article.id}`, 200, { method: 'DELETE', token: coord.token });
+
+  const live = await post('/api/admin/site/articles', admin.token, { title: `เผยแพร่แล้วจะลบ ${Date.now()}`, body: 'x', status: 'published' });
+  assert.equal(live.status, 201, JSON.stringify(live.data));
+  const id = live.data.article.id;
+  assert.equal((await request(`/api/admin/site/articles/${id}`, { method: 'DELETE', token: coord.token })).status, 428);
+  // The coordinator (articles.manage) cannot approve alone: the code goes to the author (admin) or the admins.
+  const issued = await dangerCode(coord.token, 'article.delete', id);
+  assert.equal(issued.approver, 'owner');
+  assert.equal(issued.sent_to, 'ad***@netprime.com');
+  await expectStatus(`/api/admin/site/articles/${id}`, 200, { method: 'DELETE', token: coord.token, body: { confirmation_code: issued.debug_code } });
 });

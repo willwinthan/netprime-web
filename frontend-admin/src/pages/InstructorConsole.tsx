@@ -32,6 +32,7 @@ import {
   Search,
   X
 } from "lucide-react";
+import { useDangerousDelete } from "../components/security/DangerConfirmDialog";
 
 interface InstructorCourse {
   id: string;
@@ -102,6 +103,7 @@ type ConsoleView =
 
 export const InstructorConsole: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const isAdmin = hasRole(api.user, "admin");
   const [data, setData] = useState<InstructorAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -492,11 +494,14 @@ export const InstructorConsole: React.FC = () => {
 
   // Course Operations
   const handleDeleteCourse = async (courseId: string) => {
-    if (!window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบคอร์สนี้และบทเรียนทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้")) return;
     try {
-      setActionLoading(true);
       setError(null);
-      await api.request(`/instructor/courses/${courseId}`, { method: "DELETE" });
+      // Always an emailed code from the course owner or an admin; a course with learners or orders is archived instead.
+      const done = await confirmDelete<{ message: string; archived?: boolean }>({ action: "course.delete", targetId: courseId,
+        path: `/instructor/courses/${courseId}`, confirmMessage: "คุณแน่ใจหรือไม่ว่าต้องการลบคอร์สนี้และบทเรียนทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้" });
+      if (!done) return;
+      if (done.archived) alert(done.message);
+      setActionLoading(true);
       await fetchAnalytics();
       if (selectedCourseForCurriculum?.id === courseId) {
         setSelectedCourseForCurriculum(null);
@@ -573,10 +578,12 @@ export const InstructorConsole: React.FC = () => {
 
   // Lesson Operations
   const handleDeleteLesson = async (lessonId: string) => {
-    if (!window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบบทเรียนนี้?")) return;
     try {
+      // A course with learners needs an emailed code (owner or admin); otherwise the simple confirm.
+      const done = await confirmDelete({ action: "lesson.delete", targetId: lessonId, path: `/instructor/lessons/${lessonId}`,
+        confirmMessage: "คุณแน่ใจหรือไม่ว่าต้องการลบบทเรียนนี้?" });
+      if (!done) return;
       setActionLoading(true);
-      await api.request(`/instructor/lessons/${lessonId}`, { method: "DELETE" });
       if (selectedCourseForCurriculum) {
         await loadCurriculum(selectedCourseForCurriculum.id);
       }
@@ -2808,6 +2815,7 @@ export const InstructorConsole: React.FC = () => {
 
   return (
     <div className="instructor-console-container">
+      {dangerDialog}
       <AnimatePresence mode="wait">
         {view === "dashboard" && (
           <motion.div 

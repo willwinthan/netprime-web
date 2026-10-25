@@ -4,10 +4,12 @@ import { useApi } from "../../hooks/useApi";
 import { Chip, Empty, ErrorBox, Field, Modal, grid2, tableStyle, tdStyle, thStyle } from "../site-admin/ui";
 import { baht } from "../learner/CourseOrder";
 import { CourseOption, PRODUCT_KIND, PRODUCT_STATUS, Product, ProductKind } from "./types";
+import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 /** Products beyond single courses (commerce.manage): bundles / learning paths, memberships, installment course packages. */
 export const ProductsManager: React.FC = () => {
   const api = useApi();
+  const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [products, setProducts] = useState<Product[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [editing, setEditing] = useState<Product | "new" | null>(null);
@@ -31,9 +33,9 @@ export const ProductsManager: React.FC = () => {
   }, [api.token]);
 
   const remove = async (p: Product) => {
-    if (!window.confirm(`ลบแพ็กเกจ "${p.title}"?`)) return;
     try {
-      await api.request(`/manage/products/${p.id}`, { method: "DELETE" });
+      const done = await confirmDelete({ action: "product.delete", targetId: p.id, path: `/manage/products/${p.id}`, confirmMessage: `ลบแพ็กเกจ "${p.title}"?` });
+      if (!done) return;
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -42,6 +44,7 @@ export const ProductsManager: React.FC = () => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      {dangerDialog}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
         <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>ชุดคอร์ส (แสดงเป็นเส้นทางการเรียนได้) สมาชิกรายช่วง และคอร์สแบบผ่อนชำระ ทุกแพ็กเกจชำระด้วยการโอนเงิน</p>
         <button type="button" className="tech-button-primary" onClick={() => setEditing("new")}><Plus size={16} />สร้างแพ็กเกจ</button>
