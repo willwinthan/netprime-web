@@ -1060,7 +1060,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Navigation Tabs */}
-        <div style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
+        <div className="scroll-tabs" style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
           <button
             onClick={() => setActiveOutsourceTab("projects")}
             className={activeOutsourceTab === "projects" ? "tech-button-primary" : "tech-button-outline"}
@@ -1862,7 +1862,8 @@ export const Dashboard: React.FC = () => {
               alignItems: "center",
               gap: "12px",
               textAlign: "center",
-              width: "320px"
+              width: "320px",
+              maxWidth: "calc(100vw - 32px)"
             }}
           >
             <div style={{ background: "rgba(255,255,255,0.2)", borderRadius: "50%", padding: "16px" }}>
@@ -1983,6 +1984,7 @@ export const Dashboard: React.FC = () => {
                   top: "45px",
                   right: 0,
                   width: "280px",
+                  maxWidth: "calc(100vw - 32px)",
                   maxHeight: "320px",
                   overflowY: "auto",
                   background: "linear-gradient(135deg, #1e1b4b 0%, #110c26 100%)",
@@ -2100,7 +2102,7 @@ export const Dashboard: React.FC = () => {
           {/* Sub-view Navigation Menu (only shown when not in course detail view) */}
           {!selectedCourseId && (
             <>
-              <div style={{ display: "flex", gap: "12px", marginBottom: "24px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
+              <div className="scroll-tabs" style={{ display: "flex", gap: "12px", marginBottom: "24px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
                 <button
                   onClick={() => {
                     setStudentSubView("my-courses");

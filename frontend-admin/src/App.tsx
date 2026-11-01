@@ -69,7 +69,9 @@ import {
   ShoppingBag,
   ChevronDown,
   CalendarDays,
-  History
+  History,
+  Menu,
+  X
 } from "lucide-react";
 
 type ConsoleTab = "dashboard" | "hr" | "instructor" | "admin" | "site" | "articles" | "users"
@@ -187,7 +189,16 @@ export const App: React.FC = () => {
   // Learning is a role of its own: staff see it only when they also hold the student role.
   const canLearn = hasRole(api.user, "student", "admin");
   usePresenceHeartbeat();
-  const openTab = (tab: string) => { if (ALL_TABS.has(tab)) setCurrentTab(tab as ConsoleTab); };
+  // Below the tablet breakpoint the sidebar is a drawer (index.css); picking a page closes it.
+  const [navOpen, setNavOpen] = useState(false);
+  const selectTab = (tab: ConsoleTab) => { setCurrentTab(tab); setNavOpen(false); };
+  const openTab = (tab: string) => { if (ALL_TABS.has(tab)) selectTab(tab as ConsoleTab); };
+  React.useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(NAV_COLLAPSED_KEY) || "[]"); } catch { return []; }
   });
@@ -332,13 +343,30 @@ export const App: React.FC = () => {
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
+            className="workspace"
             style={{ display: "flex", width: "100%", minHeight: "100vh" }}
           >
+            {/* Phone/tablet top bar: opens the sidebar drawer */}
+            <header className="mobile-topbar">
+              <button type="button" className="mobile-topbar-toggle" aria-label="เปิดเมนู"
+                aria-controls="console-sidebar" aria-expanded={navOpen} onClick={() => setNavOpen(true)}>
+                <Menu size={22} />
+              </button>
+              <div className="sidebar-brand mobile-topbar-brand">
+                <img src={logo} alt="โลโก้ NetPrime" style={{ height: "28px", width: "auto" }} />
+                NETPRIME<span style={{ color: "var(--primary)" }}>LMS</span>
+              </div>
+            </header>
+            {navOpen && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => setNavOpen(false)} />}
+
             {/* Left Navigation Sidebar */}
-            <aside className="sidebar">
+            <aside id="console-sidebar" className={`sidebar ${navOpen ? "open" : ""}`}>
               <div className="sidebar-brand">
                 <img src={logo} alt="โลโก้ NetPrime" style={{ height: "32px", width: "auto" }} />
                 NETPRIME<span style={{ color: "var(--primary)" }}>LMS</span>
+                <button type="button" className="sidebar-close" aria-label="ปิดเมนู" onClick={() => setNavOpen(false)}>
+                  <X size={20} />
+                </button>
               </div>
 
               <div style={{ padding: "0 12px 12px" }}>
@@ -362,7 +390,7 @@ export const App: React.FC = () => {
                         <ul className="nav-group-items">
                           {group.items.map(item => (
                             <li key={item.tab}>
-                              <button type="button" onClick={() => setCurrentTab(item.tab)}
+                              <button type="button" onClick={() => selectTab(item.tab)}
                                 className={`nav-item ${currentTab === item.tab ? "active" : ""}`}
                                 aria-current={currentTab === item.tab ? "page" : undefined}>
                                 {item.icon}
@@ -378,7 +406,7 @@ export const App: React.FC = () => {
                 <div className="nav-group nav-group-account">
                   <ul className="nav-group-items">
                     <li>
-                      <button type="button" onClick={() => setCurrentTab("profile")}
+                      <button type="button" onClick={() => selectTab("profile")}
                         className={`nav-item ${currentTab === "profile" ? "active" : ""}`}
                         aria-current={currentTab === "profile" ? "page" : undefined}>
                         <CircleUser size={16} />

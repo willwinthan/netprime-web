@@ -841,7 +841,7 @@ export const HRConsole: React.FC = () => {
         <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
           
           {/* Sub-view Navigation Menu */}
-          <div style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
+          <div className="scroll-tabs" style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "12px" }}>
             <button
               onClick={() => setActiveTab("roster")}
               className={activeTab === "roster" ? "tech-button-primary" : "tech-button-outline"}
@@ -2370,7 +2370,8 @@ export const HRConsole: React.FC = () => {
               transition={{ duration: 0.2 }}
               className="glass-card" 
               style={{ 
-                width: "480px", 
+                width: "480px",
+                maxWidth: "calc(100vw - 32px)",
                 border: "1px solid var(--border-active)", 
                 boxShadow: "0 20px 50px rgba(0,0,0,0.15)",
                 borderRadius: "1.5rem"
@@ -2531,7 +2532,8 @@ export const HRConsole: React.FC = () => {
               transition={{ duration: 0.2 }}
               className="glass-card" 
               style={{ 
-                width: "500px", 
+                width: "500px",
+                maxWidth: "calc(100vw - 32px)",
                 border: "1px solid var(--border-active)", 
                 boxShadow: "0 20px 50px rgba(0,0,0,0.15)",
                 borderRadius: "1.5rem",
