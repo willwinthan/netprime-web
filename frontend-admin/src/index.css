@@ -587,9 +587,14 @@ h1, h2, h3, h4, h5, h6 {
 
 @media (max-width: 1024px) {
   .dashboard-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
+.dashboard-grid > * { min-width: 0; }
+
+/* Rows of view-switch buttons scroll sideways instead of running off narrow screens. */
+.scroll-tabs { overflow-x: auto; scrollbar-width: thin; }
+.scroll-tabs > * { flex-shrink: 0; white-space: nowrap; }
 
 .courses-grid {
   display: grid;
@@ -659,4 +664,91 @@ h1, h2, h3, h4, h5, h6 {
 .site-form .form-input {
   background: #ffffff;
   border-color: rgba(15, 23, 42, 0.12);
+}
+
+/* --- Phones and tablets: sidebar becomes a drawer behind a top bar --- */
+.mobile-topbar, .sidebar-close, .sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  .workspace { flex-direction: column; }
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 900;
+    padding: 10px 16px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    background: #020617;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .mobile-topbar-brand { margin-bottom: 0; font-size: 18px; gap: 10px; }
+  .mobile-topbar-toggle, .sidebar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    cursor: pointer;
+  }
+  .sidebar-close { margin-left: auto; }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(300px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    z-index: 1002;
+    padding: 16px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.22s ease, visibility 0s linear 0.22s;
+  }
+  .sidebar.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.22s ease;
+    box-shadow: 0 0 48px rgba(0, 0, 0, 0.45);
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1001;
+    background: rgba(2, 6, 23, 0.55);
+  }
+  .main-content { padding: 24px 20px; overflow-x: hidden; }
+}
+
+@media (max-width: 640px) {
+  .main-content { padding: 18px 16px 32px; }
+  .main-content .glass-card { padding: 18px; }
+  .header-title { font-size: 24px; line-height: 1.25; }
+  .header-row { flex-wrap: wrap; gap: 12px; }
+  .courses-grid { grid-template-columns: 1fr; }
+  /* Console pages lay out with inline grid styles; stack the two-column and wide-minimum ones. */
+  .main-content [style*="grid-template-columns: 1fr 1fr"],
+  .main-content [style*="grid-template-columns: 1fr 1.2fr"],
+  .main-content [style*="grid-template-columns: 1fr 1.5fr"],
+  .main-content [style*="grid-template-columns: 1.2fr 1fr"],
+  .main-content [style*="grid-template-columns: 2fr 1fr"],
+  .main-content [style*="grid-template-columns: minmax(2"],
+  .main-content [style*="grid-template-columns: minmax(3"],
+  .main-content [style*="minmax(260px"],
+  .main-content [style*="minmax(280px"],
+  .main-content [style*="minmax(300px"],
+  .main-content [style*="minmax(320px"],
+  .main-content [style*="minmax(340px"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  /* Wide data tables scroll inside their card instead of stretching the page. */
+  .main-content table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }

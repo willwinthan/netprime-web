@@ -864,8 +864,8 @@ export const InstructorConsole: React.FC = () => {
                           gap: "16px"
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", width: "100%" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexGrow: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", width: "100%", flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexGrow: 1, minWidth: 0 }}>
                             <img 
                               src={course.thumbnail_url} 
                               alt={course.title} 
