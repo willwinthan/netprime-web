@@ -207,6 +207,7 @@ export const DEFAULT_NAV: Nav = {
   header: [
     { label: "หลักสูตร", label_en: "Courses", href: "/courses", new_tab: false },
     { label: "ตารางอบรม", label_en: "Schedule", href: "/schedule", new_tab: false },
+    { label: "Self-learning", label_en: "Self-learning", href: "/self-learning", new_tab: false },
     { label: "บทความ", label_en: "Blog", href: "/blog", new_tab: false },
     { label: "เกี่ยวกับเรา", label_en: "About", href: "/about", new_tab: false }
   ],

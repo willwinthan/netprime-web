@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "../../hooks/useApi";
+import { API_BASE_URL, apiFetch } from "../../hooks/useApi";
 import { publicPost } from "../site/PublicSections";
 import { Link } from "../../site/router";
 
@@ -111,7 +111,7 @@ export const AiSalesChatWidget: React.FC = () => {
     setInput("");
     setBusy(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/ai/public/chat`, {
+      const res = await apiFetch(`${API_BASE_URL}/ai/public/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, history })
       });
       const data = await res.json().catch(() => ({}));

@@ -15,8 +15,8 @@
 // การตัดสินใจรายตาราง (seed ใน schema.sql ณ 24 ต.ค. 2026):
 //   เก็บ  role_permissions   สิทธิ์เริ่มต้นของแต่ละบทบาท (เหมือน migration 0008/0010) ไม่มีจะใช้เมนูไม่ได้
 //   เก็บ  achievements       นิยาม badge; โค้ดอ้าง id ตรง ๆ (ach_first_log, ach_high_eval, ach_diligent_work)
-//   ตัด   site_settings      แถว 'site' เป็นข้อมูลติดต่อเดโม (02-000-0000, admin@netprime.com);
-//                            โค้ดรองรับกรณีไม่มีแถว ให้ admin กรอกเองใน "ตั้งค่าเว็บไซต์"
+//   ตัด   site_settings      แถว 'site' มีประกาศและอีเมลแจ้งเตือนเดโม (admin@netprime.com);
+//                            ไม่มีแถวนี้ระบบใช้ข้อมูลติดต่อจริงจาก DEFAULT_SETTINGS ใน handlers/site.ts แก้ได้ใน "ตั้งค่าเว็บไซต์"
 //   ตัด   payment_settings   แถว 'bank_transfer' เป็นบัญชีธนาคารตัวอย่าง (000-0-00000-0) ห้ามให้ลูกค้าโอนเข้า
 //                            admin ต้องกรอกบัญชีจริงในหน้าตั้งค่าการชำระเงินก่อนเปิดขาย
 //   ตัด   vouchers           โค้ดส่วนลดเดโม (รวม DEMO-FREE100 ลด 100%) อันตรายถ้าหลุดไป production

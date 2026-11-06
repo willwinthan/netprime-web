@@ -11,6 +11,7 @@ export const STATIC_PAGES: Record<string, { title: string | null; description: s
   "/": { title: null, description: DEFAULT_DESCRIPTION },
   "/courses": { title: "คอร์สออนไลน์", description: "คอร์สออนไลน์ด้าน Network, Cloud และ Security จาก Cisco, AWS, Aruba, Juniper และอื่น ๆ" },
   "/schedule": { title: "ตารางอบรม", description: "รอบอบรมในห้องเรียนและออนไลน์สด พร้อมจำนวนที่นั่งคงเหลือ ลงทะเบียนได้ทันที" },
+  "/self-learning": { title: "Self-learning", description: "บทเรียนโต้ตอบ Basic Network 16 บท ดูแพ็กเก็ตวิ่งบนเครือข่ายทีละขั้น เรียนเองได้ทันทีไม่ต้องสมัครสมาชิก" },
   "/blog": { title: "บทความ", description: "บทความด้าน Network, Cloud และ Security เทคนิคเตรียมสอบ และข่าวรอบอบรมจาก NetPrime" },
   "/about": { title: "เกี่ยวกับเรา", description: "NetPrime ศูนย์ฝึกอบรมด้าน Network, Cloud และ Security" }
 };

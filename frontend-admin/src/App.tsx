@@ -11,7 +11,10 @@ import { SsoCompletePage } from "./components/settings/SsoLogin";
 import { MaintenanceBanner } from "./components/settings/MaintenanceBanner";
 import { InstallAppButton } from "./pwa/pwa";
 import logo from "../logo/NetPrimeLogo.png";
+import { FEATURES } from "./features";
 // Console pages load on first visit so learners and visitors don't download every staff screen.
+const LessonFrame = lazy(() => import("./site/SelfLearningPage").then(m => ({ default: m.LessonFrame })));
+const InstructorRoundsPage = lazy(() => import("./pages/InstructorRoundsPage").then(m => ({ default: m.InstructorRoundsPage })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
 const HRConsole = lazy(() => import("./pages/HRConsole").then(m => ({ default: m.HRConsole })));
 const InstructorConsole = lazy(() => import("./pages/InstructorConsole").then(m => ({ default: m.InstructorConsole })));
@@ -74,7 +77,7 @@ import {
   X
 } from "lucide-react";
 
-type ConsoleTab = "dashboard" | "hr" | "instructor" | "admin" | "site" | "articles" | "users"
+type ConsoleTab = "dashboard" | "selflearning" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
   | "settings" | "ai" | "affiliate" | "commerce" | "audit";
@@ -94,10 +97,12 @@ const role = (...roles: User["role"][]) => (user: User | null) => hasRole(user, 
 const NAV_GROUPS: NavGroup[] = [
   { id: "learn", title: "การเรียนของฉัน", hint: "คอร์ส บทเรียน ข้อสอบ ใบประกาศ ชุมชน และการชำระเงินของคุณ", items: [
     { tab: "dashboard", label: "ห้องเรียนของฉัน", icon: <BookOpen size={16} />, show: role("student", "admin") },
-    { tab: "affiliate", label: "แนะนำเพื่อน", icon: <Gift size={16} />, show: role("student") }
+    { tab: "selflearning", label: "Self-learning", icon: <GraduationCap size={16} />, show: role("student", "admin") },
+    { tab: "affiliate", label: "แนะนำเพื่อน", icon: <Gift size={16} />, show: u => FEATURES.affiliate && hasRole(u, "student") }
   ] },
   { id: "teach", title: "การสอน", hint: "คอร์สที่คุณสอน ข้อสอบ งานที่ต้องตรวจ และผู้เรียนของคุณ", items: [
     { tab: "instructor", label: "คอร์สที่ฉันสอน", icon: <Hammer size={16} />, show: role("instructor", "admin") },
+    { tab: "rounds", label: "รอบอบรมของฉัน", icon: <CalendarDays size={16} />, show: role("instructor") },
     { tab: "assessments", label: "การวัดผลและสอบ", icon: <ClipboardCheck size={16} />, show: role("instructor", "admin") },
     { tab: "reports", label: "รายงานคอร์สของฉัน", icon: <FileBarChart size={16} />, show: u => hasRole(u, "instructor") && !can(u, "reports.view") },
     { tab: "communication", label: "ประกาศและข้อความ", icon: <MessagesSquare size={16} />, show: u => hasRole(u, "instructor") && !can(u, "communication.manage") },
@@ -459,6 +464,12 @@ export const App: React.FC = () => {
                 {currentTab === "instructor" && (
                   <m.div key="instructor" {...pageTransition}>
                     <InstructorConsole />
+                  </m.div>
+                )}
+                {currentTab === "selflearning" && <m.div key="selflearning" {...pageTransition}><LessonFrame /></m.div>}
+                {currentTab === "rounds" && (
+                  <m.div key="rounds" {...pageTransition}>
+                    <InstructorRoundsPage />
                   </m.div>
                 )}
                 {currentTab === "admin" && (

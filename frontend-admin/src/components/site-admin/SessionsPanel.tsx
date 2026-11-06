@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Copy, Download, Pencil, Trash2, Users, UserPlus, ArrowLeft, RefreshCw, MailPlus, List, CalendarDays } from "lucide-react";
+import { CalendarPlus, Copy, Download, Pencil, Trash2, Users, UserPlus, ArrowLeft, RefreshCw, MailPlus, List, CalendarDays, Paperclip } from "lucide-react";
 import { SessionCalendar, CalendarEvent } from "../calendar/SessionCalendar";
-import { YearMonth, monthOf, todayYmd } from "../calendar/calendarDates";
-import { useApi } from "../../hooks/useApi";
+import { YearMonth, daysBetween, monthOf, pickedDays, shiftDays, sourceId, splitByDays, thaiLongDate, todayYmd } from "../calendar/calendarDates";
+import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { SessionMeetingCard } from "../settings/SessionMeetingCard";
 import {
   AdminSession, Registration, RegistrationStatus, MODE_LABEL, SESSION_STATUS, REG_STATUS,
   Chip, SeatBar, Modal, Field, ErrorBox, Empty, grid2, tableStyle, thStyle, tdStyle,
-  formatDateRange, formatBaht, formatDateTime, downloadWithAuth
+  formatSessionDates, formatBaht, formatDateTime, downloadWithAuth, sessionDays
 } from "./ui";
 import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
@@ -15,7 +15,7 @@ type Api = ReturnType<typeof useApi>;
 
 const EMPTY_SESSION = {
   title: "", vendor: "", description: "", course_id: "", start_date: "", end_date: "", time_text: "09:00–16:00",
-  mode: "classroom", location: "", instructor_name: "", price: 0, capacity: 20, registration_deadline: "", status: "draft"
+  mode: "classroom", location: "", instructor_name: "", instructor_id: "", session_dates: null, price: 0, capacity: 20, registration_deadline: "", status: "draft"
 };
 
 // ==========================================
@@ -46,18 +46,18 @@ async function loadAllSessions(api: Api): Promise<AdminSession[]> {
   return all;
 }
 
-function toCalendarEvent(s: AdminSession): CalendarEvent {
+function toCalendarEvents(s: AdminSession): CalendarEvent[] {
   const tone = SESSION_STATUS[s.status] ?? SESSION_STATUS.draft;
   const badges: CalendarEvent["badges"] = [{ label: `${s.seats_taken}/${s.capacity}`, fg: "var(--text-secondary)", bg: "rgba(255,255,255,0.75)" }];
   if (s.pending_count > 0) badges.push({ label: `รอตรวจ ${s.pending_count}`, fg: REG_STATUS.pending.color, bg: "#fff" });
   if (s.waitlist_count > 0) badges.push({ label: `รอคิว ${s.waitlist_count}`, fg: REG_STATUS.waitlist.color, bg: "#fff" });
-  return {
+  return splitByDays<CalendarEvent>({
     id: s.id, start: s.start_date, end: s.end_date || s.start_date, title: s.title,
     color: { fg: tone.color, bg: tone.bg },
     meta: [s.time_text, MODE_LABEL[s.mode], s.instructor_name].filter(Boolean).join(" · "),
     badges, muted: s.status === "cancelled",
     description: `${tone.label} · ที่นั่ง ${s.seats_taken}/${s.capacity}${s.pending_count ? ` · รอตรวจสอบ ${s.pending_count} ราย` : ""}${s.waitlist_count ? ` · รอคิว ${s.waitlist_count} ราย` : ""}`
-  };
+  }, sessionDays(s.session_dates));
 }
 
 // ==========================================
@@ -95,7 +95,7 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
   useEffect(() => { load(); }, [scope, view, api.token]);
   const changeView = (next: SessionsView) => { setView(next); saveView(next); };
   const calendarEvents = useMemo(() => view !== "calendar" ? [] :
-    sessions.filter(s => statusFilter === "all" || s.status === statusFilter).map(toCalendarEvent), [sessions, statusFilter, view]);
+    sessions.filter(s => statusFilter === "all" || s.status === statusFilter).flatMap(toCalendarEvents), [sessions, statusFilter, view]);
   const sessionById = useMemo(() => new Map(sessions.map(s => [s.id, s])), [sessions]);
   useEffect(() => {
     api.get<{ courses: Array<{ id: string; title: string }> }>("/admin/site/course-options").then(d => setCourses(d.courses)).catch(() => setCourses([]));
@@ -116,7 +116,7 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
     try {
       // Published or with registration history → emailed code from the creator or an admin.
       const done = await confirmDelete({ action: "session.delete", targetId: session.id, path: `/admin/site/sessions/${session.id}`,
-        confirmMessage: `ลบรอบ "${session.title}" (${formatDateRange(session.start_date, session.end_date)}) ?` });
+        confirmMessage: `ลบรอบ "${session.title}" (${formatSessionDates(session)}) ?` });
       if (!done) return;
       await load();
     } catch (err: any) { setError(err.message); }
@@ -181,7 +181,7 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
             onDayClick={date => setEditing({ ...EMPTY_SESSION, start_date: date, end_date: date } as any)}
             dayActionLabel="เพิ่มรอบอบรมวันนี้"
             legend={(["draft", "open", "closed", "cancelled"] as const).map(k => ({ label: SESSION_STATUS[k].label, fg: SESSION_STATUS[k].color, bg: SESSION_STATUS[k].bg }))}
-            renderExtra={e => { const s = sessionById.get(e.id); return s ? <SeatBar taken={s.seats_taken} capacity={s.capacity} /> : null; }}
+            renderExtra={e => { const s = sessionById.get(sourceId(e.id)); return s ? <SeatBar taken={s.seats_taken} capacity={s.capacity} /> : null; }}
             emptyText={statusFilter === "all" ? "ไม่มีรอบอบรมในเดือนนี้ · คลิกวันที่ในปฏิทินเพื่อเพิ่มรอบอบรม" : "ไม่มีรอบอบรมสถานะนี้ในเดือนนี้"}
           />
           <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "10px" }}>
@@ -207,11 +207,12 @@ export const SessionsPanel: React.FC<{ openSessionId?: string | null; onOpened?:
                     </button>
                     <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{[s.vendor, s.instructor_name].filter(Boolean).join(" · ") || "-"}</div>
                     <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                      {s.status === "draft" && s.instructor_id && <Chip {...SESSION_STATUS.closed} label="อาจารย์ลงรอบ รอเปิดรับสมัคร" />}
                       {s.pending_count > 0 && <Chip {...REG_STATUS.pending} label={`รอตรวจสอบ ${s.pending_count}`} />}
                       {s.waitlist_count > 0 && <Chip {...REG_STATUS.waitlist} label={`รอคิว ${s.waitlist_count}`} />}
                     </div>
                   </td>
-                  <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateRange(s.start_date, s.end_date)}<div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{s.time_text}</div></td>
+                  <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatSessionDates(s)}<div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{s.time_text}</div></td>
                   <td style={tdStyle}>{MODE_LABEL[s.mode]}</td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatBaht(s.price)}</td>
                   <td style={tdStyle}><SeatBar taken={s.seats_taken} capacity={s.capacity} /></td>
@@ -242,6 +243,28 @@ export const IconButton: React.FC<{ title: string; onClick: () => void; children
   </button>
 );
 
+/** Tick the days a round actually runs; the first and last day are fixed by the start and end dates. */
+export const DaysField: React.FC<{ start: string; end: string; value: string[] | null; onChange: (days: string[] | null) => void }> = ({ start, end, value, onChange }) => {
+  const all = daysBetween(start, end);
+  if (!all || all.length < 3) return null;
+  const toggle = (day: string) => {
+    const current = value ?? all;
+    onChange(current.includes(day) ? current.filter(d => d !== day) : [...current, day]);
+  };
+  return (
+    <Field label="วันที่อบรมจริง" hint="เอาเครื่องหมายออกจากวันที่ไม่มีเรียน เช่น เรียนเฉพาะเสาร์-อาทิตย์" span>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", maxHeight: "160px", overflowY: "auto" }}>
+        {all.map(day => (
+          <label key={day} style={{ display: "inline-flex", gap: "6px", alignItems: "center", fontSize: "13px" }}>
+            <input type="checkbox" disabled={day === start || day === end} checked={day === start || day === end || (value ?? all).includes(day)} onChange={() => toggle(day)} />
+            {thaiLongDate(day)}
+          </label>
+        ))}
+      </div>
+    </Field>
+  );
+};
+
 // ==========================================
 // Session create / edit form
 // ==========================================
@@ -256,15 +279,28 @@ const SessionForm: React.FC<{
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [days, setDays] = useState<string[] | null>(() => sessionDays(initial.session_dates));
+  const [instructors, setInstructors] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    api.get<{ instructors: Array<{ id: string; name: string }> }>("/admin/site/instructor-options").then(d => setInstructors(d.instructors)).catch(() => setInstructors([]));
+  }, [api.token]);
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [key]: e.target.value }));
+  const moveStart = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDays(current => shiftDays(current, form.start_date, e.target.value));
+    set("start_date")(e);
+  };
+  const pickInstructor = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const picked = instructors.find(i => i.id === e.target.value);
+    setForm(prev => ({ ...prev, instructor_id: e.target.value, instructor_name: picked?.name ?? prev.instructor_name }));
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setSaving(true);
       setError(null);
-      const body = { ...form, price: Number(form.price), capacity: Number(form.capacity) };
+      const body = { ...form, price: Number(form.price), capacity: Number(form.capacity), session_dates: pickedDays(form.start_date, form.end_date, days) };
       if (initial.id) await api.patch(`/admin/site/sessions/${initial.id}`, body);
       else await api.post("/admin/site/sessions", body);
       onSaved();
@@ -289,8 +325,9 @@ const SessionForm: React.FC<{
             {form.course_id && !courses.some(c => c.id === form.course_id) && <option value={form.course_id}>{form.course_id} (ไม่ได้เผยแพร่แล้ว)</option>}
           </select>
         </Field>
-        <Field label="วันเริ่ม *"><input className="form-input" type="date" required value={form.start_date} onChange={set("start_date")} /></Field>
+        <Field label="วันเริ่ม *"><input className="form-input" type="date" required value={form.start_date} onChange={moveStart} /></Field>
         <Field label="วันสิ้นสุด *"><input className="form-input" type="date" required value={form.end_date} min={form.start_date || undefined} onChange={set("end_date")} /></Field>
+        <DaysField start={form.start_date} end={form.end_date} value={days} onChange={setDays} />
         <Field label="เวลาอบรม"><input className="form-input" maxLength={80} value={form.time_text} onChange={set("time_text")} placeholder="09:00–16:00" /></Field>
         <Field label="ปิดรับสมัครวันที่" hint="เว้นว่าง = รับถึงวันเริ่มอบรม"><input className="form-input" type="date" value={form.registration_deadline || ""} max={form.end_date || undefined} onChange={set("registration_deadline")} /></Field>
         <Field label="รูปแบบ *">
@@ -299,7 +336,14 @@ const SessionForm: React.FC<{
           </select>
         </Field>
         <Field label="สถานที่ / ช่องทาง"><input className="form-input" maxLength={200} value={form.location} onChange={set("location")} placeholder="ห้องอบรม ชั้น 5 / Zoom" /></Field>
-        <Field label="วิทยากร"><input className="form-input" maxLength={120} value={form.instructor_name} onChange={set("instructor_name")} /></Field>
+        <Field label="บัญชีอาจารย์" hint="อาจารย์จะเห็นรอบนี้และรายชื่อผู้สมัครในหน้าของตัวเอง">
+          <select className="form-input" value={form.instructor_id || ""} onChange={pickInstructor}>
+            <option value="">— ไม่เชื่อม —</option>
+            {instructors.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+            {form.instructor_id && !instructors.some(i => i.id === form.instructor_id) && <option value={form.instructor_id}>{form.instructor_name || form.instructor_id}</option>}
+          </select>
+        </Field>
+        <Field label="วิทยากร (ชื่อที่แสดงบนเว็บ)"><input className="form-input" maxLength={120} value={form.instructor_name} onChange={set("instructor_name")} /></Field>
         <Field label="ราคา (บาท) *" hint="0 = ฟรี"><input className="form-input" type="number" min={0} step={1} required value={form.price} onChange={set("price")} /></Field>
         <Field label="จำนวนที่นั่ง *"><input className="form-input" type="number" min={1} max={1000} required value={form.capacity} onChange={set("capacity")} /></Field>
         <Field label="สถานะ *" hint="ฉบับร่างจะไม่แสดงบนเว็บ">
@@ -330,6 +374,7 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
   const [notify, setNotify] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [bulkAdding, setBulkAdding] = useState(false);
   const [detail, setDetail] = useState<Registration | null>(null);
   const [filter, setFilter] = useState<RegistrationStatus | "all">("all");
   const [info, setInfo] = useState<string | null>(null);
@@ -406,15 +451,18 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
               <h2 style={{ fontSize: "20px" }}>{session.title}</h2><Chip {...SESSION_STATUS[session.status]} />
             </div>
             <div style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "4px" }}>
-              {formatDateRange(session.start_date, session.end_date)} · {session.time_text || "-"} · {MODE_LABEL[session.mode]} · {formatBaht(session.price)}
+              {formatSessionDates(session)} · {session.time_text || "-"} · {MODE_LABEL[session.mode]} · {formatBaht(session.price)}
             </div>
           </div>
           <SeatBar taken={session.seats_taken} capacity={session.capacity} />
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button className="tech-button-outline" onClick={() => onEdit(session)}><Pencil size={16} />แก้ไขรอบ</button>
+            <button className="tech-button-outline" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/schedule?register=${session.id}`).then(() => alert("คัดลอกลิงก์ลงทะเบียนแล้ว"))}
+              title={session.status === "open" ? undefined : "ลิงก์จะใช้งานได้เมื่อเปิดรับสมัครรอบนี้"}><Copy size={16} />คัดลอกลิงก์ลงทะเบียน</button>
             <button className="tech-button-outline" onClick={exportCsv}><Download size={16} />ดาวน์โหลด Excel</button>
             {withoutAccount.length > 0 && <button className="tech-button-outline" disabled={!!busy} onClick={inviteAll}
               title="สร้างบัญชีผู้เรียนให้ผู้สมัครที่ยังไม่มีบัญชี แล้วส่งลิงก์ตั้งรหัสผ่านทางอีเมล"><MailPlus size={16} />เชิญทุกคนที่ยังไม่มีบัญชี ({withoutAccount.length})</button>}
+            <button className="tech-button-outline" onClick={() => setBulkAdding(true)}><Users size={16} />เพิ่มทั้งบริษัท</button>
             <button className="tech-button-primary" onClick={() => setAdding(true)}><UserPlus size={16} />เพิ่มผู้สมัคร</button>
           </div>
         </div>
@@ -432,7 +480,7 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
         </div>
         <label style={{ fontSize: "13px", display: "flex", gap: "6px", alignItems: "center", color: "var(--text-secondary)" }}>
           <input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)} />
-          ส่งอีเมลแจ้งผู้สมัครเมื่อยืนยัน / ชำระแล้ว / ยกเลิก
+          ส่งอีเมลแจ้งผู้สมัครเมื่อยืนยัน / ชำระแล้ว / ยกเลิก{session?.course_id ? " และเปิดบัญชีให้เข้าคอร์สออนไลน์" : ""}
         </label>
       </div>
 
@@ -455,6 +503,9 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
                   <td style={tdStyle}>{r.attendees}</td>
                   <td style={tdStyle}>
                     <Chip {...REG_STATUS[r.status]} />
+                    {r.slip_uploaded_at && <div style={{ fontSize: "11px", color: "var(--accent)", marginTop: "4px", display: "flex", gap: "4px", alignItems: "center" }}><Paperclip size={12} />แนบสลิปแล้ว</div>}
+                    {r.sales_stage && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>{SALES_STAGE[r.sales_stage]}</div>}
+                    {r.paid_amount_satang != null && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>รับแล้ว {formatBaht(r.paid_amount_satang / 100)}{r.receipt_nos ? ` · ใบเสร็จ ${r.receipt_nos}` : ""}</div>}
                     {r.payment_ref && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>อ้างอิง: {r.payment_ref}</div>}
                     {r.admin_note && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>📝 {r.admin_note}</div>}
                     {r.reminder_sent_at && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>ส่งอีเมลเตือนแล้ว {formatDateTime(r.reminder_sent_at)}</div>}
@@ -487,8 +538,10 @@ const RegistrationsView: React.FC<{ api: Api; sessionId: string; onBack: () => v
         )}
       </div>
 
-      {adding && session && <RegistrationForm api={api} session={session} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
-      {detail && <RegistrationDetail registration={detail} onClose={() => setDetail(null)} onSave={async body => { if (await update(detail, body)) setDetail(null); }} onDelete={() => remove(detail)} />}
+      {adding && session && <RegistrationForm api={api} session={session} notify={notify} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
+      {bulkAdding && session && <BulkRegistrationForm api={api} session={session} notify={notify} onClose={() => setBulkAdding(false)}
+        onSaved={message => { setBulkAdding(false); setInfo(message); load(); }} />}
+      {detail && <RegistrationDetail api={api} registration={detail} onClose={() => setDetail(null)} onSave={async body => { if (await update(detail, body)) setDetail(null); }} onDelete={() => remove(detail)} />}
     </div>
   );
 };
@@ -521,7 +574,7 @@ const AccountCell: React.FC<{ registration: Registration; hasCourse: boolean; bu
   );
 };
 
-const RegistrationForm: React.FC<{ api: Api; session: AdminSession; onClose: () => void; onSaved: () => void }> = ({ api, session, onClose, onSaved }) => {
+const RegistrationForm: React.FC<{ api: Api; session: AdminSession; notify: boolean; onClose: () => void; onSaved: () => void }> = ({ api, session, notify, onClose, onSaved }) => {
   const full = session.seats_taken >= session.capacity;
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", attendees: 1, status: full ? "waitlist" : "confirmed", invoice_required: false, tax_id: "", billing_address: "", admin_note: "" });
   const [error, setError] = useState<string | null>(null);
@@ -533,7 +586,7 @@ const RegistrationForm: React.FC<{ api: Api; session: AdminSession; onClose: () 
     try {
       setSaving(true);
       setError(null);
-      await api.post(`/admin/site/sessions/${session.id}/registrations`, { ...form, attendees: Number(form.attendees) });
+      await api.post(`/admin/site/sessions/${session.id}/registrations`, { ...form, attendees: Number(form.attendees), notify });
       onSaved();
     } catch (err: any) { setError(err.message); } finally { setSaving(false); }
   };
@@ -569,8 +622,100 @@ const RegistrationForm: React.FC<{ api: Api; session: AdminSession; onClose: () 
   );
 };
 
-const RegistrationDetail: React.FC<{ registration: Registration; onClose: () => void; onSave: (body: Record<string, unknown>) => void; onDelete: () => void }> = ({ registration: r, onClose, onSave, onDelete }) => {
-  const [form, setForm] = useState({ status: r.status, attendees: r.attendees, payment_ref: r.payment_ref || "", admin_note: r.admin_note || "", phone: r.phone, company: r.company || "" });
+/** "Name, email, phone" per line; commas or tabs, so rows pasted from a spreadsheet work too. */
+function parsePeople(text: string) {
+  return text.split("\n").map(line => line.split(/[,\t]/).map(cell => cell.trim())).filter(cells => cells[0])
+    .map(([name, email, phone]) => ({ name, email: email ?? "", phone: phone ?? "" }));
+}
+
+const BulkRegistrationForm: React.FC<{ api: Api; session: AdminSession; notify: boolean; onClose: () => void; onSaved: (message: string) => void }> = ({ api, session, notify, onClose, onSaved }) => {
+  const [form, setForm] = useState({ people: "", company: "", status: "pending", sales_stage: "", amount: "", paid_on: "", paid_account: "", receipt_nos: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(prev => ({ ...prev, [key]: e.target.value }));
+  const people = parsePeople(form.people);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setError(null);
+      const { amount, people: _text, ...shared } = form;
+      const res = await api.post<{ added: number; results: Array<{ email: string; error?: string }> }>(`/admin/site/sessions/${session.id}/registrations/bulk`,
+        { ...shared, people, notify, paid_amount_satang: toSatang(amount) });
+      const skipped = res.results.filter(r => r.error);
+      if (res.added === 0) { setError(skipped.map(r => `${r.email}: ${r.error}`).join(" · ")); return; }
+      onSaved(`เพิ่มแล้ว ${res.added} คน${skipped.length ? ` · ข้าม ${skipped.length} คน (${skipped.map(r => `${r.email}: ${r.error}`).join(", ")})` : ""}`);
+    } catch (err: any) { setError(err.message); } finally { setSaving(false); }
+  };
+  return (
+    <Modal title={`เพิ่มทั้งบริษัท: ${session.title}`} onClose={onClose}>
+      <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "12px" }}>เหลือ {Math.max(0, session.capacity - session.seats_taken)} ที่นั่ง · ใครเพิ่มไม่ได้ ระบบจะแจ้งชื่อให้ คนอื่นยังถูกบันทึกตามปกติ</p>
+      <ErrorBox message={error} />
+      <form onSubmit={save} style={grid2}>
+        <Field label="บริษัท *" span><input className="form-input" required maxLength={160} value={form.company} onChange={set("company")} /></Field>
+        <Field label={`รายชื่อ * (${people.length} คน)`} hint="บรรทัดละคน: ชื่อ, อีเมล, เบอร์โทร (เบอร์ไม่บังคับ) หรือวางจาก Excel ได้" span>
+          <textarea className="form-input" rows={5} required value={form.people} onChange={set("people")} placeholder={"Somchai Jaidee, somchai@example.com, 0812345678"} />
+        </Field>
+        <Field label="สถานะ">
+          <select className="form-input" value={form.status} onChange={set("status")}>
+            {(["pending", "confirmed", "paid"] as RegistrationStatus[]).map(s => <option key={s} value={s}>{REG_STATUS[s].label}</option>)}
+          </select>
+        </Field>
+        <SalesStageField value={form.sales_stage} onChange={set("sales_stage")} />
+        <Field label="ยอดชำระต่อคน (บาท)"><input className="form-input" type="number" min={0} step="0.01" value={form.amount} onChange={set("amount")} /></Field>
+        <Field label="วันที่ชำระ"><input className="form-input" type="date" value={form.paid_on} onChange={set("paid_on")} /></Field>
+        <Field label="บัญชีที่รับเงิน"><input className="form-input" maxLength={80} value={form.paid_account} onChange={set("paid_account")} /></Field>
+        <Field label="เลขที่ใบเสร็จ"><input className="form-input" maxLength={200} value={form.receipt_nos} onChange={set("receipt_nos")} /></Field>
+        <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <button type="button" className="tech-button-outline" onClick={onClose}>ยกเลิก</button>
+          <button type="submit" className="tech-button-primary" disabled={saving || people.length === 0}>{saving ? "กำลังบันทึก…" : `เพิ่ม ${people.length} คน`}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
+/** The slip is private, so it is fetched with the staff token rather than linked directly. */
+const SlipPreview: React.FC<{ api: Api; registration: Registration }> = ({ api, registration: r }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let created: string | null = null;
+    let live = true;
+    fetch(`${API_BASE_URL}/admin/site/registrations/${r.id}/slip`, { headers: api.token ? { Authorization: `Bearer ${api.token}` } : {} })
+      .then(res => { if (!res.ok) throw new Error("เปิดสลิปไม่สำเร็จ"); return res.blob(); })
+      .then(blob => { if (live) { created = URL.createObjectURL(blob); setUrl(created); } })
+      .catch(err => live && setError(err.message));
+    return () => { live = false; if (created) URL.revokeObjectURL(created); };
+  }, [r.id, api.token]);
+  if (error) return <ErrorBox message={error} />;
+  if (!url) return <p style={{ fontSize: "13px", color: "var(--text-muted)" }}>กำลังโหลดสลิป…</p>;
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      <div style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "6px" }}>สลิปการโอน · แนบเมื่อ {formatDateTime(r.slip_uploaded_at!)}</div>
+      {r.slip_content_type === "application/pdf"
+        ? <a href={url} target="_blank" rel="noreferrer">เปิดไฟล์ PDF</a>
+        : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="สลิปการโอน" style={{ maxWidth: "100%", maxHeight: "320px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.08)" }} /></a>}
+    </div>
+  );
+};
+
+const SALES_STAGE: Record<string, string> = { quote_sent: "ส่งใบเสนอราคาแล้ว", po_received: "ได้รับ PO แล้ว" };
+const toSatang = (baht: string) => baht === "" ? null : Math.round(Number(baht) * 100);
+
+const SalesStageField: React.FC<{ value: string; onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void }> = ({ value, onChange }) => (
+  <Field label="ขั้นตอนการขาย">
+    <select className="form-input" value={value} onChange={onChange}>
+      <option value="">— ไม่ระบุ —</option>
+      {Object.entries(SALES_STAGE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+    </select>
+  </Field>
+);
+
+const RegistrationDetail: React.FC<{ api: Api; registration: Registration; onClose: () => void; onSave: (body: Record<string, unknown>) => void; onDelete: () => void }> = ({ api, registration: r, onClose, onSave, onDelete }) => {
+  const [form, setForm] = useState({ status: r.status, attendees: r.attendees, payment_ref: r.payment_ref || "", admin_note: r.admin_note || "", phone: r.phone, company: r.company || "",
+    buyer_type: r.buyer_type || "", sales_stage: r.sales_stage || "", amount: r.paid_amount_satang == null ? "" : String(r.paid_amount_satang / 100),
+    paid_on: r.paid_on || "", paid_account: r.paid_account || "", receipt_nos: r.receipt_nos || "" });
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm(prev => ({ ...prev, [key]: e.target.value }));
   const info: Array<[string, React.ReactNode]> = [
     ["อีเมล", r.email], ["หมายเหตุจากผู้สมัคร", r.note || "-"],
@@ -582,7 +727,13 @@ const RegistrationDetail: React.FC<{ registration: Registration; onClose: () => 
       <dl style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: "8px 12px", fontSize: "14px", marginBottom: "20px" }}>
         {info.map(([k, v]) => <React.Fragment key={k}><dt style={{ color: "var(--text-muted)" }}>{k}</dt><dd style={{ whiteSpace: "pre-wrap" }}>{v}</dd></React.Fragment>)}
       </dl>
-      <form onSubmit={e => { e.preventDefault(); onSave({ ...form, attendees: Number(form.attendees) }); }} style={grid2}>
+      {r.slip_uploaded_at && <SlipPreview api={api} registration={r} />}
+      <form onSubmit={e => {
+        e.preventDefault();
+        const { amount, ...rest } = form;
+        // People added in a company group may have no phone number yet.
+        onSave({ ...rest, attendees: Number(form.attendees), paid_amount_satang: toSatang(amount), phone: form.phone || undefined });
+      }} style={grid2}>
         <Field label="สถานะ">
           <select className="form-input" value={form.status} onChange={set("status")}>
             {(Object.keys(REG_STATUS) as RegistrationStatus[]).map(s => <option key={s} value={s}>{REG_STATUS[s].label}</option>)}
@@ -591,6 +742,16 @@ const RegistrationDetail: React.FC<{ registration: Registration; onClose: () => 
         <Field label="จำนวนผู้เข้าอบรม"><input className="form-input" type="number" min={1} max={50} value={form.attendees} onChange={set("attendees")} /></Field>
         <Field label="เบอร์โทร"><input className="form-input" value={form.phone} onChange={set("phone")} /></Field>
         <Field label="บริษัท"><input className="form-input" value={form.company} onChange={set("company")} /></Field>
+        <Field label="ผู้ซื้อ">
+          <select className="form-input" value={form.buyer_type} onChange={set("buyer_type")}>
+            <option value="">— ไม่ระบุ —</option><option value="individual">บุคคล</option><option value="company">บริษัท</option>
+          </select>
+        </Field>
+        <SalesStageField value={form.sales_stage} onChange={set("sales_stage")} />
+        <Field label="ยอดที่รับแล้ว (บาท)"><input className="form-input" type="number" min={0} step="0.01" value={form.amount} onChange={set("amount")} /></Field>
+        <Field label="วันที่ชำระ"><input className="form-input" type="date" value={form.paid_on} onChange={set("paid_on")} /></Field>
+        <Field label="บัญชีที่รับเงิน"><input className="form-input" maxLength={80} value={form.paid_account} onChange={set("paid_account")} /></Field>
+        <Field label="เลขที่ใบเสร็จ"><input className="form-input" maxLength={200} value={form.receipt_nos} onChange={set("receipt_nos")} /></Field>
         <Field label="เลขอ้างอิงการชำระเงิน" span><input className="form-input" value={form.payment_ref} onChange={set("payment_ref")} placeholder="เลขที่โอน / ใบแจ้งหนี้" /></Field>
         <Field label="หมายเหตุเจ้าหน้าที่" span><textarea className="form-input" rows={3} value={form.admin_note} onChange={set("admin_note")} /></Field>
         <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", gap: "10px" }}>

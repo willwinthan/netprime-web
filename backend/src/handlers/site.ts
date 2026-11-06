@@ -7,6 +7,7 @@ import { currentPermissions, permit, Permission } from "../utils/permissions";
 import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { createNotification } from "./notifications";
 import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
+import { checkSlip, loadBankTransfer, putSlip, serveSlip } from "./orders";
 
 /**
  * Website content managed by coordinators (admin role):
@@ -15,6 +16,7 @@ import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
  */
 export const publicSiteRouter = new Hono<Env>();
 export const adminSiteRouter = new Hono<Env>();
+export const instructorSessionsRouter = new Hono<Env>();
 
 // Statuses that occupy seats in a training session.
 const HOLD = ["pending", "confirmed", "paid", "attended"] as const;
@@ -24,12 +26,15 @@ const STATUS_LABEL: Record<string, string> = {
   pending: "รอตรวจสอบ", confirmed: "ยืนยันแล้ว", paid: "ชำระเงินแล้ว",
   attended: "เข้าอบรมแล้ว", waitlist: "รอคิว", cancelled: "ยกเลิก"
 };
+const BUYER_LABEL: Record<string, string> = { individual: "บุคคล", company: "บริษัท" };
+const STAGE_LABEL: Record<string, string> = { quote_sent: "ส่งใบเสนอราคาแล้ว", po_received: "PO แล้ว" };
+const SLIP_MAX_BYTES = 10 * 1024 * 1024;
 
 // ==========================================
 // Validation helpers
 // ==========================================
 
-type Kind = "text" | "email" | "date" | "int" | "bool" | "url" | readonly string[];
+type Kind = "text" | "email" | "date" | "dates" | "int" | "bool" | "url" | readonly string[];
 interface FieldSpec { kind: Kind; label: string; max?: number; min?: number; required?: boolean; default?: unknown }
 type Values = Record<string, any>;
 
@@ -66,7 +71,11 @@ function parseFields(body: unknown, spec: Record<string, FieldSpec>, partial = f
       continue;
     }
     const kind = field.kind;
-    if (Array.isArray(kind)) {
+    if (kind === "dates") {
+      // A list of days is stored sorted as JSON; an empty list clears the field.
+      if (!Array.isArray(raw) || raw.length > 60 || !raw.every(d => typeof d === "string" && validDate(d))) return { values, error: `${field.label}ไม่ถูกต้อง` };
+      values[key] = raw.length ? JSON.stringify(Array.from(new Set(raw as string[])).sort()) : null;
+    } else if (Array.isArray(kind)) {
       if (!kind.includes(raw as string)) return { values, error: `${field.label}ไม่ถูกต้อง` };
       values[key] = raw;
     } else if (kind === "bool") {
@@ -114,6 +123,7 @@ function uniqueViolation(error: any): boolean {
 // ==========================================
 
 interface SiteSettings {
+  company: string | null;
   phone: string | null;
   email: string | null;
   line: string | null;
@@ -121,13 +131,15 @@ interface SiteSettings {
   hours: string | null;
   map_url: string | null;
   facebook_url: string | null;
-  announcement: { active: boolean; text: string | null; link: string | null };
+  /** `auto`: show rounds starting soon; the staff text is used when there are none. */
+  announcement: { active: boolean; auto: boolean; text: string | null; link: string | null };
   notify_emails: string | null;
 }
 
 const DEFAULT_SETTINGS: SiteSettings = {
-  phone: null, email: null, line: null, address: null, hours: null, map_url: null, facebook_url: null,
-  announcement: { active: false, text: null, link: null }, notify_emails: null
+  company: "Plantecplus Co.,Ltd (NetPrime Training)", phone: "062-559-4622", email: "netprime@plantecplus.com", line: null,
+  address: "118/28 ถนน พระรามที่ 6 แขวงพญาไท เขตพญาไท กรุงเทพมหานคร 10400", hours: null, map_url: null, facebook_url: null,
+  announcement: { active: false, auto: true, text: null, link: null }, notify_emails: null
 };
 
 async function loadSettings(db: D1Database): Promise<SiteSettings> {
@@ -211,10 +223,12 @@ const SESSION_SPEC: Record<string, FieldSpec> = {
   course_id: { kind: "text", label: "คอร์สออนไลน์ที่เชื่อม", max: 80 },
   start_date: { kind: "date", label: "วันเริ่ม", required: true },
   end_date: { kind: "date", label: "วันสิ้นสุด", required: true },
+  session_dates: { kind: "dates", label: "วันอบรม" },
   time_text: { kind: "text", label: "เวลาอบรม", max: 80 },
   mode: { kind: ["classroom", "online", "hybrid"], label: "รูปแบบ", required: true, default: "classroom" },
   location: { kind: "text", label: "สถานที่", max: 200 },
   instructor_name: { kind: "text", label: "วิทยากร", max: 120 },
+  instructor_id: { kind: "text", label: "บัญชีวิทยากร", max: 80 },
   price: { kind: "int", label: "ราคา", min: 0, max: 10_000_000, required: true, default: 0 },
   capacity: { kind: "int", label: "จำนวนที่นั่ง", min: 1, max: 1000, required: true },
   registration_deadline: { kind: "date", label: "วันปิดรับสมัคร" },
@@ -233,12 +247,17 @@ type SessionRow = Record<string, any> & {
   registration_deadline: string | null; seats_taken: number;
 };
 
+function parseDates(value: unknown): string[] | null {
+  if (typeof value !== "string") return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
 function publicSession(row: SessionRow, today = bangkokToday()) {
   const deadline = row.registration_deadline || row.start_date;
   const seatsLeft = Math.max(0, row.capacity - row.seats_taken);
   return {
     id: row.id, title: row.title, vendor: row.vendor, description: row.description, course_id: row.course_id,
-    start_date: row.start_date, end_date: row.end_date, time_text: row.time_text, mode: row.mode,
+    start_date: row.start_date, end_date: row.end_date, session_dates: parseDates(row.session_dates), time_text: row.time_text, mode: row.mode,
     location: row.location, instructor_name: row.instructor_name, price: row.price,
     registration_deadline: deadline, seats_left: seatsLeft,
     registration_open: row.status === "open" && deadline >= today,
@@ -249,6 +268,12 @@ function publicSession(row: SessionRow, today = bangkokToday()) {
 /** `previousCourseId`: a course already linked may stay linked after it is archived. */
 async function sessionCrossCheck(db: D1Database, values: Values, previousCourseId?: string | null): Promise<string | null> {
   if (values.end_date < values.start_date) return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
+  const days = parseDates(values.session_dates);
+  if (days && (days[0] !== values.start_date || days[days.length - 1] !== values.end_date)) return "วันอบรมวันแรกและวันสุดท้ายต้องตรงกับวันเริ่มและวันสิ้นสุด";
+  if (values.instructor_id) {
+    const instructor = await db.prepare("SELECT 1 FROM user_roles WHERE user_id = ? AND role = 'instructor'").bind(values.instructor_id).first();
+    if (!instructor) return "ไม่พบบัญชีวิทยากรที่เลือก";
+  }
   if (values.registration_deadline && values.registration_deadline > values.end_date) return "วันปิดรับสมัครต้องไม่หลังวันสิ้นสุด";
   if (values.course_id && values.course_id !== previousCourseId) {
     const course = await db.prepare("SELECT status FROM courses WHERE id = ?").bind(values.course_id).first<{ status: string }>();
@@ -270,6 +295,15 @@ publicSiteRouter.use("*", async (c, next) => {
   }
 });
 
+/** Rounds for the announcement bar: starting within 30 days, with registration open and seats left. */
+async function upcomingRounds(db: D1Database, today: string) {
+  const until = new Date(Date.parse(`${today}T00:00:00Z`) + 30 * 86400_000).toISOString().slice(0, 10);
+  const rows = await db.prepare(`${SESSION_SELECT} WHERE s.status = 'open' AND s.start_date BETWEEN ? AND ?
+    ORDER BY s.start_date, s.title LIMIT 20`).bind(today, until).all<SessionRow>();
+  return rows.results.map(row => publicSession(row, today)).filter(s => s.registration_open && s.seats_left > 0).slice(0, 5)
+    .map(({ id, title, start_date }) => ({ id, title, start_date }));
+}
+
 /** Contact details, announcement bar and active promotions for the header/footer. */
 publicSiteRouter.get("/site", async (c) => {
   const settings = await loadSettings(c.env.DB);
@@ -281,6 +315,7 @@ publicSiteRouter.get("/site", async (c) => {
   const legal = await loadLegal(c.env.DB);
   return c.json({
     settings: publicSettings, promotions: promotions.results, home: await loadHome(c.env.DB),
+    upcoming_sessions: settings.announcement.auto ? await upcomingRounds(c.env.DB, today) : [],
     legal: LEGAL_KEYS.map(key => ({ key, path: `/${key}`, title: legal[key].title }))
   });
 });
@@ -316,6 +351,7 @@ const REGISTRATION_SPEC: Record<string, FieldSpec> = {
   email: { kind: "email", label: "อีเมล", max: 254, required: true },
   phone: { kind: "text", label: "เบอร์โทร", max: 30, required: true },
   company: { kind: "text", label: "บริษัท/หน่วยงาน", max: 160 },
+  buyer_type: { kind: ["individual", "company"], label: "ประเภทผู้ซื้อ" },
   attendees: { kind: "int", label: "จำนวนผู้เข้าอบรม", min: 1, max: 50, required: true, default: 1 },
   note: { kind: "text", label: "หมายเหตุ", max: 1000 },
   invoice_required: { kind: "bool", label: "ต้องการใบกำกับภาษี" },
@@ -399,16 +435,22 @@ function unusablePasswordHash(): string {
 }
 
 publicSiteRouter.post("/sessions/:id/register", async (c) => {
-  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  // JSON, or multipart when the form carries a transfer slip in the "slip" field.
+  const multipart = (c.req.header("Content-Type") || "").includes("multipart/form-data");
+  const body: Record<string, unknown> | null = multipart
+    ? await c.req.parseBody().catch(() => null)
+    : await c.req.json<Record<string, unknown>>().catch(() => null);
   if (!body || typeof body !== "object") return c.json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
   if (await rateLimited(c, "register")) return c.json({ error: "ส่งข้อมูลบ่อยเกินไป กรุณารอสักครู่" }, 429);
   const blocked = await botCheck(c, body);
   if (blocked) return c.json({ error: blocked }, 400);
-  if (body.consent !== true) return c.json({ error: "กรุณายินยอมให้เก็บข้อมูลเพื่อติดต่อกลับตามนโยบายความเป็นส่วนตัว" }, 400);
+  if (body.consent !== true && body.consent !== "true") return c.json({ error: "กรุณายินยอมให้เก็บข้อมูลเพื่อติดต่อกลับตามนโยบายความเป็นส่วนตัว" }, 400);
 
   const { values, error } = parseFields(body, REGISTRATION_SPEC);
   const problem = error || registrationCrossCheck(values);
   if (problem) return c.json({ error: problem }, 400);
+  const slip = body.slip instanceof File && body.slip.size > 0 ? await checkSlip(body.slip, SLIP_MAX_BYTES) : null;
+  if (slip && "error" in slip) return c.json({ error: slip.error }, 400);
 
   const db = c.env.DB;
   const row = await db.prepare(`${SESSION_SELECT} WHERE s.id = ? AND s.status IN ('open', 'closed')`)
@@ -427,17 +469,26 @@ publicSiteRouter.post("/sessions/:id/register", async (c) => {
   }
   const waitlisted = created!.status === "waitlist";
   await linkRegistration(db, created!.id);
+  if (values.buyer_type) await db.prepare("UPDATE session_registrations SET buyer_type = ? WHERE id = ?").bind(values.buyer_type, created!.id).run();
+  // Nobody should pay for a seat they did not get, so a slip sent while the round filled up is not kept.
+  const slipSaved = !!slip && !waitlisted;
+  if (slipSaved) {
+    const key = await putSlip(c, slip, `registrations/${created!.id}`);
+    await db.prepare(`UPDATE session_registrations SET slip_r2_key = ?, slip_content_type = ?, slip_uploaded_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(key, slip.type, created!.id).run();
+  }
 
   const settings = await loadSettings(db);
   const details: Array<[string, unknown]> = [
     ["หลักสูตร", row.title], ["วันที่", `${row.start_date} ถึง ${row.end_date}`], ["เวลา", row.time_text],
     ["ชื่อ", values.name], ["อีเมล", values.email], ["โทร", values.phone], ["บริษัท", values.company],
-    ["จำนวนผู้เข้าอบรม", values.attendees], ["ใบกำกับภาษี", values.invoice_required ? "ต้องการ" : "ไม่ต้องการ"], ["หมายเหตุ", values.note]
+    ["จำนวนผู้เข้าอบรม", values.attendees], ["ใบกำกับภาษี", values.invoice_required ? "ต้องการ" : "ไม่ต้องการ"],
+    ["สลิป", slipSaved ? "แนบแล้ว" : null], ["หมายเหตุ", values.note]
   ];
   deliverLater(c, Promise.all([
     sendEmail(values.email, waitlisted ? `อยู่ในรายชื่อรอคิว: ${row.title}` : `ได้รับใบสมัครแล้ว: ${row.title}`,
       emailLayout(waitlisted ? "ที่นั่งเต็มแล้ว คุณอยู่ในรายชื่อรอคิว" : "ได้รับใบสมัครอบรมของคุณแล้ว", details,
-        `<p>เจ้าหน้าที่จะติดต่อกลับเพื่อยืนยันที่นั่งและแจ้งการชำระเงิน${settings.phone ? ` หรือติดต่อ ${escapeHtml(settings.phone)}` : ""}</p>`),
+        `<p>${slipSaved ? "เจ้าหน้าที่จะตรวจสอบสลิปและยืนยันที่นั่ง" : "เจ้าหน้าที่จะติดต่อกลับเพื่อยืนยันที่นั่งและแจ้งการชำระเงิน"}${settings.phone ? ` หรือติดต่อ ${escapeHtml(settings.phone)}` : ""}</p>`),
       c.env.RESEND_API_KEY),
     sendEmail(notifyRecipients(settings), `[ลงทะเบียนใหม่${waitlisted ? " - รอคิว" : ""}] ${row.title}`,
       emailLayout("มีผู้ลงทะเบียนอบรมใหม่", details, siteUrl(c) ? `<p>จัดการได้ที่ ${escapeHtml(siteUrl(c))}</p>` : ""),
@@ -445,10 +496,14 @@ publicSiteRouter.post("/sessions/:id/register", async (c) => {
   ]));
 
   return c.json({
-    message: waitlisted ? "ที่นั่งเต็มแล้ว เราบันทึกคุณไว้ในรายชื่อรอคิว" : "ลงทะเบียนสำเร็จ เจ้าหน้าที่จะติดต่อกลับเพื่อยืนยัน",
+    message: waitlisted ? "ที่นั่งเต็มแล้ว เราบันทึกคุณไว้ในรายชื่อรอคิว ยังไม่ต้องโอนเงิน"
+      : slipSaved ? "ลงทะเบียนและแนบสลิปแล้ว เจ้าหน้าที่จะตรวจสอบและยืนยันที่นั่ง" : "ลงทะเบียนสำเร็จ เจ้าหน้าที่จะติดต่อกลับเพื่อยืนยัน",
     registration: { id: created!.id, status: created!.status }
   }, 201);
 });
+
+/** Bank details shown on the registration form; the same account as course orders. */
+publicSiteRouter.get("/payment-info", async (c) => c.json({ bank: await loadBankTransfer(c.env.DB) }));
 
 publicSiteRouter.get("/articles", async (c) => {
   const category = c.req.query("category") || null;
@@ -471,7 +526,7 @@ publicSiteRouter.get("/articles", async (c) => {
 
 publicSiteRouter.get("/articles/:slug", async (c) => {
   const article = await c.env.DB.prepare(`SELECT a.id, a.slug, a.title, a.category, a.excerpt, a.body, a.content_json, a.cover_url, a.published_at,
-    u.name AS author_name
+    COALESCE(a.author_label, u.name) AS author_name
     FROM articles a LEFT JOIN users u ON u.id = a.author_id
     WHERE a.slug = ? AND a.status = 'published' AND a.published_at <= datetime('now')`).bind(c.req.param("slug")).first();
   if (!article) return c.json({ error: "ไม่พบบทความ" }, 404);
@@ -533,7 +588,7 @@ publicSiteRouter.get("/images/:name", async (c) => {
 adminSiteRouter.use("*", rbac());
 const guard = (paths: string[], ...permissions: Permission[]) => paths.forEach(path => adminSiteRouter.use(path, permit(...permissions)));
 guard(["/summary"], "site.dashboard");
-guard(["/sessions", "/sessions/*", "/registrations/*", "/course-options"], "site.sessions");
+guard(["/sessions", "/sessions/*", "/registrations/*", "/course-options", "/instructor-options"], "site.sessions");
 guard(["/inquiries", "/inquiries/*"], "site.inquiries");
 guard(["/promotions", "/promotions/*"], "site.promotions");
 guard(["/settings", "/home", "/legal", "/legal/*"], "site.settings");
@@ -568,6 +623,13 @@ adminSiteRouter.get("/summary", async (c) => {
 adminSiteRouter.get("/course-options", async (c) => {
   const rows = await c.env.DB.prepare("SELECT id, title FROM courses WHERE status = 'published' ORDER BY title").all<{ id: string; title: string }>();
   return c.json({ courses: rows.results });
+});
+
+/** Accounts a round can be assigned to (session form picker). */
+adminSiteRouter.get("/instructor-options", async (c) => {
+  const rows = await c.env.DB.prepare(`SELECT u.id, u.name FROM users u JOIN user_roles r ON r.user_id = u.id
+    WHERE r.role = 'instructor' AND u.status = 'active' ORDER BY u.name`).all<{ id: string; name: string }>();
+  return c.json({ instructors: rows.results });
 });
 
 adminSiteRouter.get("/sessions", async (c) => {
@@ -631,8 +693,11 @@ adminSiteRouter.delete("/sessions/:id", async (c) => {
   // Published or with registration history → an emailed code from the creator or an admin.
   const denied = await requireDeleteConfirmation(c, "session.delete", id);
   if (denied) return denied;
+  const slips = await c.env.DB.prepare("SELECT slip_r2_key FROM session_registrations WHERE session_id = ? AND slip_r2_key IS NOT NULL")
+    .bind(id).all<{ slip_r2_key: string }>();
   const result = await c.env.DB.prepare("DELETE FROM training_sessions WHERE id = ?").bind(id).run();
   if (!result.meta.changes) return c.json({ error: "ไม่พบรอบอบรม" }, 404);
+  await Promise.all(slips.results.map(s => c.env.ASSETS.delete(s.slip_r2_key)));
   await audit(c, "delete", "session", id);
   return c.json({ message: "ลบรอบอบรมแล้ว" });
 });
@@ -680,9 +745,10 @@ adminSiteRouter.get("/sessions/:id/registrations.csv", async (c) => {
     return `"${text.replace(/"/g, '""')}"`;
   };
   const header = ["ลำดับ", "ชื่อ-นามสกุล", "อีเมล", "โทร", "บริษัท", "จำนวนคน", "สถานะ", "ใบกำกับภาษี", "เลขผู้เสียภาษี",
-    "ที่อยู่ออกใบกำกับ", "เลขอ้างอิงชำระเงิน", "หมายเหตุผู้สมัคร", "หมายเหตุเจ้าหน้าที่", "ช่องทาง", "วันที่สมัคร"];
+    "ที่อยู่ออกใบกำกับ", "ประเภทผู้ซื้อ", "ขั้นตอนการขาย", "ยอดชำระ", "วันที่ชำระ", "บัญชีที่รับเงิน", "เลขที่ใบเสร็จ", "เลขอ้างอิงชำระเงิน", "หมายเหตุผู้สมัคร", "หมายเหตุเจ้าหน้าที่", "ช่องทาง", "วันที่สมัคร"];
   const lines = rows.results.map((r, i) => [i + 1, r.name, r.email, r.phone, r.company, r.attendees, STATUS_LABEL[r.status] || r.status,
-    r.invoice_required ? "ต้องการ" : "", r.tax_id, r.billing_address, r.payment_ref, r.note, r.admin_note,
+    r.invoice_required ? "ต้องการ" : "", r.tax_id, r.billing_address, BUYER_LABEL[r.buyer_type] ?? "", STAGE_LABEL[r.sales_stage] ?? "",
+    r.paid_amount_satang === null ? "" : (r.paid_amount_satang / 100).toFixed(2), r.paid_on, r.paid_account, r.receipt_nos, r.payment_ref, r.note, r.admin_note,
     r.source === "admin" ? "เจ้าหน้าที่เพิ่ม" : "เว็บไซต์", r.created_at].map(cell).join(","));
   const csv = "﻿" + [header.map(cell).join(","), ...lines].join("\r\n");
   const filename = `registrations-${session.start_date}-${session.id}.csv`;
@@ -695,11 +761,27 @@ adminSiteRouter.get("/sessions/:id/registrations.csv", async (c) => {
   });
 });
 
+/** Payment record staff keep per registration; see migrations/0030_mvp_rounds.sql. */
+const PAYMENT_SPEC: Record<string, FieldSpec> = {
+  sales_stage: { kind: ["quote_sent", "po_received"], label: "ขั้นตอนการขาย" },
+  paid_amount_satang: { kind: "int", label: "ยอดชำระ", min: 0, max: 1_000_000_000 },
+  paid_on: { kind: "date", label: "วันที่ชำระ" },
+  paid_account: { kind: "text", label: "บัญชีที่รับเงิน", max: 80 },
+  receipt_nos: { kind: "text", label: "เลขที่ใบเสร็จ", max: 200 }
+};
+
+async function savePayment(db: D1Database, registrationId: string, values: Values) {
+  await db.prepare(`UPDATE session_registrations SET buyer_type = ?, sales_stage = ?, paid_amount_satang = ?, paid_on = ?, paid_account = ?, receipt_nos = ?
+    WHERE id = ?`).bind(values.buyer_type ?? null, values.sales_stage ?? null, values.paid_amount_satang ?? null, values.paid_on ?? null,
+      values.paid_account ?? null, values.receipt_nos ?? null, registrationId).run();
+}
+
 /** Coordinators add phone/email registrations themselves; capacity rules still apply. */
 adminSiteRouter.post("/sessions/:id/registrations", async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
   const { values, error } = parseFields(body, {
     ...REGISTRATION_SPEC,
+    ...PAYMENT_SPEC,
     status: { kind: ["pending", "confirmed", "paid", "waitlist"], label: "สถานะ", required: true, default: "confirmed" },
     admin_note: { kind: "text", label: "หมายเหตุเจ้าหน้าที่", max: 1000 }
   });
@@ -718,14 +800,81 @@ adminSiteRouter.post("/sessions/:id/registrations", async (c) => {
   if (values.admin_note) {
     await c.env.DB.prepare("UPDATE session_registrations SET admin_note = ? WHERE id = ?").bind(values.admin_note, created.id).run();
   }
+  await savePayment(c.env.DB, created.id, values);
   await linkRegistration(c.env.DB, created.id);
+  if (body?.notify !== false) await autoInvite(c, created.id);
   const access = await grantCourseAccess(c.env.DB, created.id);
   await audit(c, "create", "registration", created.id, { session_id: session.id, status: created.status, course_access: access ?? undefined });
   return c.json({ registration: created, course_access: access }, 201);
 });
 
+const BULK_PERSON_SPEC: Record<string, FieldSpec> = {
+  name: REGISTRATION_SPEC.name,
+  email: REGISTRATION_SPEC.email,
+  phone: { kind: "text", label: "เบอร์โทร", max: 30, default: "" }
+};
+
+/**
+ * Several people from one company in one go, usually sharing a receipt. Each person is added on their own:
+ * a duplicate email or a full round skips that person and is reported, the others are kept.
+ */
+adminSiteRouter.post("/sessions/:id/registrations/bulk", async (c) => {
+  const db = c.env.DB;
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  const { values, error } = parseFields(body, {
+    ...PAYMENT_SPEC,
+    company: { ...REGISTRATION_SPEC.company, required: true },
+    status: { kind: ["pending", "confirmed", "paid"], label: "สถานะ", required: true, default: "pending" },
+    admin_note: { kind: "text", label: "หมายเหตุเจ้าหน้าที่", max: 1000 }
+  });
+  if (error) return c.json({ error }, 400);
+  const people = Array.isArray(body?.people) ? body.people : [];
+  if (people.length === 0 || people.length > 50) return c.json({ error: "กรุณาใส่รายชื่อ 1–50 คน" }, 400);
+  const parsed: Values[] = [];
+  for (const [i, person] of people.entries()) {
+    const row = parseFields(person, BULK_PERSON_SPEC);
+    const problem = row.error || registrationCrossCheck(row.values);
+    if (problem) return c.json({ error: `คนที่ ${i + 1}: ${problem}` }, 400);
+    parsed.push(row.values);
+  }
+  const session = await db.prepare("SELECT id FROM training_sessions WHERE id = ?").bind(c.req.param("id")).first<{ id: string }>();
+  if (!session) return c.json({ error: "ไม่พบรอบอบรม" }, 404);
+
+  const results: Array<{ email: string; id?: string; error?: string }> = [];
+  for (const person of parsed) {
+    const row = { ...person, company: values.company, attendees: 1, note: null, invoice_required: 0, tax_id: null, billing_address: null };
+    let created;
+    try {
+      created = await insertRegistration(db, session.id, row, values.status, "admin");
+    } catch (err) {
+      if (!uniqueViolation(err)) throw err;
+      results.push({ email: person.email, error: "อีเมลนี้ลงทะเบียนรอบนี้ไว้แล้ว" });
+      continue;
+    }
+    if (!created) { results.push({ email: person.email, error: "ที่นั่งไม่พอ" }); continue; }
+    await savePayment(db, created.id, { ...values, buyer_type: "company" });
+    if (values.admin_note) await db.prepare("UPDATE session_registrations SET admin_note = ? WHERE id = ?").bind(values.admin_note, created.id).run();
+    await linkRegistration(db, created.id);
+    if (body?.notify !== false) await autoInvite(c, created.id);
+    await grantCourseAccess(db, created.id);
+    results.push({ email: person.email, id: created.id });
+  }
+  const added = results.filter(r => r.id).length;
+  await audit(c, "create", "registration", session.id, { bulk: added, company: values.company });
+  return c.json({ added, results }, added ? 201 : 200);
+});
+
+/** The slip a registrant sent with the public form. */
+adminSiteRouter.get("/registrations/:id/slip", async (c) => {
+  const reg = await c.env.DB.prepare("SELECT slip_r2_key, slip_content_type FROM session_registrations WHERE id = ?")
+    .bind(c.req.param("id")).first<{ slip_r2_key: string | null; slip_content_type: string | null }>();
+  if (!reg) return c.json({ error: "ไม่พบผู้ลงทะเบียน" }, 404);
+  return serveSlip(c, reg.slip_r2_key, reg.slip_content_type, `slip-${c.req.param("id")}`);
+});
+
 const REGISTRATION_UPDATE_SPEC: Record<string, FieldSpec> = {
   ...REGISTRATION_SPEC,
+  ...PAYMENT_SPEC,
   status: { kind: REG_STATUSES, label: "สถานะ", required: true },
   payment_ref: { kind: "text", label: "เลขอ้างอิงชำระเงิน", max: 120 },
   admin_note: { kind: "text", label: "หมายเหตุเจ้าหน้าที่", max: 1000 }
@@ -760,11 +909,12 @@ adminSiteRouter.patch("/registrations/:id", async (c) => {
   }
   if (!result.meta.changes) return c.json({ error: "ที่นั่งไม่พอ เพิ่มจำนวนที่นั่งของรอบนี้ก่อน หรือคงไว้ในรายชื่อรอคิว" }, 409);
   await linkRegistration(db, id, values.email !== undefined && values.email !== existing.email);
+  const statusChanged = values.status && values.status !== existing.status;
+  const notify = body?.notify !== false;
+  if (statusChanged && notify) await autoInvite(c, id);
   const access = await grantCourseAccess(db, id);
   await audit(c, "update", "registration", id, access ? { ...values, course_access: access } : values);
 
-  const statusChanged = values.status && values.status !== existing.status;
-  const notify = body?.notify !== false;
   if (statusChanged && notify && ["confirmed", "paid", "cancelled"].includes(values.status)) {
     const settings = await loadSettings(db);
     const titles: Record<string, string> = {
@@ -792,6 +942,34 @@ async function sendInvite(c: Context<Env>, userId: string, reg: { name: string; 
       <p style="text-align:center;margin:20px 0"><a href="${escapeHtml(link)}" style="background:#c2541a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">ตั้งรหัสผ่านและเข้าสู่ระบบ</a></p>`),
     c.env.RESEND_API_KEY));
   return link;
+}
+
+/** Creates a student account for a registrant and links their registrations; null when the email already has one. */
+async function createRegistrantAccount(db: D1Database, reg: { name: string; email: string }): Promise<string | null> {
+  const userId = "usr_" + crypto.randomUUID();
+  try {
+    await db.prepare("INSERT INTO users (id, email, password_hash, name, role, partner_id) VALUES (?, ?, ?, ?, 'student', NULL)")
+      .bind(userId, reg.email, unusablePasswordHash(), reg.name).run();
+  } catch (err) {
+    if (uniqueViolation(err)) return null;
+    throw err;
+  }
+  await db.prepare("UPDATE session_registrations SET user_id = ? WHERE email = ? AND user_id IS NULL").bind(userId, reg.email).run();
+  return userId;
+}
+
+/**
+ * A confirmed or paid registrant of a round with an online course gets an account and an invitation by
+ * themselves, so they can open the course. Someone who already has an account is left to grantCourseAccess.
+ */
+async function autoInvite(c: Context<Env>, registrationId: string): Promise<void> {
+  const reg = await c.env.DB.prepare(`SELECT r.name, r.email, r.user_id, r.status, s.title AS session_title, s.course_id
+    FROM session_registrations r JOIN training_sessions s ON s.id = r.session_id WHERE r.id = ?`).bind(registrationId)
+    .first<{ name: string; email: string; user_id: string | null; status: string; session_title: string; course_id: string | null }>();
+  if (!reg || reg.user_id || !reg.course_id || !["confirmed", "paid"].includes(reg.status)) return;
+  const userId = await createRegistrantAccount(c.env.DB, reg);
+  if (userId) await sendInvite(c, userId, reg);
+  else await linkRegistration(c.env.DB, registrationId, true);
 }
 
 /**
@@ -829,17 +1007,12 @@ adminSiteRouter.post("/registrations/:id/invite", async (c) => {
     return c.json({ message: "ผู้สมัครมีบัญชีอยู่แล้ว เชื่อมกับบัญชีเดิมให้แล้ว", user_id: linked.id, created: false, course_access: access });
   }
 
-  const userId = "usr_" + crypto.randomUUID();
-  try {
-    await db.prepare("INSERT INTO users (id, email, password_hash, name, role, partner_id) VALUES (?, ?, ?, ?, 'student', NULL)")
-      .bind(userId, reg.email, unusablePasswordHash(), reg.name).run();
-  } catch (err) {
+  const userId = await createRegistrantAccount(db, reg);
+  if (!userId) {
     // Someone signed up with this email in the meantime: link to that account instead.
-    if (!uniqueViolation(err)) throw err;
     await linkRegistration(db, id, true);
     return c.json({ message: "ผู้สมัครมีบัญชีอยู่แล้ว เชื่อมกับบัญชีเดิมให้แล้ว", created: false, course_access: await grantCourseAccess(db, id) });
   }
-  await db.prepare("UPDATE session_registrations SET user_id = ? WHERE email = ? AND user_id IS NULL").bind(userId, reg.email).run();
   const access = await grantCourseAccess(db, id);
   const link = await sendInvite(c, userId, reg);
   await audit(c, "invite", "registration", id, { user_id: userId, course_access: access ?? undefined });
@@ -850,10 +1023,98 @@ adminSiteRouter.post("/registrations/:id/invite", async (c) => {
 });
 
 adminSiteRouter.delete("/registrations/:id", async (c) => {
-  const result = await c.env.DB.prepare("DELETE FROM session_registrations WHERE id = ?").bind(c.req.param("id")).run();
-  if (!result.meta.changes) return c.json({ error: "ไม่พบผู้ลงทะเบียน" }, 404);
+  const deleted = await c.env.DB.prepare("DELETE FROM session_registrations WHERE id = ? RETURNING slip_r2_key").bind(c.req.param("id")).first<{ slip_r2_key: string | null }>();
+  if (!deleted) return c.json({ error: "ไม่พบผู้ลงทะเบียน" }, 404);
+  if (deleted.slip_r2_key) await c.env.ASSETS.delete(deleted.slip_r2_key);
   await audit(c, "delete", "registration", c.req.param("id"));
   return c.json({ message: "ลบรายการแล้ว" });
+});
+
+// ==========================================
+// INSTRUCTOR ROUTES  (/api/instructor/sessions)
+// Instructors schedule rounds of their own courses as drafts; staff set the round open.
+// They see who is coming, but not registrants' contact, tax or payment details.
+// ==========================================
+
+const { status: _status, instructor_id: _instructorId, instructor_name: _instructorName, ...INSTRUCTOR_SESSION_SPEC } = SESSION_SPEC;
+const OWNED_DRAFT = "s.id = ? AND s.instructor_id = ? AND s.status = 'draft'";
+
+instructorSessionsRouter.use("/instructor/sessions", rbac(["instructor", "admin"]));
+instructorSessionsRouter.use("/instructor/sessions/*", rbac(["instructor", "admin"]));
+
+async function ownCourse(db: D1Database, courseId: unknown, userId: string): Promise<boolean> {
+  return !!await db.prepare("SELECT 1 FROM courses WHERE id = ? AND instructor_id = ?").bind(courseId, userId).first();
+}
+
+instructorSessionsRouter.get("/instructor/sessions", async (c) => {
+  const rows = await c.env.DB.prepare(`${SESSION_SELECT} WHERE s.instructor_id = ? ORDER BY s.start_date DESC LIMIT 200`).bind(c.get("user").id).all();
+  return c.json({ sessions: rows.results });
+});
+
+instructorSessionsRouter.get("/instructor/sessions/course-options", async (c) => {
+  const rows = await c.env.DB.prepare("SELECT id, title FROM courses WHERE instructor_id = ? AND status = 'published' ORDER BY title")
+    .bind(c.get("user").id).all<{ id: string; title: string }>();
+  return c.json({ courses: rows.results });
+});
+
+instructorSessionsRouter.post("/instructor/sessions", async (c) => {
+  const db = c.env.DB;
+  const user = c.get("user");
+  const { values, error } = parseFields(await c.req.json().catch(() => null), INSTRUCTOR_SESSION_SPEC);
+  if (error) return c.json({ error }, 400);
+  if (!values.course_id) return c.json({ error: "กรุณาเลือกคอร์สของคุณ" }, 400);
+  if (!await ownCourse(db, values.course_id, user.id)) return c.json({ error: "ลงรอบได้เฉพาะคอร์สของคุณ" }, 403);
+  const problem = await sessionCrossCheck(db, values);
+  if (problem) return c.json({ error: problem }, 400);
+  const id = newId("ses");
+  const row: Values = { ...values, status: "draft", instructor_id: user.id, instructor_name: user.name };
+  await db.prepare(`INSERT INTO training_sessions (id, ${SESSION_COLUMNS.join(", ")}, created_by)
+    VALUES (?, ${SESSION_COLUMNS.map(() => "?").join(", ")}, ?)`)
+    .bind(id, ...SESSION_COLUMNS.map(k => row[k] ?? null), user.id).run();
+  await audit(c, "create", "session", id, { title: values.title, start_date: values.start_date, by: "instructor" });
+  const settings = await loadSettings(db);
+  deliverLater(c, sendEmail(notifyRecipients(settings), `[รอบอบรมรอเปิดรับสมัคร] ${values.title}`,
+    emailLayout("อาจารย์ลงรอบอบรมใหม่", [["หลักสูตร", values.title], ["วิทยากร", user.name], ["วันที่", `${values.start_date} ถึง ${values.end_date}`]],
+      siteUrl(c) ? `<p>ตรวจและเปิดรับสมัครได้ที่ ${escapeHtml(siteUrl(c))}</p>` : ""), c.env.RESEND_API_KEY));
+  return c.json({ session: await db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).bind(id).first() }, 201);
+});
+
+instructorSessionsRouter.patch("/instructor/sessions/:id", async (c) => {
+  const db = c.env.DB;
+  const user = c.get("user");
+  const id = c.req.param("id");
+  const existing = await db.prepare(`${SESSION_SELECT} WHERE ${OWNED_DRAFT}`).bind(id, user.id).first<SessionRow>();
+  if (!existing) return c.json({ error: "แก้ไขได้เฉพาะรอบของคุณที่ยังเป็นฉบับร่าง รอบที่เปิดแล้วให้ติดต่อเจ้าหน้าที่" }, 403);
+  const { values, error } = parseFields(await c.req.json().catch(() => null), INSTRUCTOR_SESSION_SPEC, true);
+  if (error) return c.json({ error }, 400);
+  const keys = Object.keys(values);
+  if (keys.length === 0) return c.json({ error: "ไม่มีข้อมูลที่ต้องแก้ไข" }, 400);
+  if (values.course_id !== undefined && !await ownCourse(db, values.course_id, user.id)) return c.json({ error: "ลงรอบได้เฉพาะคอร์สของคุณ" }, 403);
+  const problem = await sessionCrossCheck(db, { ...existing, ...values }, existing.course_id);
+  if (problem) return c.json({ error: problem }, 400);
+  await db.prepare(`UPDATE training_sessions SET ${keys.map(k => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND instructor_id = ? AND status = 'draft'`).bind(...keys.map(k => values[k]), id, user.id).run();
+  await audit(c, "update", "session", id, values);
+  return c.json({ session: await db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).bind(id).first() });
+});
+
+instructorSessionsRouter.delete("/instructor/sessions/:id", async (c) => {
+  const db = c.env.DB;
+  const id = c.req.param("id");
+  const result = await db.prepare(`DELETE FROM training_sessions AS s WHERE ${OWNED_DRAFT}
+    AND NOT EXISTS (SELECT 1 FROM session_registrations r WHERE r.session_id = s.id)`).bind(id, c.get("user").id).run();
+  if (!result.meta.changes) return c.json({ error: "ลบได้เฉพาะรอบของคุณที่ยังเป็นฉบับร่างและไม่มีผู้สมัคร" }, 403);
+  await audit(c, "delete", "session", id);
+  return c.json({ message: "ลบรอบอบรมแล้ว" });
+});
+
+instructorSessionsRouter.get("/instructor/sessions/:id/registrations", async (c) => {
+  const db = c.env.DB;
+  const session = await db.prepare(`${SESSION_SELECT} WHERE s.id = ? AND s.instructor_id = ?`).bind(c.req.param("id"), c.get("user").id).first();
+  if (!session) return c.json({ error: "ไม่พบรอบอบรม" }, 404);
+  const rows = await db.prepare(`SELECT id, name, company, attendees, status, created_at FROM session_registrations
+    WHERE session_id = ? AND status != 'cancelled' ORDER BY created_at`).bind(c.req.param("id")).all();
+  return c.json({ session, registrations: rows.results });
 });
 
 // ---------- Reminders & scheduled jobs ----------
@@ -955,6 +1216,7 @@ const ARTICLE_SPEC: Record<string, FieldSpec> = {
   body: { kind: "text", label: "เนื้อหา", max: 200_000, required: true },
   content_json: { kind: "text", label: "เนื้อหาแบบบล็อก", max: 800_000 },
   cover_url: { kind: "url", label: "รูปปก", max: 500 },
+  author_label: { kind: "text", label: "ชื่อผู้เขียนที่แสดง", max: 120 },
   status: { kind: ["draft", "review", "published"], label: "สถานะ", required: true, default: "draft" },
   published_at: { kind: "date", label: "วันที่เผยแพร่" },
   review_note: { kind: "text", label: "หมายเหตุจากผู้ตรวจ", max: 1000 },
@@ -1088,6 +1350,7 @@ adminSiteRouter.post("/articles", async (c) => {
   if (problem) return c.json({ error: problem }, 400);
   if (values.status === "published" && !canPublish) return c.json({ error: "บัญชีของคุณยังเผยแพร่เองไม่ได้ กรุณาส่งตรวจ" }, 403);
   if (values.review_note && !canPublish) values.review_note = null;
+  if (values.author_label && !canPublish) values.author_label = null; // Only reviewers may credit someone else.
   if (!values.slug) values.slug = slugify(values.title);
   const id = newId("art");
   const keys = Object.keys(ARTICLE_SPEC);
@@ -1129,6 +1392,7 @@ adminSiteRouter.patch("/articles/:id", async (c) => {
   if (publishing && values.status !== undefined && values.status !== existing.status && !canPublish) {
     return c.json({ error: "บัญชีของคุณยังเผยแพร่หรือยกเลิกการเผยแพร่เองไม่ได้ กรุณาส่งตรวจ" }, 403);
   }
+  if (values.author_label !== undefined && !canPublish) return c.json({ error: "เฉพาะผู้ตรวจเท่านั้นที่แก้ชื่อผู้เขียนได้" }, 403);
   if (values.review_note !== undefined && !canPublish) return c.json({ error: "เฉพาะผู้ตรวจเท่านั้นที่เขียนหมายเหตุได้" }, 403);
   if (values.status === "review" && !isAuthor && !canManage) return c.json({ error: "ส่งตรวจได้เฉพาะผู้เขียน" }, 403);
 
@@ -1325,6 +1589,7 @@ adminSiteRouter.put("/settings", async (c) => {
   const { values, error } = parseFields(body, {
     phone: { kind: "text", label: "เบอร์โทร", max: 40 },
     email: { kind: "email", label: "อีเมลติดต่อ", max: 254 },
+    company: { kind: "text", label: "ชื่อบริษัท", max: 120 },
     line: { kind: "text", label: "LINE", max: 60 },
     address: { kind: "text", label: "ที่อยู่", max: 300 },
     hours: { kind: "text", label: "เวลาทำการ", max: 80 },
@@ -1335,6 +1600,7 @@ adminSiteRouter.put("/settings", async (c) => {
   if (error) return c.json({ error }, 400);
   const announcement = parseFields(body?.announcement, {
     active: { kind: "bool", label: "การแสดงประกาศ" },
+    auto: { kind: "bool", label: "การแสดงรอบอบรมอัตโนมัติ", default: 1 },
     text: { kind: "text", label: "ข้อความประกาศ", max: 200 },
     link: { kind: "url", label: "ลิงก์ประกาศ", max: 500 }
   });
@@ -1347,7 +1613,7 @@ adminSiteRouter.put("/settings", async (c) => {
   const settings: SiteSettings = {
     ...values as Omit<SiteSettings, "announcement">,
     notify_emails: notify.join(", ") || null,
-    announcement: { ...announcement.values, active: announcement.values.active === 1 } as SiteSettings["announcement"]
+    announcement: { ...announcement.values, active: announcement.values.active === 1, auto: announcement.values.auto === 1 } as SiteSettings["announcement"]
   };
   await c.env.DB.prepare(`INSERT INTO site_settings (key, value, updated_by, updated_at) VALUES ('site', ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`)

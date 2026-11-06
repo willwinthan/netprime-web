@@ -558,22 +558,33 @@ async function prerequisiteBlock(db: D1Database, userId: string, courseIds: stri
   return null;
 }
 
-/** Validates and stores an uploaded slip in R2 under slips/; returns the key or an error message. */
-async function storeSlip(c: Context<Env>, prefix: string): Promise<{ key: string; type: string } | { error: string }> {
-  const form = await c.req.parseBody().catch(() => null);
-  const file = form?.file;
+/** Checks an uploaded slip's type, size and file signature without storing it. */
+export async function checkSlip(file: unknown, maxBytes = SLIP_MAX_BYTES): Promise<{ bytes: Uint8Array; type: string; ext: string } | { error: string }> {
   if (!(file instanceof File)) return { error: "กรุณาเลือกไฟล์สลิป" };
   const type = SLIP_TYPES[file.type];
   if (!type) return { error: "รองรับเฉพาะไฟล์ PNG, JPG, WEBP หรือ PDF" };
-  if (file.size > SLIP_MAX_BYTES) return { error: "ไฟล์สลิปต้องไม่เกิน 5 MB" };
+  if (file.size > maxBytes) return { error: `ไฟล์สลิปต้องไม่เกิน ${Math.round(maxBytes / 1024 / 1024)} MB` };
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!type.magic.every((byte, i) => bytes[i] === byte)) return { error: "ไฟล์ไม่ตรงกับชนิดที่ระบุ" };
-  const key = `slips/${prefix}/${crypto.randomUUID().replace(/-/g, "")}.${type.ext}`;
-  await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: file.type } });
-  return { key, type: file.type };
+  return { bytes, type: file.type, ext: type.ext };
 }
 
-async function serveSlip(c: Context<Env>, key: string | null, contentType: string | null, filename: string) {
+/** Stores a checked slip privately in R2 under slips/ and returns its key. */
+export async function putSlip(c: Context<Env>, slip: { bytes: Uint8Array; type: string; ext: string }, prefix: string): Promise<string> {
+  const key = `slips/${prefix}/${crypto.randomUUID().replace(/-/g, "")}.${slip.ext}`;
+  await c.env.ASSETS.put(key, slip.bytes, { httpMetadata: { contentType: slip.type } });
+  return key;
+}
+
+/** Validates and stores an uploaded slip in R2 under slips/; returns the key or an error message. */
+async function storeSlip(c: Context<Env>, prefix: string): Promise<{ key: string; type: string } | { error: string }> {
+  const form = await c.req.parseBody().catch(() => null);
+  const slip = await checkSlip(form?.file);
+  if ("error" in slip) return slip;
+  return { key: await putSlip(c, slip, prefix), type: slip.type };
+}
+
+export async function serveSlip(c: Context<Env>, key: string | null, contentType: string | null, filename: string) {
   if (!key) return c.json({ error: "คำสั่งซื้อนี้ยังไม่มีสลิป" }, 404);
   const object = await c.env.ASSETS.get(key);
   if (!object) return c.json({ error: "ไม่พบไฟล์สลิป" }, 404);

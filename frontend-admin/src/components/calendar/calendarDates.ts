@@ -202,3 +202,46 @@ export function rangeLength(event: CalendarRange): number {
   const b = bounds(event);
   return b ? b[1] - b[0] + 1 : 0;
 }
+
+/** Groups class days into runs of consecutive days. */
+export function dayRuns(days: string[]): Array<{ start: string; end: string }> {
+  const runs: Array<{ start: string; end: string }> = [];
+  for (const day of [...days].sort()) {
+    const last = runs[runs.length - 1];
+    if (last && addDays(last.end, 1) === day) last.end = day;
+    else runs.push({ start: day, end: day });
+  }
+  return runs;
+}
+
+/** One calendar event per run of class days; ids after the first carry a #n suffix that sourceId removes. */
+export function splitByDays<T extends CalendarRange>(event: T, days: string[] | null | undefined): T[] {
+  if (!days?.length) return [event];
+  return dayRuns(days).map((run, i) => ({ ...event, ...run, id: i === 0 ? event.id : `${event.id}#${i}` }));
+}
+
+export const sourceId = (eventId: string) => eventId.split("#")[0];
+
+/** Every day from start to end, or null when the range is unusable or longer than maxDays. */
+export function daysBetween(start: string, end: string, maxDays = 60): string[] | null {
+  if (!parseYmd(start) || !parseYmd(end) || end < start) return null;
+  const count = dayNumber(end) - dayNumber(start) + 1;
+  return count > maxDays ? null : Array.from({ length: count }, (_, i) => addDays(start, i));
+}
+
+/**
+ * The session_dates to save from a day picker: [] means "every day". The first and last day are always
+ * class days, and days left outside the range after the dates changed are dropped.
+ */
+export function pickedDays(start: string, end: string, picked: string[] | null): string[] {
+  const all = daysBetween(start, end);
+  if (!picked || !all) return [];
+  const chosen = all.filter(d => d === start || d === end || picked.includes(d));
+  return chosen.length === all.length ? [] : chosen;
+}
+
+/** Moves picked class days along with the start date, so a copied round keeps its pattern of days. */
+export function shiftDays(days: string[] | null, from: string, to: string): string[] | null {
+  if (!days || !parseYmd(from) || !parseYmd(to)) return days;
+  return days.map(day => addDays(day, dayNumber(to) - dayNumber(from)));
+}

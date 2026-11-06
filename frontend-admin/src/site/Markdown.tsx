@@ -10,7 +10,7 @@ import React from "react";
 export type Block =
   | { type: "h2" | "h3"; text: string; id: string }
   | { type: "p" | "quote"; text: string }
-  | { type: "ul" | "ol"; items: string[] }
+  | { type: "ul" | "ol"; items: string[]; start?: number }
   | { type: "code"; text: string }
   | { type: "img"; alt: string; src: string };
 
@@ -56,9 +56,10 @@ export function parseMarkdown(source: string): Block[] {
     if (BULLET.test(line) || NUMBERED.test(line)) {
       const ordered = NUMBERED.test(line);
       const pattern = ordered ? NUMBERED : BULLET;
+      const start = ordered ? parseInt(line, 10) : 1; // A list split by an image keeps counting from where it was.
       const items: string[] = [];
       while (i < lines.length && pattern.test(lines[i])) items.push(lines[i++].replace(pattern, ""));
-      blocks.push({ type: ordered ? "ol" : "ul", items });
+      blocks.push({ type: ordered ? "ol" : "ul", items, ...(start !== 1 ? { start } : {}) });
       continue;
     }
     if (trimmed.startsWith(">")) {
@@ -130,7 +131,7 @@ export const Markdown: React.FC<{ blocks: Block[] }> = ({ blocks }) => (
         case "p": return <p key={i}>{renderInline(block.text)}</p>;
         case "quote": return <blockquote key={i}><p>{renderInline(block.text)}</p></blockquote>;
         case "ul": return <ul key={i}>{block.items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ul>;
-        case "ol": return <ol key={i}>{block.items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ol>;
+        case "ol": return <ol key={i} start={block.start}>{block.items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ol>;
         case "code": return <pre key={i}><code>{block.text}</code></pre>;
         case "img": {
           const src = safeImage(block.src);

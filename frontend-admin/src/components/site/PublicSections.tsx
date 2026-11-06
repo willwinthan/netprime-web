@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { CalendarDays, Clock, MapPin, Phone, Mail, MessageCircle, Megaphone, ArrowRight, CheckCircle, X } from "lucide-react";
-import { API_BASE_URL } from "../../hooks/useApi";
-import { MODE_LABEL, SessionMode, formatBaht, formatDate, formatDateRange } from "../site-admin/ui";
+import { API_BASE_URL, apiFetch } from "../../hooks/useApi";
+import { MODE_LABEL, SessionMode, formatBaht, formatDate, formatSessionDates } from "../site-admin/ui";
 
 // ==========================================
 // Public data access (no authentication)
@@ -9,26 +9,28 @@ import { MODE_LABEL, SessionMode, formatBaht, formatDate, formatDateRange } from
 
 export interface PublicSettings {
   phone: string | null; email: string | null; line: string | null; address: string | null; hours: string | null;
-  map_url: string | null; facebook_url: string | null;
-  announcement: { active: boolean; text: string | null; link: string | null };
+  company: string | null; map_url: string | null; facebook_url: string | null;
+  announcement: { active: boolean; auto?: boolean; text: string | null; link: string | null };
 }
+export interface UpcomingRound { id: string; title: string; start_date: string }
+interface PublicSiteData { settings: PublicSettings; promotions: PublicPromotion[]; upcoming_sessions?: UpcomingRound[] }
 export interface PublicPromotion { id: string; title: string; description: string | null; voucher_code: string | null; link_url: string | null; image_url: string | null; ends_at: string | null }
 export interface PublicSession {
-  id: string; title: string; vendor: string | null; description: string | null; start_date: string; end_date: string;
+  id: string; title: string; vendor: string | null; description: string | null; start_date: string; end_date: string; session_dates?: string[] | null;
   time_text: string | null; mode: SessionMode; location: string | null; instructor_name: string | null; price: number;
   registration_deadline: string; seats_left: number; registration_open: boolean; waitlist: boolean;
 }
 interface PublicArticle { id: string; slug: string; title: string; category: string | null; excerpt: string | null; cover_url: string | null; published_at: string; body?: string }
 
 export async function publicGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}/public${path}`);
+  const response = await apiFetch(`${API_BASE_URL}/public${path}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "โหลดข้อมูลไม่สำเร็จ");
   return data as T;
 }
 
 export async function publicPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}/public${path}`, {
+  const response = await apiFetch(`${API_BASE_URL}/public${path}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
   });
   const data = await response.json().catch(() => ({}));
@@ -36,12 +38,20 @@ export async function publicPost<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
+/** Same as publicPost, for a form that carries a file. */
+export async function publicPostForm<T>(path: string, form: FormData): Promise<T> {
+  const response = await apiFetch(`${API_BASE_URL}/public${path}`, { method: "POST", body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่");
+  return data as T;
+}
+
 /** Site settings and promotions are shared by several sections; fetch once per page load. */
-let sitePromise: Promise<{ settings: PublicSettings; promotions: PublicPromotion[] }> | null = null;
+let sitePromise: Promise<PublicSiteData> | null = null;
 export function usePublicSite() {
-  const [site, setSite] = useState<{ settings: PublicSettings; promotions: PublicPromotion[] } | null>(null);
+  const [site, setSite] = useState<PublicSiteData | null>(null);
   useEffect(() => {
-    sitePromise ??= publicGet<{ settings: PublicSettings; promotions: PublicPromotion[] }>("/site").catch(error => { sitePromise = null; throw error; });
+    sitePromise ??= publicGet<PublicSiteData>("/site").catch(error => { sitePromise = null; throw error; });
     sitePromise.then(setSite).catch(() => setSite(null));
   }, []);
   return site;
@@ -134,7 +144,7 @@ export const ScheduleSection: React.FC<{ limit?: number; onViewAll?: () => void 
               {s.description && <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{s.description}</p>}
             </div>
             <div style={{ fontSize: "14px", color: "var(--text-secondary)", display: "grid", gap: "4px" }}>
-              <span style={{ display: "flex", gap: "8px", alignItems: "center" }}><CalendarDays size={14} />{formatDateRange(s.start_date, s.end_date)}</span>
+              <span style={{ display: "flex", gap: "8px", alignItems: "center" }}><CalendarDays size={14} />{formatSessionDates(s)}</span>
               {s.time_text && <span style={{ display: "flex", gap: "8px", alignItems: "center" }}><Clock size={14} />{s.time_text}</span>}
               <span style={{ display: "flex", gap: "8px", alignItems: "center" }}><MapPin size={14} />{MODE_LABEL[s.mode]}{s.location ? ` · ${s.location}` : ""}</span>
             </div>
@@ -187,6 +197,9 @@ const inputStyle: React.CSSProperties = { width: "100%" };
 const FormField: React.FC<{ label: string; span?: boolean; children: React.ReactNode }> = ({ label, span, children }) => (
   <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600, gridColumn: span ? "1 / -1" : undefined }}>{label}{children}</label>
 );
+const SLIP_MAX_BYTES = 10 * 1024 * 1024;
+interface BankInfo { bank_name: string; account_name: string; account_number: string; promptpay_id: string; note: string }
+
 const formGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" };
 
 /** Exported for the calendar view on /schedule (site/ScheduleCalendar.tsx). */
@@ -195,15 +208,39 @@ export const RegisterModal: React.FC<{ session: PublicSession; onClose: () => vo
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [bank, setBank] = useState<BankInfo | null>(null);
+  const [payment, setPayment] = useState<"slip" | "quote">("slip");
+  const [slip, setSlip] = useState<File | null>(null);
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [key]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value }));
+  // Nothing to pay for a free round, and nobody transfers for a seat they do not have yet.
+  const takesPayment = session.price > 0 && !session.waitlist;
+  // No bank account set up yet: nowhere to transfer to, so staff follow up instead.
+  const canTransfer = takesPayment && !!bank?.account_number;
+  const sendsSlip = canTransfer && payment === "slip";
+  useEffect(() => {
+    if (takesPayment) publicGet<{ bank: BankInfo }>("/payment-info").then(d => setBank(d.bank)).catch(() => setBank(null));
+  }, [takesPayment]);
+  const footnote = !takesPayment
+    ? (session.waitlist ? "ยังไม่ต้องโอนเงิน เจ้าหน้าที่จะติดต่อเมื่อมีที่นั่งว่าง" : "เจ้าหน้าที่จะติดต่อกลับเพื่อยืนยันที่นั่ง")
+    : sendsSlip ? "เจ้าหน้าที่จะตรวจสลิปและยืนยันที่นั่งทางอีเมล"
+      : canTransfer ? "เจ้าหน้าที่จะติดต่อกลับพร้อมใบเสนอราคา" : "เจ้าหน้าที่จะติดต่อกลับเพื่อแจ้งการชำระเงิน";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sendsSlip && slip && slip.size > SLIP_MAX_BYTES) { setError("ไฟล์สลิปต้องไม่เกิน 10 MB"); return; }
     try {
       setSending(true);
       setError(null);
-      const res = await publicPost<{ message: string }>(`/sessions/${session.id}/register`, { ...form, attendees: Number(form.attendees) });
+      const fields = { ...form, attendees: Number(form.attendees), buyer_type: !takesPayment ? "" : (canTransfer && payment === "quote") || form.company.trim() ? "company" : "individual" };
+      const path = `/sessions/${session.id}/register`;
+      let res: { message: string };
+      if (sendsSlip && slip) {
+        const data = new FormData();
+        for (const [key, value] of Object.entries(fields)) data.append(key, String(value));
+        data.append("slip", slip);
+        res = await publicPostForm(path, data);
+      } else res = await publicPost(path, fields);
       setResult(res.message);
       onDone();
     } catch (err: any) { setError(err.message); } finally { setSending(false); }
@@ -225,13 +262,13 @@ export const RegisterModal: React.FC<{ session: PublicSession; onClose: () => vo
           <span style={eyebrow}>{session.waitlist ? "ลงชื่อรอคิว" : "ลงทะเบียนอบรม"}</span>
           <h2 style={{ fontSize: "22px", margin: "10px 0 4px", paddingRight: "28px" }}>{session.title}</h2>
           <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginBottom: "16px" }}>
-            {formatDateRange(session.start_date, session.end_date)}{session.time_text ? ` · ${session.time_text}` : ""} · {MODE_LABEL[session.mode]} · {formatBaht(session.price)}/ท่าน
+            {formatSessionDates(session)}{session.time_text ? ` · ${session.time_text}` : ""} · {MODE_LABEL[session.mode]} · {formatBaht(session.price)}/ท่าน
             <br />ปิดรับสมัคร {formatDate(session.registration_deadline)}
           </p>
           {session.waitlist && <Notice tone="error">ที่นั่งรอบนี้เต็มแล้ว ระบบจะบันทึกคุณในรายชื่อรอคิว และแจ้งเมื่อมีที่ว่าง</Notice>}
           {error && <Notice tone="error">{error}</Notice>}
           <form onSubmit={submit} style={formGrid}>
-            <FormField label="ชื่อ-นามสกุล *"><input className="form-input" style={inputStyle} required maxLength={120} value={form.name} onChange={set("name")} autoComplete="name" /></FormField>
+            <FormField label="ชื่อ-นามสกุล (ภาษาอังกฤษ ใช้พิมพ์ใบประกาศ) *"><input className="form-input" style={inputStyle} required maxLength={120} value={form.name} onChange={set("name")} autoComplete="name" /></FormField>
             <FormField label="บริษัท / หน่วยงาน"><input className="form-input" style={inputStyle} maxLength={160} value={form.company} onChange={set("company")} autoComplete="organization" /></FormField>
             <FormField label="อีเมล *"><input className="form-input" style={inputStyle} type="email" required maxLength={254} value={form.email} onChange={set("email")} autoComplete="email" /></FormField>
             <FormField label="เบอร์โทร *"><input className="form-input" style={inputStyle} type="tel" required maxLength={30} value={form.phone} onChange={set("phone")} autoComplete="tel" /></FormField>
@@ -244,6 +281,28 @@ export const RegisterModal: React.FC<{ session: PublicSession; onClose: () => vo
               <FormField label="ที่อยู่สำหรับออกใบกำกับภาษี *" span><textarea className="form-input" style={inputStyle} required rows={2} maxLength={500} value={form.billing_address} onChange={set("billing_address")} /></FormField>
             </>}
             <FormField label="หมายเหตุ" span><textarea className="form-input" style={inputStyle} rows={2} maxLength={1000} value={form.note} onChange={set("note")} placeholder="เช่น รายชื่อผู้เข้าอบรมคนอื่น ความต้องการพิเศษ" /></FormField>
+            {canTransfer && (
+              <fieldset style={{ gridColumn: "1 / -1", border: "none", padding: 0, margin: 0, display: "grid", gap: "8px" }}>
+                <legend style={{ fontSize: "14px", fontWeight: 600, marginBottom: "6px" }}>การชำระเงิน</legend>
+                <label style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "14px" }}>
+                  <input type="radio" name="payment" checked={payment === "slip"} onChange={() => setPayment("slip")} />โอนเงินแล้ว แนบสลิป
+                </label>
+                <label style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "14px" }}>
+                  <input type="radio" name="payment" checked={payment === "quote"} onChange={() => setPayment("quote")} />ในนามบริษัท ขอใบเสนอราคาก่อน
+                </label>
+                {sendsSlip && bank && <>
+                  <div style={{ background: "var(--primary-glow)", borderRadius: "10px", padding: "10px 14px", fontSize: "14px", lineHeight: 1.6 }}>
+                    <strong>{bank.bank_name}</strong> {bank.account_number}<br />ชื่อบัญชี {bank.account_name}
+                    {bank.promptpay_id && <><br />พร้อมเพย์ {bank.promptpay_id}</>}
+                    {bank.note && <><br />{bank.note}</>}
+                  </div>
+                  <FormField label="สลิปการโอน (PNG, JPG, WEBP หรือ PDF ไม่เกิน 10 MB) *">
+                    <input className="form-input" style={inputStyle} type="file" required accept="image/png,image/jpeg,image/webp,application/pdf"
+                      onChange={e => setSlip(e.target.files?.[0] ?? null)} />
+                  </FormField>
+                </>}
+              </fieldset>
+            )}
             {/* Honeypot: hidden from people, filled by naive bots. */}
             <input type="text" name="website" value={form.website} onChange={set("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
             <Turnstile onToken={token => setForm(prev => ({ ...prev, turnstile_token: token }))} />
@@ -254,7 +313,7 @@ export const RegisterModal: React.FC<{ session: PublicSession; onClose: () => vo
             <button type="submit" className="tech-button-primary" disabled={sending} style={{ gridColumn: "1 / -1", justifyContent: "center" }}>
               {sending ? "กำลังส่ง…" : session.waitlist ? "ลงชื่อรอคิว" : "ส่งใบสมัคร"}
             </button>
-            <p style={{ gridColumn: "1 / -1", fontSize: "12px", color: "var(--text-muted)", textAlign: "center" }}>ยังไม่มีการเก็บเงินในขั้นตอนนี้ เจ้าหน้าที่จะติดต่อยืนยันที่นั่งและแจ้งวิธีชำระเงิน</p>
+            <p style={{ gridColumn: "1 / -1", fontSize: "12px", color: "var(--text-muted)", textAlign: "center" }}>{footnote}</p>
           </form>
         </>}
       </div>

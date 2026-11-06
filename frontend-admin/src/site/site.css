@@ -46,11 +46,17 @@
 }
 .ps a.ps-announce, .ps a.ps-announce:hover { color: #ffffff; }
 .ps-announce-tag { padding: 2px 8px; border-radius: 999px; background: var(--ps-brand); color: var(--ps-ink); font-size: 12px; font-weight: 700; }
+.ps-announce-rounds { flex-wrap: nowrap; cursor: default; }
+.ps a.ps-announce-link, .ps a.ps-announce-link:hover { display: flex; align-items: center; gap: 10px; min-width: 0; color: #ffffff; text-decoration: none; }
+.ps-announce-link .ps-announce-tag, .ps-announce-link svg { flex: none; }
+.ps-announce-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps a.ps-announce-all, .ps a.ps-announce-all:hover { flex: none; color: #ffffff; font-size: 13px; text-decoration: underline; }
 .ps-header { background: #ffffff; border-bottom: 1px solid var(--ps-line); position: sticky; top: 0; z-index: 50; }
 .ps-header-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px 28px; flex-wrap: wrap; padding-top: 14px; padding-bottom: 14px; }
 .ps-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .ps a.ps-brand, .ps a.ps-brand:hover { color: var(--ps-ink); }
 .ps-brand img { height: 40px; width: auto; }
+.ps-brand img.ps-brand-full { height: 48px; }
 .ps-brand strong { display: block; font-size: 20px; line-height: 1.1; }
 .ps-brand small { display: block; font-size: 12px; color: var(--ps-ink-2); }
 .ps-nav { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -154,6 +160,7 @@
 /* Footer */
 .ps-footer { background: var(--ps-ink); color: #d7deec; margin-top: 72px; }
 .ps .ps-footer a { color: #d7deec; }
+.ps-footer-logo { align-self: flex-start; height: 72px; width: auto; max-width: 100%; padding: 8px 12px; border-radius: 10px; background: #ffffff; }
 .ps .ps-footer a:hover { color: #ffffff; }
 .ps-footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 32px; padding-top: 48px; padding-bottom: 28px; }
 .ps-footer nav { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
@@ -242,6 +249,7 @@
   .ps-header-inner { gap: 8px 12px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 6px; }
   .ps-brand { flex: 1 1 auto; min-width: 0; }
   .ps-brand img { height: 34px; }
+  .ps-brand img.ps-brand-full { height: 40px; }
   .ps-brand strong { font-size: 18px; }
   .ps-brand small { display: none; }
   .ps-actions { flex-wrap: nowrap; gap: 8px; }
@@ -278,4 +286,5 @@
 /* Phones: the header register button repeats the "schedule" menu link, so drop it to keep one row. */
 @media (max-width: 480px) {
   .ps-actions .ps-btn-primary { display: none; }
+  .ps a.ps-announce-all, .ps-announce-link .ps-announce-tag { display: none; }
 }

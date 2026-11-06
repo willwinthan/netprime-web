@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApi } from "../hooks/useApi";
 import { publicGet, usePublicSite, RegisterModal, PublicSession } from "../components/site/PublicSections";
-import { formatBaht, formatDateRange, MODE_LABEL, SessionMode } from "../components/site-admin/ui";
+import { formatBaht, formatSessionDates, MODE_LABEL, SessionMode } from "../components/site-admin/ui";
 import { CourseOrderModal } from "../components/learner/CourseOrder";
 import { Stars } from "../components/marketing/Ratings";
 import { CourseReviewForm } from "../components/marketing/CourseReviewForm";
@@ -128,6 +128,12 @@ export const CoursePage: React.FC<{ courseId: string }> = ({ courseId }) => {
       openAuth("register");
       return;
     }
+    if (data.course.price <= 0) {
+      api.post(`/courses/${encodeURIComponent(data.course.id)}/enroll`, {})
+        .then(() => navigate("/dashboard"))
+        .catch(err => setError(err.message));
+      return;
+    }
     track("begin_checkout", { value: Math.round(data.course.price), item_id: data.course.id, item_name: data.course.title });
     setCheckout(true);
   };
@@ -166,9 +172,7 @@ export const CoursePage: React.FC<{ courseId: string }> = ({ courseId }) => {
     ? <Link to="/dashboard" className="ps-btn ps-btn-primary ps-btn-lg" style={{ width: "100%" }}>เข้าเรียนคอร์สนี้</Link>
     : course.price > 0
       ? <button type="button" className="ps-btn ps-btn-primary ps-btn-lg" style={{ width: "100%" }} onClick={startCheckout}>ซื้อคอร์สนี้</button>
-      : loggedIn
-        ? <Link to="/dashboard" className="ps-btn ps-btn-primary ps-btn-lg" style={{ width: "100%" }}>เริ่มเรียนฟรีในแดชบอร์ด</Link>
-        : <button type="button" className="ps-btn ps-btn-primary ps-btn-lg" style={{ width: "100%" }} onClick={() => openAuth("register")}>สมัครสมาชิกเพื่อเริ่มเรียนฟรี</button>;
+      : <button type="button" className="ps-btn ps-btn-primary ps-btn-lg" style={{ width: "100%" }} onClick={startCheckout}>{loggedIn ? "เริ่มเรียนฟรี" : "สมัครสมาชิกเพื่อเริ่มเรียนฟรี"}</button>;
 
   return (
     <>
@@ -248,7 +252,7 @@ export const CoursePage: React.FC<{ courseId: string }> = ({ courseId }) => {
                 <div key={s.id} className="ps-card" style={{ padding: "16px 18px", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
                   <div>
                     <strong>{s.title}</strong>
-                    <div className="ps-muted" style={{ fontSize: 14 }}>{formatDateRange(s.start_date, s.end_date)}{s.time_text ? ` · ${s.time_text}` : ""} · {MODE_LABEL[s.mode]} · {formatBaht(s.price)}</div>
+                    <div className="ps-muted" style={{ fontSize: 14 }}>{formatSessionDates(s)}{s.time_text ? ` · ${s.time_text}` : ""} · {MODE_LABEL[s.mode]} · {formatBaht(s.price)}</div>
                   </div>
                   {s.registration_open
                     ? <button type="button" className="ps-btn ps-btn-outline" onClick={() => setRegister(s)}>{s.waitlist ? "ลงชื่อรอคิว" : `ลงทะเบียน (เหลือ ${s.seats_left} ที่)`}</button>

@@ -7,6 +7,7 @@ import { TemplatesPanel } from "../components/communication/TemplatesPanel";
 import { ReportsPanel } from "../components/communication/ReportsPanel";
 import { Inbox } from "../components/communication/Inbox";
 import { CommunityPage } from "./CommunityPage";
+import { FEATURES } from "../features";
 
 type Tab = "broadcasts" | "templates" | "community" | "reports" | "inbox" | "settings";
 
@@ -44,7 +45,7 @@ export const CommunicationPage: React.FC<{ initialTab?: Tab; startThreadWithUser
   const tabs: Array<{ key: Tab; label: string; icon: React.ReactNode; show: boolean }> = [
     { key: "broadcasts", label: "ประกาศ/บรอดแคสต์", icon: <Megaphone size={15} />, show: !!meta.access },
     { key: "templates", label: "แม่แบบอีเมล", icon: <Mail size={15} />, show: meta.can_manage },
-    { key: "community", label: "ชุมชน", icon: <Users size={15} />, show: true },
+    { key: "community", label: "ชุมชน", icon: <Users size={15} />, show: FEATURES.community },
     { key: "reports", label: "รายงานเนื้อหา", icon: <Flag size={15} />, show: meta.can_moderate },
     { key: "inbox", label: "กล่องข้อความ", icon: <MessageSquare size={15} />, show: true },
     { key: "settings", label: "ตั้งค่า", icon: <Settings size={15} />, show: meta.can_manage }

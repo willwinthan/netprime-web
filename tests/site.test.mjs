@@ -21,7 +21,8 @@ async function createSession(body = {}) {
 test('public site data hides drafts and internal notification recipients', async () => {
   const site = await expectStatus('/api/public/site', 200);
   assert.equal(site.settings.notify_emails, undefined);
-  assert.ok(site.settings.phone);
+  assert.equal(site.settings.phone, '062-559-4622');
+  assert.match(site.settings.company, /Plantecplus/);
   assert.ok(site.promotions.every(p => p.title));
   const { sessions } = await expectStatus('/api/public/sessions', 200);
   assert.ok(sessions.length > 0);
@@ -132,6 +133,14 @@ test('articles publish on demand and reject unsafe links', async () => {
     body: { title: 'Duplicate slug', body: 'x', slug } });
 });
 
+test('migrated articles keep their original author and publish date', async () => {
+  const { article } = await expectStatus('/api/admin/site/articles', 201, { method: 'POST', token: admin.token,
+    body: { title: 'บทความจากเว็บเก่า', slug: 'old-site-post', body: 'เนื้อหา', status: 'published', published_at: '2015-06-21', author_label: 'ผู้เขียนเดิม' } });
+  const pub = await expectStatus(`/api/public/articles/${article.slug}`, 200);
+  assert.equal(pub.article.author_name, 'ผู้เขียนเดิม');
+  assert.equal(pub.article.published_at, '2015-06-21 00:00:00');
+});
+
 test('contact form requires consent and lands in the coordinator queue', async () => {
   const body = { name: 'ผู้ติดต่อ', email: 'contact@example.invalid', message: 'สนใจอบรม In-house' };
   await expectStatus('/api/public/inquiries', 400, { method: 'POST', body });
@@ -154,6 +163,33 @@ test('settings validate notification recipients and are audited', async () => {
   assert.equal(site.settings.announcement.text, 'ประกาศทดสอบ');
   const log = await expectStatus('/api/admin/site/audit', 200, { token: admin.token });
   assert.ok(log.entries.some(e => e.entity === 'settings' && e.user_name));
+});
+
+test('the announcement bar lists rounds starting soon that can still take registrations', async () => {
+  const soon = await createSession({ title: 'Soon Round', start_date: day(5), end_date: day(6) });
+  const later = await createSession({ title: 'Later Round', start_date: day(31), end_date: day(32) });
+  const draft = await createSession({ title: 'Draft Round', start_date: day(5), end_date: day(6), status: 'draft' });
+  const started = await createSession({ title: 'Started Round', start_date: day(-1), end_date: day(3) });
+  const deadlinePassed = await createSession({ title: 'Deadline Round', start_date: day(5), end_date: day(6), registration_deadline: day(-1) });
+  const full = await createSession({ title: 'Full Round', start_date: day(5), end_date: day(6), capacity: 1 });
+  await expectStatus(`/api/public/sessions/${full.id}/register`, 201, { method: 'POST', body: applicant('bar-full') });
+
+  const listed = async () => (await expectStatus('/api/public/site', 200)).upcoming_sessions;
+  const ids = (await listed()).map(s => s.id);
+  assert.ok(ids.includes(soon.id));
+  for (const hidden of [later, draft, started, deadlinePassed, full]) assert.ok(!ids.includes(hidden.id), hidden.title);
+  assert.deepEqual(Object.keys((await listed())[0]).sort(), ['id', 'start_date', 'title']);
+
+  const settings = (await expectStatus('/api/admin/site/settings', 200, { token: admin.token })).settings;
+  const put = auto => expectStatus('/api/admin/site/settings', 200, { method: 'PUT', token: admin.token,
+    body: { ...settings, announcement: { ...settings.announcement, auto } } });
+  await put(false);
+  assert.deepEqual(await listed(), []);
+  await put(true);
+  assert.ok((await listed()).some(s => s.id === soon.id));
+  for (const s of [soon, later, draft, started, deadlinePassed]) {
+    await expectStatus(`/api/admin/site/sessions/${s.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'draft' } });
+  }
 });
 
 test('coordinators manage website content only', async () => {
@@ -193,4 +229,165 @@ test('public blog supports search, author byline and catalog lesson counts', asy
   const courses = await expectStatus('/api/courses', 200);
   assert.ok(courses.length > 0 && courses.every(c => Number.isInteger(c.lesson_count)));
   assert.equal(courses.find(c => c.id === 'course_cisco_ccna').lesson_count, 3);
+});
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+async function registerWithSlip(sessionId, person, bytes = PNG, type = 'image/png') {
+  const form = new FormData();
+  for (const [key, value] of Object.entries({ ...person, consent: 'true' })) form.append(key, String(value));
+  form.append('slip', new Blob([bytes], { type }), 'slip.png');
+  const res = await fetch(`${process.env.NETPRIME_TEST_BASE}/api/public/sessions/${sessionId}/register`, { method: 'POST', body: form });
+  return { status: res.status, data: await res.json() };
+}
+
+test('public registration keeps a slip privately and refuses a fake one', async () => {
+  const session = await createSession({ capacity: 1 });
+  const fake = await registerWithSlip(session.id, applicant('slip-fake'), new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+  assert.equal(fake.status, 400);
+
+  const saved = await registerWithSlip(session.id, applicant('slip-ok', { buyer_type: 'individual' }));
+  assert.equal(saved.status, 201);
+  const id = saved.data.registration.id;
+  await expectStatus(`/api/admin/site/registrations/${id}/slip`, 401);
+  await expectStatus(`/api/admin/site/registrations/${id}/slip`, 403, { token: student.token });
+  const res = await fetch(`${process.env.NETPRIME_TEST_BASE}/api/admin/site/registrations/${id}/slip`, { headers: { Authorization: `Bearer ${admin.token}` } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('Content-Type'), 'image/png');
+  assert.deepEqual(new Uint8Array(await res.arrayBuffer()), PNG);
+
+  // The round is now full: the next person waits, and no money should change hands for that seat.
+  const waiting = await registerWithSlip(session.id, applicant('slip-wait'));
+  assert.equal(waiting.data.registration.status, 'waitlist');
+  const { registrations } = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 200, { token: admin.token });
+  assert.equal(registrations.find(r => r.id === waiting.data.registration.id).slip_r2_key, null);
+  assert.equal(registrations.find(r => r.id === id).buyer_type, 'individual');
+
+  await expectStatus(`/api/admin/site/registrations/${id}`, 200, { method: 'DELETE', token: admin.token });
+  await expectStatus(`/api/admin/site/registrations/${id}/slip`, 404, { token: admin.token });
+});
+
+test('bank details for the registration form are public', async () => {
+  const { bank } = await expectStatus('/api/public/payment-info', 200);
+  assert.deepEqual(Object.keys(bank).sort(), ['account_name', 'account_number', 'bank_name', 'note', 'promptpay_id']);
+});
+
+test('rounds may skip days, and the days must agree with the start and end', async () => {
+  const days = [day(30), day(32), day(37)];
+  const session = await createSession({ start_date: days[0], end_date: days[2], session_dates: [days[2], days[0], days[1], days[0]] });
+  assert.equal(session.session_dates, JSON.stringify(days));
+  const { session: shown } = await expectStatus(`/api/public/sessions/${session.id}`, 200);
+  assert.deepEqual(shown.session_dates, days);
+
+  const bad = await expectStatus('/api/admin/site/sessions', 400, { method: 'POST', token: admin.token,
+    body: { title: 'Bad', start_date: days[0], end_date: days[2], capacity: 5, session_dates: [days[1], days[2]] } });
+  assert.match(bad.error, /วันอบรม/);
+  await expectStatus('/api/admin/site/sessions', 400, { method: 'POST', token: admin.token,
+    body: { title: 'Bad', start_date: days[0], end_date: days[2], capacity: 5, session_dates: ['nope'] } });
+});
+
+test('staff record payment details and add a company group, reporting who could not be added', async () => {
+  const session = await createSession({ capacity: 2 });
+  const shared = { company: 'บริษัท ทดสอบ จำกัด', status: 'paid', sales_stage: 'po_received',
+    paid_amount_satang: 1070000, paid_on: day(0), paid_account: 'บริษัท', receipt_nos: 'RC-1, RC-2' };
+  await expectStatus(`/api/admin/site/sessions/${session.id}/registrations/bulk`, 400, { method: 'POST', token: admin.token,
+    body: { ...shared, people: [{ name: 'A', email: 'not-an-email' }] } });
+  await expectStatus(`/api/admin/site/sessions/${session.id}/registrations/bulk`, 403, { method: 'POST', token: student.token,
+    body: { ...shared, people: [{ name: 'A', email: 'a@example.invalid' }] } });
+
+  const people = ['a', 'a', 'b', 'c'].map(n => ({ name: `Bulk ${n}`, email: `bulk-${n}@example.invalid` }));
+  const result = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations/bulk`, 201, { method: 'POST', token: admin.token, body: { ...shared, people } });
+  assert.equal(result.added, 2);
+  assert.deepEqual(result.results.map(r => r.error ?? 'ok'), ['ok', 'อีเมลนี้ลงทะเบียนรอบนี้ไว้แล้ว', 'ok', 'ที่นั่งไม่พอ']);
+
+  const { registrations } = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 200, { token: admin.token });
+  assert.equal(registrations.length, 2);
+  assert.ok(registrations.every(r => r.buyer_type === 'company' && r.paid_amount_satang === 1070000 && r.receipt_nos === 'RC-1, RC-2'));
+
+  const { registration } = await expectStatus(`/api/admin/site/registrations/${registrations[0].id}`, 200, { method: 'PATCH', token: admin.token,
+    body: { paid_amount_satang: 950000, notify: false } });
+  assert.equal(registration.paid_amount_satang, 950000);
+  const csv = await request(`/api/admin/site/sessions/${session.id}/registrations.csv`, { token: admin.token });
+  assert.match(csv.data, /9500\.00/);
+  assert.match(csv.data, /PO แล้ว/);
+});
+
+test('confirming a registrant of a round with a course opens an account and the course', async () => {
+  const session = await createSession({ course_id: 'course_cisco_ccna' });
+  const { registration } = await expectStatus(`/api/public/sessions/${session.id}/register`, 201, { method: 'POST', body: applicant('auto-invite') });
+  await expectStatus(`/api/admin/site/registrations/${registration.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'confirmed' } });
+  const { registrations } = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 200, { token: admin.token });
+  assert.ok(registrations[0].account_id);
+  assert.equal(registrations[0].course_access, 1);
+
+  // Staff can hold it back by not notifying.
+  const quiet = await expectStatus(`/api/public/sessions/${session.id}/register`, 201, { method: 'POST', body: applicant('quiet') });
+  await expectStatus(`/api/admin/site/registrations/${quiet.registration.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'confirmed', notify: false } });
+  const after = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 200, { token: admin.token });
+  assert.equal(after.registrations.find(r => r.id === quiet.registration.id).account_id, null);
+
+  // The same goes for a person staff add by hand.
+  await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 201, { method: 'POST', token: admin.token,
+    body: { ...applicant('quiet-manual'), status: 'confirmed', notify: false } });
+  const manual = await expectStatus(`/api/admin/site/sessions/${session.id}/registrations`, 200, { token: admin.token });
+  assert.equal(manual.registrations.find(r => r.email === 'site-quiet-manual@example.invalid').account_id, null);
+});
+
+test('instructors schedule their own courses as drafts and see limited registrant details', async () => {
+  const instructor = await login('instructor@netprime.com', 'inst123');
+  const base = '/api/instructor/sessions';
+  await expectStatus(base, 401);
+  await expectStatus(base, 403, { token: student.token });
+  const { courses } = await expectStatus(`${base}/course-options`, 200, { token: instructor.token });
+  assert.ok(courses.length > 0);
+  const round = { title: 'รอบของอาจารย์', course_id: courses[0].id, start_date: day(40), end_date: day(41), capacity: 5, status: 'open', instructor_id: 'usr_x', instructor_name: 'คนอื่น' };
+
+  const created = await expectStatus(base, 201, { method: 'POST', token: instructor.token, body: round });
+  const session = created.session;
+  assert.equal(session.status, 'draft', 'instructors cannot open a round themselves');
+  assert.equal(session.instructor_id, instructor.user.id);
+  assert.notEqual(session.instructor_name, 'คนอื่น');
+  await expectStatus(`/api/public/sessions/${session.id}`, 404);
+
+  const stranger = await expectStatus('/api/admin/site/sessions', 201, { method: 'POST', token: admin.token,
+    body: { title: 'ไม่ใช่คอร์สของอาจารย์', start_date: day(40), end_date: day(41), capacity: 5, course_id: 'course_cisco_ccna' } });
+  const foreign = await expectStatus('/api/instructor/courses', 201, { method: 'POST', token: admin.token, body: { title: 'คอร์สของคนอื่น', description: 'x' } });
+  const refused = await expectStatus(base, 403, { method: 'POST', token: instructor.token, body: { ...round, course_id: foreign.id ?? foreign.course.id } });
+  assert.match(refused.error, /คอร์สของคุณ/);
+  await expectStatus(`${base}/${stranger.session.id}`, 403, { method: 'PATCH', token: instructor.token, body: { title: 'x' } });
+  await expectStatus(`${base}/${stranger.session.id}`, 403, { method: 'DELETE', token: instructor.token });
+  await expectStatus(`${base}/${stranger.session.id}/registrations`, 404, { token: instructor.token });
+  await expectStatus('/api/admin/site/sessions', 403, { token: instructor.token });
+
+  const edited = await expectStatus(`${base}/${session.id}`, 200, { method: 'PATCH', token: instructor.token, body: { capacity: 8, status: 'open' } });
+  assert.equal(edited.session.capacity, 8);
+  assert.equal(edited.session.status, 'draft');
+
+  // Staff open it; from then on changes go through staff.
+  await expectStatus(`/api/admin/site/sessions/${session.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'open' } });
+  await expectStatus(`${base}/${session.id}`, 403, { method: 'PATCH', token: instructor.token, body: { capacity: 9 } });
+  await expectStatus(`${base}/${session.id}`, 403, { method: 'DELETE', token: instructor.token });
+
+  await expectStatus(`/api/public/sessions/${session.id}/register`, 201, { method: 'POST',
+    body: applicant('for-instructor', { company: 'ACME', invoice_required: true, tax_id: '1234567890123', billing_address: 'Bangkok' }) });
+  const { registrations } = await expectStatus(`${base}/${session.id}/registrations`, 200, { token: instructor.token });
+  assert.equal(registrations.length, 1);
+  assert.deepEqual(Object.keys(registrations[0]).sort(), ['attendees', 'company', 'created_at', 'id', 'name', 'status']);
+
+  const list = await expectStatus(base, 200, { token: instructor.token });
+  assert.ok(list.sessions.some(s => s.id === session.id));
+  assert.ok(!list.sessions.some(s => s.id === stranger.session.id));
+
+  const draft = await expectStatus(base, 201, { method: 'POST', token: instructor.token, body: round });
+  await expectStatus(`${base}/${draft.session.id}`, 200, { method: 'DELETE', token: instructor.token });
+});
+
+test('staff can assign a round to instructor accounts only', async () => {
+  const { instructors } = await expectStatus('/api/admin/site/instructor-options', 200, { token: admin.token });
+  assert.ok(instructors.length > 0);
+  await expectStatus('/api/admin/site/instructor-options', 403, { token: student.token });
+  await createSession({ instructor_id: instructors[0].id });
+  const bad = await expectStatus('/api/admin/site/sessions', 400, { method: 'POST', token: admin.token,
+    body: { title: 'Bad', start_date: day(5), end_date: day(6), capacity: 5, instructor_id: student.user.id } });
+  assert.match(bad.error, /วิทยากร/);
 });

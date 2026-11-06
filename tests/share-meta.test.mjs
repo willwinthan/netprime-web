@@ -50,7 +50,7 @@ test('static pages and missing articles', () => {
 test('sitemap lists public pages and articles; robots points to it', () => {
   const xml = sitemapXml(sitemapEntries(origin, [{ slug: 'ccna-study-plan', published_at: '2026-10-18 09:00:00' }]));
   assert.match(xml, /^<\?xml version="1.0" encoding="UTF-8"\?>/);
-  for (const path of ['/', '/courses', '/schedule', '/blog', '/about']) assert.ok(xml.includes(`<loc>${origin}${path}</loc>`), path);
+  for (const path of ['/', '/courses', '/schedule', '/self-learning', '/blog', '/about']) assert.ok(xml.includes(`<loc>${origin}${path}</loc>`), path);
   assert.ok(xml.includes(`<url><loc>${origin}/blog/ccna-study-plan</loc><lastmod>2026-10-18</lastmod></url>`));
   assert.ok(!xml.includes('/dashboard'));
   assert.match(robotsTxt(origin), /Sitemap: https:\/\/www\.netprime\.example\/sitemap\.xml/);
