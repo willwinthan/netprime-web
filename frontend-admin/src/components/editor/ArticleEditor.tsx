@@ -8,6 +8,7 @@ import { BlockNoteView } from "@blocknote/ariakit";
 import { ArrowLeft, ImagePlus, Download, Settings2, Trash2, X, ExternalLink, History, RotateCcw, AlertTriangle } from "lucide-react";
 import { API_BASE_URL, can, useApi } from "../../hooks/useApi";
 import { ErrorBox, Modal, Field, uploadImage, formatDateTime } from "../site-admin/ui";
+import { uploadInlineImages } from "./inlineImages";
 import { notionEmbedUrl } from "../../site/notionEmbed";
 import { thaiDictionary } from "./thaiDictionary";
 import { useDangerousDelete } from "../security/DangerConfirmDialog";
@@ -212,6 +213,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
     setSaving(true);
     try {
       setError(null);
+      if (withContent) await uploadInlineImages(editor, f => uploadImage(f, api.token));
       const body = { ...(withContent ? contentPayload() : {}), ...extra };
       const res = article
         ? await sendArticle(api, `/admin/site/articles/${article.id}`, "PATCH", { ...body, expected_updated_at: (overwrite ?? article).updated_at })

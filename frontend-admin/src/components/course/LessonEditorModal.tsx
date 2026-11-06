@@ -94,9 +94,9 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     };
     if (type === "embed") body.embed_url = embedUrl;
     if (type === "pdf") body.pdf_r2_key = pdfKey;
-    if (type === "text" && editorRef.current) Object.assign(body, editorRef.current.getContent());
     setBusy("กำลังบันทึก...");
     try {
+      if (type === "text" && editorRef.current) Object.assign(body, await editorRef.current.getContent());
       let lessonId = lesson?.id ?? createdId;
       if (lessonId) await api.patch(`/instructor/lessons/${lessonId}/settings`, body);
       else {

@@ -6,6 +6,7 @@ import { BlockNoteView } from "@blocknote/ariakit";
 import { useApi } from "../../hooks/useApi";
 import { uploadImage } from "../site-admin/ui";
 import { thaiDictionary } from "../editor/thaiDictionary";
+import { uploadInlineImages } from "../editor/inlineImages";
 
 // Notion-like editor for text lessons (same BlockNote setup as the article editor, minus uploads
 // we cannot store). Loaded lazily by LessonEditorModal; the learner side renders the saved JSON
@@ -15,8 +16,8 @@ const { video, audio, file, ...blockSpecs } = defaultBlockSpecs;
 const schema = BlockNoteSchema.create({ blockSpecs });
 
 export interface LessonTextEditorHandle {
-  /** Current document as BlockNote JSON plus a Markdown fallback. */
-  getContent(): { content_json: string; content_md: string };
+  /** Current document as BlockNote JSON plus a Markdown fallback (pasted inline images are uploaded first). */
+  getContent(): Promise<{ content_json: string; content_md: string }>;
 }
 
 interface Props { initialJson: string | null; initialMarkdown: string | null; onChange?: () => void }
@@ -50,10 +51,13 @@ const LessonTextEditor = forwardRef<LessonTextEditorHandle, Props>(({ initialJso
   }, []);
 
   useImperativeHandle(ref, () => ({
-    getContent: () => ({
-      content_json: JSON.stringify(editor.document),
-      content_md: editor.blocksToMarkdownLossy(editor.document).trim()
-    })
+    getContent: async () => {
+      await uploadInlineImages(editor, f => uploadImage(f, api.token));
+      return {
+        content_json: JSON.stringify(editor.document),
+        content_md: editor.blocksToMarkdownLossy(editor.document).trim()
+      };
+    }
   }), [editor]);
 
   return (
