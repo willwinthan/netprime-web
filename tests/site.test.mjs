@@ -362,6 +362,8 @@ test('instructors schedule their own courses as drafts and see limited registran
   const edited = await expectStatus(`${base}/${session.id}`, 200, { method: 'PATCH', token: instructor.token, body: { capacity: 8, status: 'open' } });
   assert.equal(edited.session.capacity, 8);
   assert.equal(edited.session.status, 'draft');
+  const cleared = await expectStatus(`${base}/${session.id}`, 400, { method: 'PATCH', token: instructor.token, body: { course_id: '' } });
+  assert.match(cleared.error, /กรุณาเลือกคอร์ส/);
 
   // Staff open it; from then on changes go through staff.
   await expectStatus(`/api/admin/site/sessions/${session.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'open' } });
