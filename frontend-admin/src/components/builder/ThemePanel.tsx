@@ -4,7 +4,7 @@ import { useApi } from "../../hooks/useApi";
 import { Empty, ErrorBox, Field, grid2 } from "../site-admin/ui";
 import { ImageInput, Notice, SelectInput, TextInput } from "./adminKit";
 import { DEFAULT_THEME, FONTS, FontName, Theme, contrastRatio, fontStack, isHex, loadFont, publishTheme, themeVars } from "./theme";
-import logo from "../../../logo/NetPrimeLogo.png";
+import fullLogo from "../../../logo/NetPrimeFullLogo.png";
 import "../../site/site.css";
 
 /**
@@ -89,8 +89,10 @@ export const ThemePanel: React.FC = () => {
           <div className="ps-header" style={{ position: "static" }}>
             <div className="ps-container ps-header-inner" style={{ padding: "12px 16px" }}>
               <span className="ps-brand">
-                <img src={theme.logo_url && /^(https?:\/\/|\/)/.test(theme.logo_url) ? theme.logo_url : logo} alt="" />
-                <span><strong>{theme.school_name || "—"}</strong><small>{theme.tagline}</small></span>
+                {theme.logo_url && /^(https?:\/\/|\/)/.test(theme.logo_url) ? <>
+                  <img src={theme.logo_url} alt="" />
+                  <span><strong>{theme.school_name || "—"}</strong><small>{theme.tagline}</small></span>
+                </> : <img className="ps-brand-full" src={fullLogo} alt={theme.school_name} />}
               </span>
               <span className="ps-nav"><a href="#preview" aria-current="page" onClick={e => e.preventDefault()}>หลักสูตร</a><a href="#preview" onClick={e => e.preventDefault()}>บทความ</a></span>
             </div>

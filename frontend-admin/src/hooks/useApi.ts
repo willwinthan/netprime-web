@@ -2,6 +2,16 @@ import { useCallback, useSyncExternalStore } from "react";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787/api";
 
+/** fetch() for messages people read: a request that never reached the server rejects with the browser's English text. */
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("เชื่อมต่อระบบไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้ง");
+    throw error;
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -61,7 +71,7 @@ export function useApi() {
     const headers = new Headers(options.headers || {});
     if (token) headers.set("Authorization", `Bearer ${token}`);
     if (!(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+    const response = await apiFetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       // A late response from a previous login must not clear a newer session.

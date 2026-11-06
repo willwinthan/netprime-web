@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  addDays, addMonths, dayNumber, daysInMonth, groupByDay, groupByFirstDay, layoutWeek, monthWeeks, parseYmd,
+  addDays, addMonths, dayNumber, dayRuns, daysBetween, daysInMonth, groupByDay, groupByFirstDay, layoutWeek, monthWeeks, parseYmd,
+  pickedDays, shiftDays, sourceId, splitByDays,
   thaiLongDate, thaiMonthLabel, todayYmd, weekdayMon0
 } from '../frontend-admin/src/components/calendar/calendarDates.ts';
 
@@ -99,4 +100,35 @@ test('agenda groups each session once under its first visible day', () => {
   ]);
   const days = groupByDay(events, '2026-10-01', '2026-10-03');
   assert.deepEqual(days.map(g => g.date), ['2026-10-01', '2026-10-02']);
+});
+
+test('rounds that skip days become one bar per run of days', () => {
+  const event = { id: 'ses_1', start: '2026-12-05', end: '2026-12-13' };
+  assert.deepEqual(dayRuns(['2026-12-13', '2026-12-05', '2026-12-06', '2026-12-12']),
+    [{ start: '2026-12-05', end: '2026-12-06' }, { start: '2026-12-12', end: '2026-12-13' }]);
+  const split = splitByDays(event, ['2026-12-05', '2026-12-06', '2026-12-12', '2026-12-13']);
+  assert.deepEqual(split.map(e => [e.id, e.start, e.end]), [['ses_1', '2026-12-05', '2026-12-06'], ['ses_1#1', '2026-12-12', '2026-12-13']]);
+  assert.equal(sourceId('ses_1#1'), 'ses_1');
+  assert.deepEqual(splitByDays(event, null), [event]);
+});
+
+test('the day picker saves nothing for every day and always keeps the first and last day', () => {
+  const [start, end] = ['2026-12-05', '2026-12-08'];
+  assert.deepEqual(daysBetween(start, end), ['2026-12-05', '2026-12-06', '2026-12-07', '2026-12-08']);
+  assert.equal(daysBetween(end, start), null);
+  assert.equal(daysBetween('2026-01-01', '2026-12-31'), null);
+  assert.deepEqual(pickedDays(start, end, null), []);
+  assert.deepEqual(pickedDays(start, end, ['2026-12-05', '2026-12-06', '2026-12-07', '2026-12-08']), []);
+  assert.deepEqual(pickedDays(start, end, ['2026-12-06']), ['2026-12-05', '2026-12-06', '2026-12-08']);
+  // The end date moved in: a day picked before stays out of the saved list once it is past the end.
+  assert.deepEqual(pickedDays(start, '2026-12-06', ['2026-12-05', '2026-12-08']), []);
+});
+
+test('moving the start date carries the picked days along', () => {
+  const weekends = ['2026-12-05', '2026-12-06', '2026-12-12', '2026-12-13'];
+  const moved = shiftDays(weekends, '2026-12-05', '2027-01-02');
+  assert.deepEqual(moved, ['2027-01-02', '2027-01-03', '2027-01-09', '2027-01-10']);
+  assert.deepEqual(pickedDays('2027-01-02', '2027-01-10', moved), moved);
+  assert.equal(shiftDays(null, '2026-12-05', '2027-01-02'), null);
+  assert.deepEqual(shiftDays(weekends, '', '2027-01-02'), weekends);
 });

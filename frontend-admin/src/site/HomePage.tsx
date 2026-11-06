@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import serverRack from "../../logo/server_rack_hero.png";
 import { publicGet, usePublicSite, PublicSession, ScheduleSection, ContactSection } from "../components/site/PublicSections";
-import { formatDate, formatDateRange, MODE_LABEL } from "../components/site-admin/ui";
+import { formatDate, formatSessionDates, MODE_LABEL } from "../components/site-admin/ui";
 import { Link, navigate, usePageMeta, useInitialHashScroll } from "./router";
 import { Article, ArticleCard, ArrowIcon, Course, CourseCard, CourseDialog, openSiteLink, seatsText, toneOf, useCourses, vendorOf } from "./shared";
 
@@ -133,7 +133,7 @@ export const HomePage: React.FC = () => {
               <Link to="/schedule" className="ps-next">
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#9a3f12" }}>รอบอบรมถัดไป</span>
                 <strong style={{ fontSize: 17 }}>{nextSession.title}</strong>
-                <span className="ps-muted" style={{ fontSize: 14 }}>{formatDateRange(nextSession.start_date, nextSession.end_date)} · {MODE_LABEL[nextSession.mode]} · {seatsText(nextSession)}</span>
+                <span className="ps-muted" style={{ fontSize: 14 }}>{formatSessionDates(nextSession)} · {MODE_LABEL[nextSession.mode]} · {seatsText(nextSession)}</span>
               </Link>
             )}
           </div>

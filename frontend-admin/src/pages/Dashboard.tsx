@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { FEATURES } from "../features";
 import { useApi, User, API_BASE_URL, hasRole } from "../hooks/useApi";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { motion, AnimatePresence } from "framer-motion";
@@ -2145,6 +2146,7 @@ export const Dashboard: React.FC = () => {
                   <Sparkles size={16} />
                   สำรวจคอร์ส
                 </button>
+                {FEATURES.internships && (
                 <button
                   onClick={() => {
                     setStudentSubView("internships");
@@ -2166,6 +2168,8 @@ export const Dashboard: React.FC = () => {
                   <Briefcase size={16} />
                   พอร์ทัลฝึกงาน
                 </button>
+                )}
+                {FEATURES.outsource && (
                 <button
                   onClick={() => {
                     setStudentSubView("freelance");
@@ -2187,6 +2191,7 @@ export const Dashboard: React.FC = () => {
                   <Users size={16} />
                   ศูนย์งานฟรีแลนซ์
                 </button>
+                )}
                 <button
                   onClick={() => {
                     setStudentSubView("payments");
@@ -2208,7 +2213,7 @@ export const Dashboard: React.FC = () => {
                   <Receipt size={16} />
                   การชำระเงินของฉัน
                 </button>
-                {(["community", "inbox"] as const).map(view => (
+                {(FEATURES.community ? ["community", "inbox"] as const : ["inbox"] as const).map(view => (
                   <button
                     key={view}
                     onClick={() => {

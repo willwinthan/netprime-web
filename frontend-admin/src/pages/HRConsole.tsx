@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { FEATURES } from "../features";
 import { useApi, hasRole } from "../hooks/useApi";
 import { MetricsCard } from "../components/MetricsCard";
 import { Modal, downloadWithAuth } from "../components/site-admin/ui";
@@ -875,6 +876,7 @@ export const HRConsole: React.FC = () => {
               <FileCheck size={16} />
               การมอบหมายคอร์ส
             </button>
+            {FEATURES.internships && (
             <button
               onClick={() => {
                 setActiveTab("internships");
@@ -893,6 +895,8 @@ export const HRConsole: React.FC = () => {
               <Briefcase size={16} />
               จัดการฝึกงาน
             </button>
+            )}
+            {FEATURES.outsource && (
             <button
               onClick={() => {
                 setActiveTab("outsource");
@@ -911,6 +915,7 @@ export const HRConsole: React.FC = () => {
               <Briefcase size={16} />
               จับคู่งาน IT Outsource
             </button>
+            )}
           </div>
 
           {activeTab === "roster" ? (

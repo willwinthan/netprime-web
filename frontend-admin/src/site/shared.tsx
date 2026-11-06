@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { API_BASE_URL, useApi, User } from "../hooks/useApi";
-import { usePublicSite, PublicSession } from "../components/site/PublicSections";
-import { formatBaht, formatDate, formatDateRange, MODE_LABEL } from "../components/site-admin/ui";
+import { API_BASE_URL, apiFetch, useApi, User } from "../hooks/useApi";
+import { usePublicSite, PublicSession, UpcomingRound } from "../components/site/PublicSections";
+import { formatBaht, formatDate, formatSessionDates, MODE_LABEL } from "../components/site-admin/ui";
 import { Link, navigate, useLocation } from "./router";
-import logo from "../../logo/NetPrimeLogo.png";
+import fullLogo from "../../logo/NetPrimeFullLogo.png";
 import { getLang, LanguageSwitcher, MessageKey, t, useDocumentLang, useI18n } from "../i18n";
 import { useBranding } from "../components/builder/theme";
 import { menuLinks, MenuLink as MenuItem, useSiteNav } from "../components/builder/siteChrome";
@@ -96,7 +96,7 @@ export function useCourses(): { courses: Course[] | null; error: string | null }
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    coursesPromise ??= fetch(`${API_BASE_URL}/courses`).then(async res => {
+    coursesPromise ??= apiFetch(`${API_BASE_URL}/courses`).then(async res => {
       if (!res.ok) throw new Error("โหลดรายการคอร์สไม่สำเร็จ");
       return res.json() as Promise<Course[]>;
     }).catch(err => { coursesPromise = null; throw err; });
@@ -137,6 +137,7 @@ export const SearchIcon: React.FC = () => (
 const NAV: Array<{ to: string; key: MessageKey }> = [
   { to: "/courses", key: "nav.courses" },
   { to: "/schedule", key: "nav.schedule" },
+  { to: "/self-learning", key: "nav.selfLearning" },
   { to: "/blog", key: "nav.blog" },
   { to: "/about", key: "nav.about" }
 ];
@@ -157,6 +158,32 @@ const MenuLink: React.FC<{ item: MenuItem; current?: boolean; style?: React.CSSP
     : <Link to={href} aria-current={current ? "page" : undefined} style={style}>{item.label}</Link>;
 };
 
+/** Announcement bar for rounds starting soon: one at a time, each opening its registration form. */
+const UpcomingBar: React.FC<{ rounds: UpcomingRound[] }> = ({ rounds }) => {
+  const { lang, t } = useI18n();
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (rounds.length < 2 || paused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => setIndex(i => i + 1), 6000);
+    return () => window.clearInterval(timer);
+  }, [rounds.length, paused]);
+  const round = rounds[index % rounds.length];
+  const date = new Intl.DateTimeFormat(lang === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
+    .format(new Date(`${round.start_date}T00:00:00Z`));
+  return (
+    <div className="ps-announce ps-announce-rounds" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+      <Link to={`/schedule?register=${encodeURIComponent(round.id)}`} className="ps-announce-link">
+        <span className="ps-announce-tag">{t("announce.upcoming")}</span>
+        <span className="ps-announce-text">{t("announce.starts", { date })} · {round.title}</span>
+        <ArrowIcon size={16} />
+      </Link>
+      {rounds.length > 1 && <Link to="/schedule" className="ps-announce-all">{t("announce.viewAll")}</Link>}
+    </div>
+  );
+};
+
 export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const site = usePublicSite();
@@ -166,6 +193,7 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const siteNav = useSiteNav();
   useDocumentLang();
   const announcement = site?.settings.announcement;
+  const upcoming = site?.upcoming_sessions ?? [];
   const settings = site?.settings;
   const isCurrent = (to: string) => location.pathname === to || (to !== "/" && location.pathname.startsWith(to + "/"));
   // Builder menus when available; the built-in menu otherwise (API down, first paint).
@@ -176,7 +204,7 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   return (
     <div className="ps">
       <a href="#main" className="ps-sr">{t("a11y.skip")}</a>
-      {announcement?.active && announcement.text && (
+      {upcoming.length > 0 ? <UpcomingBar rounds={upcoming} /> : announcement?.active && announcement.text && (
         announcement.link
           ? <button type="button" className="ps-announce" onClick={() => openSiteLink(announcement.link!)}>
               <span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span><ArrowIcon size={16} />
@@ -186,8 +214,10 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       <header className="ps-header">
         <div className="ps-container ps-header-inner">
           <Link to="/" className="ps-brand">
-            <img src={brand.logo || logo} alt="" />
-            <span><strong>{brand.name}</strong><small>{lang === "th" && brand.tagline ? brand.tagline : t("brand.tagline")}</small></span>
+            {brand.logo ? <>
+              <img src={brand.logo} alt="" />
+              <span><strong>{brand.name}</strong><small>{lang === "th" && brand.tagline ? brand.tagline : t("brand.tagline")}</small></span>
+            </> : <img className="ps-brand-full" src={fullLogo} alt={brand.name} />}
           </Link>
           <nav aria-label={t("a11y.mainNav")} className="ps-nav">
             {headerMenu.map(item => <MenuLink key={item.to + item.label} item={item} current={isCurrent(item.to)} />)}
@@ -207,8 +237,10 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       <footer className="ps-footer">
         <div className="ps-container ps-footer-grid">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <strong style={{ fontSize: 20 }}>{brand.name}</strong>
+            <img className="ps-footer-logo" src={brand.logo || fullLogo} alt={brand.name} />
+            <strong style={{ fontSize: 16 }}>{settings?.company || brand.name}</strong>
             <span style={{ fontSize: 14 }}>{t("brand.footer")}</span>
+            {settings?.address && <span style={{ fontSize: 14 }}>{settings.address}</span>}
             {settings?.phone && <a href={`tel:${settings.phone}`} style={{ fontSize: 14 }}>{settings.phone}</a>}
             {settings?.email && <a href={`mailto:${settings.email}`} style={{ fontSize: 14 }}>{settings.email}</a>}
             {settings?.line && <span style={{ fontSize: 14 }}>LINE {settings.line}</span>}
@@ -496,7 +528,7 @@ export const ArticleCard: React.FC<{ article: Article }> = ({ article }) => (
 
 export function sessionSummary(s: PublicSession): string {
   const mode = getLang() === "th" ? MODE_LABEL[s.mode] : t(`mode.${s.mode}` as MessageKey);
-  return `${formatDateRange(s.start_date, s.end_date)} · ${mode} · ${formatBaht(s.price)}`;
+  return `${formatSessionDates(s)} · ${mode} · ${formatBaht(s.price)}`;
 }
 
 export function seatsText(s: PublicSession): string {

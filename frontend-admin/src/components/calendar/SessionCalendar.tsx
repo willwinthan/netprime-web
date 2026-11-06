@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { formatDateRange } from "../site-admin/ui";
 import {
   CalendarRange, YearMonth, THAI_MONTHS_SHORT, THAI_WEEKDAYS_SHORT, weekdayMon0, addDays, addMonths, coversDay, compareRanges, firstOfMonth,
-  groupByFirstDay, lastOfMonth, layoutWeek, monthOf, monthWeeks, parseYmd, thaiLongDate, thaiMonthLabel, todayYmd
+  groupByFirstDay, lastOfMonth, layoutWeek, monthOf, monthWeeks, parseYmd, sourceId, thaiLongDate, thaiMonthLabel, todayYmd
 } from "./calendarDates";
 import "./SessionCalendar.css";
 
@@ -74,9 +74,10 @@ export function suggestMonth(events: CalendarRange[], today = todayYmd()): YearM
 const sameMonth = (a: YearMonth, b: YearMonth) => a.year === b.year && a.month === b.month;
 
 export const SessionCalendar: React.FC<Props> = ({
-  events, onEventClick, onDayClick, dayActionLabel, renderExtra, legend, initialMonth, onMonthChange, loading, emptyText,
+  events, onEventClick: onSourceClick, onDayClick, dayActionLabel, renderExtra, legend, initialMonth, onMonthChange, loading, emptyText,
   maxLanes = 3, toolbar, label = "ปฏิทินรอบอบรม"
 }) => {
+  const onEventClick = (id: string) => onSourceClick(sourceId(id));
   const today = todayYmd();
   const narrow = useNarrowScreen();
   const [month, setMonth] = useState<YearMonth>(() => initialMonth ?? monthOf(today)!);

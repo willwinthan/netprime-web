@@ -268,10 +268,13 @@ export const SettingsPanel: React.FC = () => {
       <ErrorBox message={error} />
       <div className="glass-card" style={{ padding: "24px" }}>
         <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>แถบประกาศบนสุดของเว็บ</h3>
-        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "14px" }}>ใช้แจ้งรอบอบรมใหม่ วันหยุด หรือโปรโมชั่นด่วน</p>
+        <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "14px" }}>แสดงรอบอบรมที่ใกล้เปิดให้อัตโนมัติ ถ้าต้องการแจ้งวันหยุดหรือโปรโมชั่นด่วน ให้ปิดการแสดงอัตโนมัติแล้วใช้ข้อความด้านล่าง</p>
         <div style={grid2}>
           <label style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "14px", gridColumn: "1 / -1" }}>
-            <input type="checkbox" checked={!!form.announcement.active} onChange={e => setAnn("active", e.target.checked)} />แสดงประกาศ
+            <input type="checkbox" checked={form.announcement.auto !== false} onChange={e => setAnn("auto", e.target.checked)} />แสดงรอบอบรมที่เริ่มภายใน 30 วันอัตโนมัติ
+          </label>
+          <label style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "14px", gridColumn: "1 / -1" }}>
+            <input type="checkbox" checked={!!form.announcement.active} onChange={e => setAnn("active", e.target.checked)} />แสดงข้อความประกาศ (ถ้าเปิดแสดงอัตโนมัติ จะใช้ข้อความนี้เมื่อไม่มีรอบใกล้เปิด)
           </label>
           <Field label="ข้อความ" span><input className="form-input" maxLength={200} value={form.announcement.text || ""} onChange={e => setAnn("text", e.target.value)} /></Field>
           <Field label="ลิงก์เมื่อกด" hint="เช่น #schedule หรือ https://…" span><input className="form-input" maxLength={500} value={form.announcement.link || ""} onChange={e => setAnn("link", e.target.value)} /></Field>
@@ -280,6 +283,7 @@ export const SettingsPanel: React.FC = () => {
       <div className="glass-card" style={{ padding: "24px" }}>
         <h3 style={{ fontSize: "16px", marginBottom: "14px" }}>ข้อมูลติดต่อ (แสดงที่ header, footer และหน้าติดต่อ)</h3>
         <div style={grid2}>
+          <Field label="ชื่อบริษัท" span><input className="form-input" maxLength={120} value={form.company || ""} onChange={set("company")} /></Field>
           <Field label="เบอร์โทร"><input className="form-input" maxLength={40} value={form.phone || ""} onChange={set("phone")} /></Field>
           <Field label="อีเมลติดต่อ"><input className="form-input" type="email" maxLength={254} value={form.email || ""} onChange={set("email")} /></Field>
           <Field label="LINE Official"><input className="form-input" maxLength={60} value={form.line || ""} onChange={set("line")} placeholder="@netprime" /></Field>

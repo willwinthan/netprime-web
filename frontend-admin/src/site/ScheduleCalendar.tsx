@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { publicGet, PublicSession, RegisterModal } from "../components/site/PublicSections";
-import { MODE_LABEL, formatBaht, formatDate, formatDateRange } from "../components/site-admin/ui";
+import { MODE_LABEL, formatBaht, formatDate, formatSessionDates } from "../components/site-admin/ui";
 import { SessionCalendar, CalendarEvent, suggestMonth } from "../components/calendar/SessionCalendar";
-import { YearMonth } from "../components/calendar/calendarDates";
+import { YearMonth, splitByDays } from "../components/calendar/calendarDates";
 import { Dialog, seatsText, toneOf } from "./shared";
 
 // ==========================================
@@ -11,18 +11,18 @@ import { Dialog, seatsText, toneOf } from "./shared";
 
 const vendorKey = (s: PublicSession) => s.vendor || "อื่น ๆ";
 
-function toEvent(s: PublicSession): CalendarEvent {
+function toEvents(s: PublicSession): CalendarEvent[] {
   const tone = toneOf(s.vendor);
   const badges: CalendarEvent["badges"] = [];
   if (!s.registration_open) badges.push({ label: "ปิดรับ", fg: "#4a5775", bg: "#ffffff" });
   else if (s.seats_left === 0) badges.push({ label: "เต็ม · รอคิว", fg: "#b42318", bg: "#ffffff" });
   else if (s.seats_left <= 3) badges.push({ label: `เหลือ ${s.seats_left}`, fg: "#9a3f12", bg: "#ffffff" });
-  return {
+  return splitByDays<CalendarEvent>({
     id: s.id, start: s.start_date, end: s.end_date || s.start_date, title: s.title,
     color: { fg: tone.fg, bg: tone.bg },
     meta: [s.time_text, MODE_LABEL[s.mode], s.location].filter(Boolean).join(" · "),
     badges, description: `${vendorKey(s)} · ${MODE_LABEL[s.mode]} · ${formatBaht(s.price)} · ${seatsText(s)}`
-  };
+  }, s.session_dates);
 }
 
 export const ScheduleCalendarView: React.FC = () => {
@@ -50,7 +50,7 @@ export const ScheduleCalendarView: React.FC = () => {
 
   const vendors = useMemo(() => Array.from(new Set((data ?? []).map(vendorKey))).sort(), [data]);
   const shown = useMemo(() => (data ?? []).filter(s => !vendor || vendorKey(s) === vendor), [data, vendor]);
-  const events = useMemo(() => shown.map(toEvent), [shown]);
+  const events = useMemo(() => shown.flatMap(toEvents), [shown]);
   const byId = useMemo(() => new Map((data ?? []).map(s => [s.id, s])), [data]);
 
   return (
@@ -87,7 +87,7 @@ export const ScheduleCalendarView: React.FC = () => {
           <h2 style={{ margin: "6px 44px 10px 0", fontSize: 24, lineHeight: 1.3 }}>{open.title}</h2>
           {open.description && <p className="ps-muted" style={{ margin: 0, fontSize: 16 }}>{open.description}</p>}
           <dl className="ps-facts">
-            <div><dt>วันที่</dt><dd>{formatDateRange(open.start_date, open.end_date)}</dd></div>
+            <div><dt>วันที่</dt><dd>{formatSessionDates(open)}</dd></div>
             {open.time_text && <div><dt>เวลา</dt><dd>{open.time_text}</dd></div>}
             <div><dt>รูปแบบ</dt><dd>{MODE_LABEL[open.mode]}{open.location ? ` · ${open.location}` : ""}</dd></div>
             {open.instructor_name && <div><dt>วิทยากร</dt><dd>{open.instructor_name}</dd></div>}

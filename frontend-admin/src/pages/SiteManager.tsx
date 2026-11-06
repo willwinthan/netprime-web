@@ -4,7 +4,7 @@ import { can, useApi } from "../hooks/useApi";
 import { TRAINING_TABS } from "./tabPermissions";
 import { SessionsPanel } from "../components/site-admin/SessionsPanel";
 import { InquiriesPanel } from "../components/site-admin/ContentPanels";
-import { AdminSession, Chip, REG_STATUS, SeatBar, ErrorBox, Empty, formatDateRange, formatDateTime } from "../components/site-admin/ui";
+import { AdminSession, Chip, REG_STATUS, SeatBar, ErrorBox, Empty, formatSessionDates, formatDateTime } from "../components/site-admin/ui";
 
 type Tab = "overview" | "sessions" | "inquiries";
 
@@ -83,7 +83,7 @@ export const SiteManager: React.FC = () => {
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", width: "100%", background: "none", border: "none", borderBottom: "1px solid rgba(0,0,0,0.05)", padding: "12px 0", cursor: "pointer", textAlign: "left" }}>
                     <div>
                       <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>{s.title}</div>
-                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{formatDateRange(s.start_date, s.end_date)}{s.pending_count ? ` · รอตรวจสอบ ${s.pending_count}` : ""}</div>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{formatSessionDates(s)}{s.pending_count ? ` · รอตรวจสอบ ${s.pending_count}` : ""}</div>
                     </div>
                     <SeatBar taken={s.seats_taken} capacity={s.capacity} />
                   </button>

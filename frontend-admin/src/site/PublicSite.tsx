@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { LegalPage, LEGAL_PATHS } from "./LegalPage";
 import { User } from "../hooks/useApi";
-import { ScheduleSection, ContactSection } from "../components/site/PublicSections";
+import { ScheduleSection, ContactSection, PublicSession, RegisterModal, publicGet } from "../components/site/PublicSections";
 import { Link, navigate, useLocation, usePageMeta, useInitialHashScroll } from "./router";
 import { AuthDialog, Course, CourseCard, CourseDialog, SearchIcon, SiteContext, SiteLayout, useCourses, vendorOf } from "./shared";
 import { HomePage, FeatureGrid } from "./HomePage";
@@ -12,6 +12,7 @@ import { ScheduleCalendarView } from "./ScheduleCalendar";
 import { AiSalesChatWidget } from "../components/ai/AiSalesChatWidget";
 import "./site.css";
 import { CustomPage } from "./CustomPage";
+import { SelfLearningPage } from "./SelfLearningPage";
 import { CoursePage, consumeReturnTo } from "./CoursePage";
 import { useI18n } from "../i18n";
 import { PublicCategoryChips } from "../components/course/CategoryFilter";
@@ -19,7 +20,7 @@ import { PublicCategoryChips } from "../components/course/CategoryFilter";
 /** Paths served by the public website (everything else while signed in is the LMS console). */
 export function isPublicPath(pathname: string): boolean {
   // Emailed account links (reset / invitation / verification) also open while signed in.
-  return ["/", "/courses", "/schedule", "/about", "/blog", "/reset-password", "/verify-email", ...Object.keys(LEGAL_PATHS)].includes(pathname.replace(/\/+$/, "") || "/") ||
+  return ["/", "/courses", "/schedule", "/self-learning", "/about", "/blog", "/reset-password", "/verify-email", ...Object.keys(LEGAL_PATHS)].includes(pathname.replace(/\/+$/, "") || "/") ||
     pathname.startsWith("/blog/") || pathname.startsWith("/p/") || /^\/courses\/[^/]+\/?$/.test(pathname);
 }
 
@@ -98,17 +99,37 @@ const SchedulePage: React.FC = () => {
   usePageMeta("ตารางอบรม", "รอบอบรมในห้องเรียนและออนไลน์สด พร้อมจำนวนที่นั่งคงเหลือ ลงทะเบียนได้ทันที");
   const [view, setView] = useState<ScheduleView>(initialScheduleView);
   const { t } = useI18n();
+  // /schedule?register=<round id> is the link staff share: it opens the form for that round.
+  const registerId = useLocation().searchParams.get("register");
+  const [linked, setLinked] = useState<PublicSession | null>(null);
+  const [linkClosed, setLinkClosed] = useState(false);
+  useEffect(() => {
+    if (!registerId) return;
+    let current = true;
+    setLinkClosed(false);
+    publicGet<{ session: PublicSession }>(`/sessions/${encodeURIComponent(registerId)}`)
+      .then(({ session }) => {
+        if (!current) return;
+        if (session.registration_open) setLinked(session);
+        else setLinkClosed(true);
+      })
+      .catch(() => { if (current) setLinkClosed(true); });
+    return () => { current = false; };
+  }, [registerId]);
+  const closeLinked = () => { setLinked(null); navigate("/schedule", { replace: true }); };
   const choose = (next: ScheduleView) => {
     setView(next);
     try { localStorage.setItem(SCHEDULE_VIEW_KEY, next); } catch { /* storage unavailable */ }
   };
   return (
     <div className="ps-container" style={{ paddingTop: 24 }}>
+      {linkClosed && <p role="status" className="ps-card" style={{ margin: "0 0 16px", padding: "14px 18px" }}>{t("schedule.linkClosed")}</p>}
       <div className="ps-chips ps-view-toggle" role="group" aria-label={t("schedule.viewToggle")}>
         <button type="button" className="ps-chip" aria-pressed={view === "list"} onClick={() => choose("list")}>{t("schedule.list")}</button>
         <button type="button" className="ps-chip" aria-pressed={view === "calendar"} onClick={() => choose("calendar")}>{t("schedule.calendar")}</button>
       </div>
       {view === "list" ? <ScheduleSection /> : <ScheduleCalendarView />}
+      {linked && <RegisterModal session={linked} onClose={closeLinked} onDone={() => undefined} />}
     </div>
   );
 };
@@ -162,6 +183,7 @@ export const PublicSite: React.FC<{ loggedIn: boolean; onLogin: (token: string, 
   else if (path === "/" || consolePath) page = <HomePage />;
   else if (path === "/courses") page = <CoursesPage />;
   else if (path === "/schedule") page = <SchedulePage />;
+  else if (path === "/self-learning") page = <SelfLearningPage />;
   else if (path === "/about") page = <AboutPage />;
   else if (path === "/blog") page = <BlogPage />;
   else if (path === "/reset-password") page = <ResetPasswordPage />;

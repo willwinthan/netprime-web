@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "../../hooks/useApi";
+import { API_BASE_URL, apiFetch } from "../../hooks/useApi";
 import { PublicLeadForm, storedUtm } from "./runtime";
 
 /** Cloudflare Turnstile when VITE_TURNSTILE_SITE_KEY is set; otherwise nothing (same as the website forms). */
@@ -42,7 +42,7 @@ export const LeadFormView: React.FC<{ form: PublicLeadForm; onDone?: () => void;
       setSending(true);
       setError(null);
       const utm = storedUtm();
-      const res = await fetch(`${API_BASE_URL}/public/marketing/forms/${encodeURIComponent(form.id)}/submit`, {
+      const res = await apiFetch(`${API_BASE_URL}/public/marketing/forms/${encodeURIComponent(form.id)}/submit`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ values, consent: true, website, turnstile_token: token, page_path: window.location.pathname,
           utm_source: utm.utm_source, utm_medium: utm.utm_medium, utm_campaign: utm.utm_campaign })

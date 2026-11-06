@@ -1073,7 +1073,7 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log (created_at);
 
 -- Seeds for website content (demo only)
-INSERT INTO site_settings (key, value) VALUES ('site', '{"phone":"02-000-0000","email":"training@netprime.example","line":"@netprime","address":"กรุงเทพมหานคร","hours":"จ.–ศ. 08:30–17:30","announcement":{"active":true,"text":"เปิดรับสมัคร CCNA รอบเดือนพฤศจิกายน ที่นั่งจำกัด","link":"#schedule"},"notify_emails":"admin@netprime.com"}');
+INSERT INTO site_settings (key, value) VALUES ('site', '{"company":"Plantecplus Co.,Ltd (NetPrime Training)","phone":"062-559-4622","email":"netprime@plantecplus.com","address":"118/28 ถนน พระรามที่ 6 แขวงพญาไท เขตพญาไท กรุงเทพมหานคร 10400","announcement":{"active":true,"text":"เปิดรับสมัคร CCNA รอบเดือนพฤศจิกายน ที่นั่งจำกัด","link":"#schedule"},"notify_emails":"admin@netprime.com"}');
 
 INSERT INTO training_sessions (id, course_id, title, vendor, description, start_date, end_date, time_text, mode, location, instructor_name, price, capacity, status) VALUES
 ('ses_ccna_nov', 'course_cisco_ccna', 'CCNA 200-301', 'Cisco', 'ปูพื้นฐาน Routing & Switching พร้อม Lab อุปกรณ์จริง', '2026-11-03', '2026-11-07', '09:00–16:00', 'classroom', 'ห้องอบรม NetPrime ชั้น 5', 'อ.สมชาย', 18900, 12, 'open'),
@@ -1084,6 +1084,9 @@ INSERT INTO training_sessions (id, course_id, title, vendor, description, start_
 INSERT INTO session_registrations (id, session_id, name, email, phone, company, attendees, status) VALUES
 ('reg_demo_1', 'ses_ccna_nov', 'คุณสมศรี ตัวอย่าง', 'somsri@example.invalid', '0810000001', 'Acme Corp', 3, 'confirmed'),
 ('reg_demo_2', 'ses_ccna_nov', 'คุณมานะ ตัวอย่าง', 'mana@example.invalid', '0810000002', NULL, 1, 'pending');
+
+-- ชื่อผู้เขียนของบทความที่ย้ายมาจากเว็บเก่า (ผู้เขียนยังไม่มีบัญชีในระบบ)
+ALTER TABLE articles ADD COLUMN author_label TEXT;
 
 INSERT INTO articles (id, slug, title, category, excerpt, body, status, published_at) VALUES
 ('art_ccna_plan', 'ccna-study-plan', 'เตรียมสอบ CCNA ให้ผ่านในรอบเดียว', 'Cisco', 'แผนอ่าน 6 สัปดาห์และ Lab ที่ต้องฝึก', 'ข้อสอบ CCNA 200-301 วัดทั้งความเข้าใจและการลงมือทำ แผนนี้แบ่งเป็น 3 ช่วง
@@ -2112,3 +2115,25 @@ CREATE TABLE IF NOT EXISTS danger_confirmations (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_danger_confirmations_lookup ON danger_confirmations (action, target_id, requested_by, created_at);
+
+-- MVP rounds: instructors own rounds, rounds may run on non-consecutive days, and a registration
+-- carries the payment details staff used to keep in the old Google Sheet. Handlers: src/handlers/site.ts.
+
+-- The instructor account behind a round; instructor_name stays as the public label.
+ALTER TABLE training_sessions ADD COLUMN instructor_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+-- JSON array of YYYY-MM-DD class days. NULL = every day from start_date to end_date.
+ALTER TABLE training_sessions ADD COLUMN session_dates TEXT;
+
+-- Transfer slip sent with the public form; private R2 key under slips/registrations/.
+ALTER TABLE session_registrations ADD COLUMN slip_r2_key TEXT;
+ALTER TABLE session_registrations ADD COLUMN slip_content_type TEXT;
+ALTER TABLE session_registrations ADD COLUMN slip_uploaded_at TEXT;
+-- Payment record kept by staff. Amounts are per registration, in satang, and may differ between people.
+ALTER TABLE session_registrations ADD COLUMN buyer_type TEXT CHECK(buyer_type IS NULL OR buyer_type IN ('individual', 'company'));
+ALTER TABLE session_registrations ADD COLUMN sales_stage TEXT CHECK(sales_stage IS NULL OR sales_stage IN ('quote_sent', 'po_received'));
+ALTER TABLE session_registrations ADD COLUMN paid_amount_satang INTEGER CHECK(paid_amount_satang IS NULL OR paid_amount_satang >= 0);
+ALTER TABLE session_registrations ADD COLUMN paid_on TEXT;       -- YYYY-MM-DD
+ALTER TABLE session_registrations ADD COLUMN paid_account TEXT;  -- Receiving account, as staff name it
+ALTER TABLE session_registrations ADD COLUMN receipt_nos TEXT;   -- One receipt may cover several people, and one person several receipts
+
+CREATE INDEX IF NOT EXISTS idx_training_sessions_instructor ON training_sessions(instructor_id);

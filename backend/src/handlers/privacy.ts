@@ -157,7 +157,7 @@ const DELETED_MESSAGE = "[ข้อความถูกลบตามคำข
  * Deleted: personal/staff notes, sign-in identities (OAuth + SSO), tokens, notifications, custom profile
  * values, tags, notification preferences, web push subscriptions, LINE links/codes, presence, marketing
  * leads and contact inquiries sent with the account's email.
- * Scrubbed: registration contact details, import-log emails, outgoing webhook payloads (user_email /
+ * Scrubbed: registration contact details and transfer slips, import-log emails, outgoing webhook payloads (user_email /
  * user_name and data.email/name/phone) and the content + attachments of direct messages the user sent.
  * Kept, with authorship anonymized through the renamed account: public community posts/comments, lesson
  * Q&A and course reviews (deleting them would break other people's discussions).
@@ -184,6 +184,9 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
   const attachments = tables.has("dm_messages")
     ? (await db.prepare("SELECT attachment_key FROM dm_messages WHERE sender_id = ? AND attachment_key IS NOT NULL").bind(userId).all<{ attachment_key: string }>()).results
     : [];
+  // Slips show a name and bank account, so they go too unless a tax invoice was requested (kept for tax records).
+  const slips = (await db.prepare("SELECT slip_r2_key FROM session_registrations WHERE user_id = ? AND slip_r2_key IS NOT NULL AND invoice_required = 0")
+    .bind(userId).all<{ slip_r2_key: string }>()).results;
   const email = `deleted-${userId}@invalid`;
   const unusable = `pbkdf2-sha256$deleted$${crypto.randomUUID().replace(/-/g, "")}`;
   const now = new Date().toISOString();
@@ -199,7 +202,8 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
     db.prepare("DELETE FROM notifications WHERE user_id = ?").bind(userId),
     // Contact details go; company/tax details stay only where a tax invoice was requested.
     db.prepare(`UPDATE session_registrations SET name = ?, email = 'deleted-' || id || '@invalid', phone = '-', note = NULL,
-        company = CASE WHEN invoice_required = 1 THEN company ELSE NULL END
+        company = CASE WHEN invoice_required = 1 THEN company ELSE NULL END,
+        slip_r2_key = CASE WHEN invoice_required = 1 THEN slip_r2_key ELSE NULL END
       WHERE user_id = ?`).bind(DELETED_NAME, userId)
   ];
   for (const table of ["user_profile_values", "user_tags", "sso_identities", "push_subscriptions", "line_links", "line_link_codes", "user_presence", "notification_preferences", "staff_notes"]) {
@@ -228,6 +232,7 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
   if (!claimed.meta.changes) return c.json({ error: "คำขอนี้ดำเนินการไปแล้ว" }, 409);
   // Private DM attachments the user sent (R2); best effort after the database is anonymized.
   for (const { attachment_key } of attachments) await c.env.ASSETS.delete(attachment_key).catch(() => undefined);
+  for (const { slip_r2_key } of slips) await c.env.ASSETS.delete(slip_r2_key).catch(() => undefined);
   await audit(c, "approve", request.id, { user_id: userId });
   return c.json({ message: "ลบข้อมูลส่วนบุคคลและปิดบัญชีแล้ว", request: { id: request.id, status: "approved" } });
 });

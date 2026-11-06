@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import React from "react";
 import { X } from "lucide-react";
 import { API_BASE_URL } from "../../hooks/useApi";
+import { dayRuns } from "../calendar/calendarDates";
 
 // ==========================================
 // Types shared by the content console and the public site sections
@@ -19,10 +20,13 @@ export interface AdminSession {
   description: string | null;
   start_date: string;
   end_date: string;
+  /** JSON array of class days; null = every day from start to end. */
+  session_dates?: string | null;
   time_text: string | null;
   mode: SessionMode;
   location: string | null;
   instructor_name: string | null;
+  instructor_id?: string | null;
   price: number;
   capacity: number;
   registration_deadline: string | null;
@@ -57,6 +61,15 @@ export interface Registration {
   account_last_login?: string | null;
   /** 1 when the account already has the session's online course. */
   course_access?: number | null;
+  /** Transfer slip and payment record; see migrations/0030_mvp_rounds.sql. */
+  slip_uploaded_at?: string | null;
+  slip_content_type?: string | null;
+  buyer_type?: "individual" | "company" | null;
+  sales_stage?: "quote_sent" | "po_received" | null;
+  paid_amount_satang?: number | null;
+  paid_on?: string | null;
+  paid_account?: string | null;
+  receipt_nos?: string | null;
 }
 
 export const MODE_LABEL: Record<SessionMode, string> = { classroom: "ห้องอบรม", online: "ออนไลน์", hybrid: "Hybrid" };
@@ -96,6 +109,20 @@ export function formatDateRange(start: string, end: string): string {
   const e = new Date(end + "T00:00:00Z");
   const sameYear = s.getUTCFullYear() === e.getUTCFullYear();
   return `${sameYear ? THAI_DAY_MONTH.format(s) : THAI_DATE.format(s)} – ${THAI_DATE.format(e)}`;
+}
+
+/** Class days of a round: an array from the public API, a JSON string from the staff API. */
+export function sessionDays(value: string[] | string | null | undefined): string[] | null {
+  if (Array.isArray(value)) return value;
+  if (!value) return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+/** The dates of a round, listing each run of days when it skips days. */
+export function formatSessionDates(s: { start_date: string; end_date: string; session_dates?: string[] | string | null }): string {
+  const days = sessionDays(s.session_dates);
+  if (!days?.length) return formatDateRange(s.start_date, s.end_date);
+  return dayRuns(days).map(run => formatDateRange(run.start, run.end)).join(", ");
 }
 
 /** D1 CURRENT_TIMESTAMP values are UTC without a zone marker. */
