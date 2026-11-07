@@ -76,7 +76,7 @@ Never run `schema.sql` against a remote DB. A new remote DB uses `pnpm run db:in
 
 ## Deploy
 
-Each package has `wrangler.jsonc` with an `env.staging` block. Vars and bindings are not inherited across envs, so give each env its own full set. Deploy the backend before the frontend: `pnpm run deploy:backend[:staging]`, then `deploy:frontend[:staging]`. Apply pending D1 migrations before deploying backend code that reads new columns. The CI deploy job is written but commented out.
+Each package has `wrangler.jsonc` with an `env.staging` block. Vars and bindings are not inherited across envs, so give each env its own full set. Deploy the backend before the frontend: `pnpm run deploy:backend[:staging]`, then `deploy:frontend[:staging]`. Apply pending D1 migrations before deploying backend code that reads new columns. CI's `deploy:staging` job applies migrations and deploys staging after `check:release` passes on `main`, but only when the repo variable `DEPLOY_STAGING` is `true`. Production is deployed by hand.
 
 ## Project status docs
 

@@ -341,11 +341,15 @@ BACKUP_BUCKET=netprime-backups pnpm run db:backup
 
 ## 12. CI/CD
 
-`.github/workflows/ci.yml` รันทุก push ไป `main` และทุก pull request: pnpm 10 + Node 22 (cache pnpm store) → `pnpm install --frozen-lockfile` → `pnpm run db:init-sql:verify` → `pnpm run check:release` ไม่มีขั้น deploy อัตโนมัติ
+`.github/workflows/ci.yml` รันทุก push ไป `main` และทุก pull request: pnpm 10 + Node 22 (cache pnpm store) → `pnpm install --frozen-lockfile` → `pnpm run db:init-sql:verify` → `pnpm run check:release` เมื่อเปิดใช้แล้ว push ไป `main` จะ deploy staging อัตโนมัติ ส่วน production ยัง deploy เองตาม[หัวข้อ 14](#14-go-live-runbook)
 
 - โฟลเดอร์นี้ `git init` แล้ว (branch `main`) ยังไม่มี commit และ remote: สร้าง repository บน GitHub แล้ว `git remote add origin …` และ push
 - ตั้ง branch protection ให้ `main` ต้องผ่าน job `check:release` ก่อน merge
-- Deploy อัตโนมัติ (คอมเมนต์ไว้ท้ายไฟล์ workflow): สร้าง API token สิทธิ์ Workers Scripts:Edit, D1:Edit, Workers KV:Edit, R2:Edit เก็บเป็น `CLOUDFLARE_API_TOKEN` และ `CLOUDFLARE_ACCOUNT_ID` ใน repo secrets ใช้ GitHub Environment ที่บังคับ reviewer สำหรับ production ไม่ deploy ถ้า `check:release` ไม่ผ่าน
+- Deploy staging อัตโนมัติ (job `deploy:staging`): หลัง `check:release` ผ่านบน `main` จะลง migration → deploy backend → deploy frontend ถ้า `check:release` ไม่ผ่านจะไม่ deploy กดรันซ้ำได้จาก Actions → CI → Run workflow บน `main`
+- วิธีเปิดใช้ ทำตามลำดับ:
+  1. ถ้า `netprime-db-staging` ยังว่าง ให้รัน `pnpm run db:init:remote -- --env staging` หนึ่งครั้ง และตั้ง secret ของ Worker staging ให้ครบ
+  2. สร้าง API token สิทธิ์ Workers Scripts:Edit, D1:Edit, Workers KV:Edit, R2:Edit ในบัญชี staging แล้วเก็บเป็น secret `CLOUDFLARE_API_TOKEN` ของ GitHub (ไม่ต้องตั้ง account ID เพราะอยู่ใน `env.staging` ของ `wrangler.jsonc`)
+  3. ตั้ง repository variable `DEPLOY_STAGING` เป็น `true` (Settings → Secrets and variables → Actions → Variables) ต้องเป็นระดับ repository ไม่ใช่ระดับ Environment เพราะ job อ่านค่านี้ก่อนเข้า Environment ถ้าจะหยุด deploy ชั่วคราวให้เปลี่ยนเป็นค่าอื่น
 - ทางเลือก: Workers Builds (Dashboard → Worker → Settings → Builds) เชื่อม repo แยกต่อ Worker
 
 ## 13. การดูแลระบบประจำวัน
