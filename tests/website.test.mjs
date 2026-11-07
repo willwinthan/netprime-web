@@ -239,6 +239,50 @@ test('theme: hex colors, contrast and font allowlist are enforced; public endpoi
   await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: consoleRes.data.defaults });
 });
 
+test('theme: style options are validated and old saved themes get their defaults', async () => {
+  const { defaults } = await expectStatus('/api/website/theme', 200, { token: coord });
+  assert.equal(defaults.header_style, 'light');
+  assert.equal(defaults.button_style, 'solid');
+  assert.equal(defaults.background, 'cream');
+  assert.equal(defaults.footer_style, 'dark');
+  assert.equal(defaults.hero_layout, 'split');
+  assert.equal(defaults.accent_color, null);
+  assert.equal(defaults.heading_font, null);
+
+  const base = { ...defaults, school_name: 'โรงเรียนทดสอบ' };
+  const cases = [
+    [{ ...base, header_style: 'neon' }, /แถบเมนู/],
+    [{ ...base, button_style: 'round' }, /แบบปุ่ม/],
+    [{ ...base, background: 'black' }, /พื้นหลัง/],
+    [{ ...base, footer_style: 'none' }, /ส่วนท้าย/],
+    [{ ...base, hero_layout: 'video' }, /ส่วนหัวหน้าแรก/],
+    [{ ...base, accent_color: 'orange' }, /สีเน้น/],
+    [{ ...base, heading_font: 'Papyrus' }, /ฟอนต์หัวข้อ/],
+    [{ ...base, hero_layout: 'image', hero_image_url: null }, /รูปพื้นหลัง/],
+    [{ ...base, hero_layout: 'image', hero_image_url: 'javascript:alert(1)' }, /รูปพื้นหลัง/]
+  ];
+  for (const [body, message] of cases) {
+    const res = await request('/api/website/theme', { token: coord, method: 'PUT', body });
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(res.data.error, message);
+  }
+
+  const styled = { ...base, accent_color: '#F59E0B', heading_font: 'Kanit', header_style: 'dark', button_style: 'pill',
+    background: 'white', footer_style: 'light', hero_layout: 'image', hero_image_url: 'https://example.com/hero.jpg' };
+  const saved = await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: styled });
+  assert.equal(saved.theme.accent_color, '#f59e0b');
+  assert.equal(saved.theme.heading_font, 'Kanit');
+  const pub = await expectStatus('/api/public/website/theme', 200);
+  for (const key of ['header_style', 'button_style', 'background', 'footer_style', 'hero_layout', 'hero_image_url']) assert.equal(pub.theme[key], styled[key], key);
+
+  // A theme saved before these options existed reads back with the defaults.
+  const legacy = { school_name: 'โรงเรียนทดสอบ', primary_color: '#1d4ea8', secondary_color: '#182443', font: 'Sarabun', radius: 8 };
+  const old = await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: legacy });
+  assert.equal(old.theme.header_style, 'light');
+  assert.equal(old.theme.hero_layout, 'split');
+  await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: defaults });
+});
+
 // ---------- Certificate templates ----------
 
 test('certificate templates: CRUD, default handling, validation and per-course override', async () => {
