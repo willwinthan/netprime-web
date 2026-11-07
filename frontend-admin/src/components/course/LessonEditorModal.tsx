@@ -23,6 +23,8 @@ interface Props {
   sections: CourseSection[];
   embedProviders: string;
   defaultSectionId?: string | null;
+  /** Type picked before the modal opened (new lessons only). */
+  defaultType?: LessonType;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -30,10 +32,10 @@ interface Props {
 interface SelfLearningOption { id: string; slug: string; title: string; visibility: "public" | "course" }
 
 /** Create or edit a text / PDF / embed / SCORM / self-learning lesson, its chapter and drip settings. */
-export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections, embedProviders, defaultSectionId, onClose, onSaved }) => {
+export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections, embedProviders, defaultSectionId, defaultType, onClose, onSaved }) => {
   const api = useApi();
   const [title, setTitle] = useState(lesson?.title ?? "");
-  const [type, setType] = useState<LessonType>(lesson?.type ?? "text");
+  const [type, setType] = useState<LessonType>(lesson?.type ?? defaultType ?? "text");
   const [sectionId, setSectionId] = useState<string>(lesson ? lesson.section_id ?? "" : defaultSectionId ?? "");
   const [embedUrl, setEmbedUrl] = useState(lesson?.embed_url ?? "");
   const [pdfKey, setPdfKey] = useState(lesson?.pdf_r2_key ?? "");
@@ -131,7 +133,7 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
   const typeOptions = (Object.keys(LESSON_TYPE_LABEL) as LessonType[]).filter(t => t !== "video" || lesson?.type === "video");
 
   return (
-    <Modal title={lesson ? `แก้ไขบทเรียน: ${lesson.title}` : "เพิ่มบทเรียน"} onClose={onClose} width={type === "text" ? 900 : 640}>
+    <Modal title={lesson ? `แก้ไขบทเรียน: ${lesson.title}` : `เพิ่มบทเรียน: ${LESSON_TYPE_LABEL[type]}`} onClose={onClose} width={type === "text" ? 900 : 640}>
       <ErrorBox message={error} />
       <form onSubmit={save} style={{ display: "grid", gap: "14px" }}>
         <div style={grid2}>

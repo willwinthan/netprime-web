@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
-import { ErrorBox, Field, grid2 } from "../site-admin/ui";
+import { ErrorBox, Field, Modal, grid2 } from "../site-admin/ui";
 import { LessonEditorModal } from "./LessonEditorModal";
-import { BuilderLesson, CourseOutline, LESSON_TYPE_LABEL, LEVEL_LABEL } from "./types";
+import { BuilderLesson, CourseOutline, LESSON_TYPE_HINT, LESSON_TYPE_LABEL, LEVEL_LABEL, LessonType } from "./types";
 import "./course.css";
 import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
@@ -17,13 +17,15 @@ interface Props {
   courseId: string;
   /** Changes whenever the console reloads the lesson list (e.g. after its own video form saved). */
   refreshToken?: unknown;
-  onAddVideoLesson: () => void;
+  /** Opens the console's video form; the new lesson goes into `sectionId` when given. */
+  onAddVideoLesson: (sectionId: string | null) => void;
   onEditVideoLesson: (lesson: BuilderLesson) => void;
   onManageQuizzes: (lesson: BuilderLesson) => void;
   onDeleteLesson: (lessonId: string) => void;
 }
 
 type Tab = "structure" | "sales" | "access";
+const VIDEO_SOURCE: Record<string, string> = { cloudflare: "อัปโหลดเข้าระบบ", youtube: "YouTube", vimeo: "Vimeo" };
 const hostOf = (url: string) => { try { return new URL(url).hostname; } catch { return url; } };
 interface Layout { unsectioned: string[]; sections: { id: string; title: string; lesson_ids: string[] }[] }
 
@@ -42,7 +44,9 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
   const [layout, setLayout] = useState<Layout | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ lesson: BuilderLesson | null; sectionId?: string | null } | null>(null);
+  const [editing, setEditing] = useState<{ lesson: BuilderLesson | null; sectionId?: string | null; type?: LessonType } | null>(null);
+  // "เพิ่มบทเรียน": pick the lesson type first; video goes to the console's video form.
+  const [picking, setPicking] = useState<{ sectionId: string | null } | null>(null);
   const [newSection, setNewSection] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -168,7 +172,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
             <strong style={{ fontSize: 14, color: "var(--text-primary)" }}>{lesson.title}</strong>
           </div>
           <div className="np-cb-meta">
-            {lesson.type === "video" && lesson.video_stream_uid && <span>วิดีโอ: {lesson.video_provider || "cloudflare"}</span>}
+            {lesson.type === "video" && lesson.video_stream_uid && <span>วิดีโอ: {VIDEO_SOURCE[lesson.video_provider || "cloudflare"] ?? lesson.video_provider}</span>}
             {lesson.type === "pdf" && <span>{lesson.pdf_r2_key ? `PDF: ${lesson.pdf_r2_key.split("/").pop()}` : "ยังไม่มีไฟล์ PDF"}</span>}
             {lesson.type === "embed" && lesson.embed_url && <span>{hostOf(lesson.embed_url)}</span>}
             {lesson.type === "scorm" && <span>{lesson.scorm_launch ? `เริ่มที่ ${lesson.scorm_launch}` : "ยังไม่ได้อัปโหลดแพ็กเกจ"}</span>}
@@ -209,8 +213,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
       {tab === "structure" && (
         <div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-            <button type="button" className="tech-button-primary" style={{ borderRadius: "1rem" }} onClick={onAddVideoLesson}><Plus size={14} /> บทเรียนวิดีโอ</button>
-            <button type="button" className="tech-button-outline" style={{ borderRadius: "1rem" }} onClick={() => setEditing({ lesson: null })}><Plus size={14} /> บทความ / PDF / ฝังเนื้อหา / SCORM</button>
+            <button type="button" className="tech-button-primary" style={{ borderRadius: "1rem" }} onClick={() => setPicking({ sectionId: null })}><Plus size={14} /> เพิ่มบทเรียน</button>
             <form onSubmit={addSection} style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
               <input className="form-input" value={newSection} onChange={e => setNewSection(e.target.value)} placeholder="ชื่อบทใหม่ เช่น บทที่ 1 พื้นฐาน" maxLength={200} aria-label="ชื่อบทใหม่" />
               <button type="submit" className="tech-button-outline" style={{ borderRadius: "1rem", whiteSpace: "nowrap" }}>เพิ่มบท</button>
@@ -234,7 +237,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
                 <span style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{section.lesson_ids.length} บทเรียน</span>
                 <button type="button" className="np-cb-btn" aria-label="เลื่อนบทขึ้น" disabled={si === 0} onClick={() => nudgeSection(section.id, -1)}><ArrowUp size={12} /></button>
                 <button type="button" className="np-cb-btn" aria-label="เลื่อนบทลง" disabled={si === layout.sections.length - 1} onClick={() => nudgeSection(section.id, 1)}><ArrowDown size={12} /></button>
-                <button type="button" className="np-cb-btn" onClick={() => setEditing({ lesson: null, sectionId: section.id })}><Plus size={12} /> บทเรียน</button>
+                <button type="button" className="np-cb-btn" onClick={() => setPicking({ sectionId: section.id })}><Plus size={12} /> บทเรียน</button>
                 <button type="button" className="np-cb-btn danger" aria-label="ลบบท" onClick={() => deleteSection(section.id)}><Trash2 size={12} /></button>
               </div>
               {section.lesson_ids.length ? section.lesson_ids.map((id, i) => renderLesson(id, section.id, i, section.lesson_ids.length))
@@ -247,9 +250,27 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
       {tab === "sales" && <SalesForm courseId={courseId} outline={outline} onSaved={() => { flash("บันทึกหน้าขายคอร์สแล้ว"); load(); }} onError={setError} />}
       {tab === "access" && <AccessForm courseId={courseId} outline={outline} onSaved={() => { flash("บันทึกเงื่อนไขแล้ว"); load(); }} onError={setError} />}
 
+      {picking && (
+        <Modal title="เพิ่มบทเรียนแบบไหน?" onClose={() => setPicking(null)} width={720}>
+          <div className="np-cb-type-grid">
+            {(Object.keys(LESSON_TYPE_LABEL) as LessonType[]).map(type => (
+              <button key={type} type="button" className="np-cb-type-card" onClick={() => {
+                const sectionId = picking.sectionId;
+                setPicking(null);
+                if (type === "video") onAddVideoLesson(sectionId);
+                else setEditing({ lesson: null, sectionId, type });
+              }}>
+                <strong>{LESSON_TYPE_LABEL[type]}</strong>
+                <span>{LESSON_TYPE_HINT[type]}</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+
       {editing && (
         <LessonEditorModal courseId={courseId} lesson={editing.lesson} sections={outline.sections} embedProviders={outline.embed_providers}
-          defaultSectionId={editing.sectionId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("บันทึกบทเรียนแล้ว"); load(); }} />
+          defaultSectionId={editing.sectionId} defaultType={editing.type} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("บันทึกบทเรียนแล้ว"); load(); }} />
       )}
     </div>
   );

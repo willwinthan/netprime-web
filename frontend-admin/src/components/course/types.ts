@@ -11,6 +11,16 @@ export const LESSON_TYPE_LABEL: Record<LessonType, string> = {
   self_learning: "Self-learning"
 };
 
+/** One-line explanation shown when an instructor picks the type of a new lesson. */
+export const LESSON_TYPE_HINT: Record<LessonType, string> = {
+  video: "อัปโหลดไฟล์วิดีโอ หรือใช้วิดีโอจาก YouTube / Vimeo",
+  text: "เขียนเนื้อหาในระบบ ใส่รูปและโค้ดได้",
+  pdf: "อัปโหลดเอกสาร PDF ให้ผู้เรียนอ่านหรือดาวน์โหลด",
+  embed: "ฝังสไลด์ ฟอร์ม หรือเว็บจากผู้ให้บริการที่อนุญาต",
+  scorm: "อัปโหลดแพ็กเกจ SCORM (.zip)",
+  self_learning: "เลือกบทเรียนโต้ตอบจากคลัง Self-learning"
+};
+
 export const LEVEL_LABEL: Record<string, string> = {
   beginner: "เริ่มต้น",
   intermediate: "ปานกลาง",
