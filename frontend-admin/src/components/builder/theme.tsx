@@ -14,14 +14,28 @@ import { IN_PREVIEW, onPreviewTheme } from "../../site/preview";
 export const FONTS = ["Anuphan", "IBM Plex Sans Thai", "Noto Sans Thai", "Sarabun", "Prompt", "Kanit"] as const;
 export type FontName = typeof FONTS[number];
 
+export type HeaderStyle = "light" | "brand" | "dark";
+export type ButtonStyle = "solid" | "pill" | "outline";
+export type Background = "cream" | "white" | "gray";
+export type FooterStyle = "dark" | "light" | "brand";
+export type HeroLayout = "split" | "center" | "image";
+
 export interface Theme {
   school_name: string; tagline: string | null; logo_url: string | null; favicon_url: string | null;
   primary_color: string; secondary_color: string; font: FontName; radius: number;
+  /** Decorative highlights; null = a lighter shade of the primary color. */
+  accent_color: string | null;
+  /** Font for headings; null = same as `font`. */
+  heading_font: FontName | null;
+  header_style: HeaderStyle; button_style: ButtonStyle; background: Background;
+  footer_style: FooterStyle; hero_layout: HeroLayout; hero_image_url: string | null;
 }
 
 export const DEFAULT_THEME: Theme = {
   school_name: "NetPrime", tagline: "ศูนย์ฝึกอบรมด้าน IT", logo_url: null, favicon_url: null,
-  primary_color: "#c2541a", secondary_color: "#182443", font: "Anuphan", radius: 14
+  primary_color: "#c2541a", secondary_color: "#182443", font: "Anuphan", radius: 14,
+  accent_color: null, heading_font: null, header_style: "light", button_style: "solid",
+  background: "cream", footer_style: "dark", hero_layout: "split", hero_image_url: null
 };
 
 const VARS_KEY = "netprime.theme.vars";
@@ -79,7 +93,9 @@ export function themeVars(theme: Theme): Record<string, string> {
     "--np-primary": primary,
     "--np-primary-dark": mix(primary, "#000000", 0.22),
     "--np-primary-tint": mix(primary, "#ffffff", 0.9),
-    "--np-accent": mix(primary, "#ffffff", 0.3),
+    "--np-accent": theme.accent_color && isHex(theme.accent_color) ? theme.accent_color : mix(primary, "#ffffff", 0.3),
+    "--np-heading-font": theme.heading_font ? fontStack(theme.heading_font) : "var(--np-font)",
+    ...(theme.hero_layout === "image" && safeAsset(theme.hero_image_url) ? { "--np-hero-image": `url("${encodeURI(theme.hero_image_url!).replace(/"/g, "%22")}")` } : {}),
     "--np-secondary": secondary,
     "--np-radius": `${Math.max(0, Math.min(24, theme.radius))}px`,
     "--np-font": fontStack(theme.font),
@@ -89,7 +105,22 @@ export function themeVars(theme: Theme): Record<string, string> {
   };
 }
 
-const safeAsset = (url: string | null) => !!url && ((url.startsWith("/") && !url.startsWith("//")) || /^https?:\/\//.test(url));
+/**
+ * Style choices as attributes on <html> (data-np-header="dark" …); site.css styles the public site
+ * from them. The console ignores them.
+ */
+export function themeAttrs(theme: Theme): Record<string, string> {
+  return {
+    "data-np-header": theme.header_style ?? DEFAULT_THEME.header_style,
+    "data-np-buttons": theme.button_style ?? DEFAULT_THEME.button_style,
+    "data-np-bg": theme.background ?? DEFAULT_THEME.background,
+    "data-np-footer": theme.footer_style ?? DEFAULT_THEME.footer_style,
+    "data-np-hero": theme.hero_layout === "image" && !safeAsset(theme.hero_image_url) ? "split" : theme.hero_layout ?? DEFAULT_THEME.hero_layout
+  };
+}
+const THEME_ATTRS = Object.keys(themeAttrs(DEFAULT_THEME));
+
+function safeAsset(url: string | null): boolean { return !!url && ((url.startsWith("/") && !url.startsWith("//")) || /^https?:\/\//.test(url)); }
 
 function setFavicon(url: string | null) {
   if (!safeAsset(url)) return;
@@ -109,7 +140,8 @@ export function applyTheme(theme: Theme, custom: boolean) {
   if (previewing && !custom) return;
   const root = document.documentElement;
   const vars = themeVars(theme);
-  for (const name of Object.keys(vars)) root.style.removeProperty(name);
+  for (const name of [...Object.keys(vars), "--np-hero-image"]) root.style.removeProperty(name);
+  for (const name of THEME_ATTRS) root.removeAttribute(name);
   if (!custom) {
     try { localStorage.removeItem(VARS_KEY); } catch { /* storage unavailable */ }
     return;
@@ -120,10 +152,13 @@ export function applyTheme(theme: Theme, custom: boolean) {
     delete vars["--color-brand-primary-glow"];
   }
   for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+  const attrs = themeAttrs(theme);
+  for (const [name, value] of Object.entries(attrs)) root.setAttribute(name, value);
   loadFont(theme.font);
+  if (theme.heading_font) loadFont(theme.heading_font);
   setFavicon(theme.favicon_url);
   if (IN_PREVIEW) return;
-  try { localStorage.setItem(VARS_KEY, JSON.stringify({ vars, font: fontHref(theme.font) })); } catch { /* storage unavailable */ }
+  try { localStorage.setItem(VARS_KEY, JSON.stringify({ vars, attrs, font: fontHref(theme.font) })); } catch { /* storage unavailable */ }
 }
 
 /** Set once a draft theme arrives in the builder preview; the published theme no longer applies. */
