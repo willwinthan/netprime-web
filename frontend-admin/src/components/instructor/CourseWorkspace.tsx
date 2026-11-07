@@ -38,6 +38,7 @@ function checklist(course: InstructorCourse, outline: CourseOutline | null): Che
   return [
     { label: "มีบทเรียนอย่างน้อย 1 บท", done: (outline?.lessons.length ?? 0) > 0, required: true, tab: "content", hint: "เพิ่มบทเรียนในแท็บเนื้อหา" },
     { label: "คำอธิบายคอร์สละเอียดพอ", done: (course.description ?? "").trim().length >= 50, tab: "details", hint: "อย่างน้อย 50 ตัวอักษร บอกว่าเรียนอะไรและเหมาะกับใคร" },
+    { label: "มีรูปปกคอร์ส", done: !!course.cover_image_url, tab: "details", hint: "อัปโหลดรูปในข้อมูลคอร์ส แสดงบนการ์ดและหน้าคอร์ส" },
     { label: "มีคำโปรยใต้ชื่อคอร์ส", done: !!c?.subtitle?.trim(), tab: "details", hint: "ประโยคสั้น ๆ ในหน้าขายคอร์ส" },
     { label: "ระบุสิ่งที่ผู้เรียนจะได้", done: (c?.learning_outcomes.filter(Boolean).length ?? 0) > 0, tab: "details", hint: "อย่างน้อย 1 ข้อในหน้าขายคอร์ส" },
     { label: "เลือกหมวดหมู่คอร์ส", done: !!c?.category_id, tab: "details", hint: "ช่วยให้ผู้เรียนหาคอร์สเจอ" }
@@ -158,7 +159,7 @@ export const CourseWorkspace: React.FC<Props> = ({ course, tab, onTabChange, onB
           <div style={{ display: "grid", gap: "28px" }}>
             <section>
               <h4 className="np-ws-subhead">ข้อมูลพื้นฐาน</h4>
-              <p className="np-ws-subdesc">ชื่อ คำอธิบาย รูป ราคา และระยะเวลาเรียน</p>
+              <p className="np-ws-subdesc">ชื่อ คำอธิบาย รูปปก ราคา และระยะเวลาเรียน</p>
               <CourseBasicsForm course={course} onSaved={() => { onCourseChanged(); setOutlineVersion(v => v + 1); }} />
             </section>
             <CourseDetailsForms courseId={course.id} onSaved={() => setOutlineVersion(v => v + 1)} />

@@ -1,15 +1,65 @@
 import React, { useEffect, useState } from "react";
-import { useApi } from "../../hooks/useApi";
+import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { ErrorBox, Field, grid2 } from "../site-admin/ui";
 import type { InstructorCourse } from "./types";
 
-/** Name, description, pictures, price and access period of a course (workspace tab "ข้อมูลคอร์ส"). */
+/** Picture field: upload a file (stored by POST /instructor/images) or paste a link. */
+const ImageField: React.FC<{ label: string; hint: string; value: string; onChange: (url: string) => void; wide?: boolean }> = ({ label, hint, value, onChange, wide }) => {
+  const api = useApi();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showLink, setShowLink] = useState(false);
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { setError("รองรับไฟล์ PNG, JPG, WEBP หรือ GIF"); return; }
+    if (file.size > 5 * 1024 * 1024) { setError("ไฟล์รูปต้องไม่เกิน 5 MB"); return; }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE_URL}/instructor/images`, { method: "POST", body: form, headers: api.token ? { Authorization: `Bearer ${api.token}` } : {} });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "อัปโหลดรูปไม่สำเร็จ");
+      onChange(data.url);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="form-group" style={{ display: "grid", gap: 8 }}>
+      <span className="form-label">{label}</span>
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ width: wide ? 240 : 160, height: wide ? 90 : 90, borderRadius: "0.75rem", border: "1px dashed var(--border-subtle)", background: "rgba(0,0,0,0.03)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>
+          {value ? <img src={value} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "ยังไม่มีรูป"}
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <label className="tech-button-outline" style={{ borderRadius: "1rem", cursor: busy ? "wait" : "pointer", padding: "8px 16px", fontSize: 13, width: "fit-content" }}>
+            {busy ? "กำลังอัปโหลด..." : value ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} disabled={busy}
+              onChange={e => { upload(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{hint}</span>
+          <span style={{ display: "flex", gap: 10 }}>
+            <button type="button" className="np-cb-btn" onClick={() => setShowLink(v => !v)}>{showLink ? "ซ่อนลิงก์" : "ใช้ลิงก์รูปแทน"}</button>
+            {value && <button type="button" className="np-cb-btn danger" onClick={() => onChange("")}>เอารูปออก</button>}
+          </span>
+        </div>
+      </div>
+      {showLink && <input className="form-input" type="url" value={value} onChange={e => onChange(e.target.value)} placeholder="https://..." aria-label={`ลิงก์${label}`} />}
+      {error && <span role="alert" style={{ fontSize: 12, color: "var(--danger)" }}>{error}</span>}
+    </div>
+  );
+};
+
+/** Name, description, cover picture, price and access period of a course (workspace tab "ข้อมูลคอร์ส"). */
 export const CourseBasicsForm: React.FC<{ course: InstructorCourse; onSaved: () => void }> = ({ course, onSaved }) => {
   const api = useApi();
   const initial = () => ({
     title: course.title,
     description: course.description ?? "",
-    thumbnail_url: course.thumbnail_url ?? "",
     cover_image_url: course.cover_image_url ?? "",
     price: String(course.price ?? 0),
     access_duration_days: course.access_duration_days ? String(course.access_duration_days) : ""
@@ -32,8 +82,8 @@ export const CourseBasicsForm: React.FC<{ course: InstructorCourse; onSaved: () 
       await api.patch(`/instructor/courses/${course.id}`, {
         title: form.title.trim(),
         description: form.description,
-        thumbnail_url: form.thumbnail_url || undefined,
-        cover_image_url: form.cover_image_url || undefined,
+        // null clears the picture; the card then falls back to a stock image
+        cover_image_url: form.cover_image_url || null,
         price: Number(form.price) || 0,
         access_duration_days: form.access_duration_days ? Number(form.access_duration_days) : null
       });
@@ -57,13 +107,9 @@ export const CourseBasicsForm: React.FC<{ course: InstructorCourse; onSaved: () 
         <textarea className="form-input" rows={5} value={form.description} onChange={set("description")} required
           style={{ resize: "vertical", fontFamily: "inherit", borderRadius: "1rem" }} />
       </Field>
+      <ImageField label="รูปปกคอร์ส" hint="แสดงบนการ์ดคอร์สและหน้ารายละเอียดคอร์ส แนะนำ 1280×720 px (16:9) ไม่เกิน 5 MB" wide
+        value={form.cover_image_url} onChange={url => setForm(f => ({ ...f, cover_image_url: url }))} />
       <div style={grid2}>
-        <Field label="รูปปกคอร์ส" hint="ลิงก์รูปภาพ แสดงบนการ์ดคอร์ส">
-          <input className="form-input" type="url" value={form.thumbnail_url} onChange={set("thumbnail_url")} placeholder="https://..." />
-        </Field>
-        <Field label="แบนเนอร์หน้าคอร์ส (ไม่บังคับ)" hint="รูปขนาดใหญ่ด้านบนหน้ารายละเอียดคอร์ส">
-          <input className="form-input" type="url" value={form.cover_image_url} onChange={set("cover_image_url")} placeholder="https://..." />
-        </Field>
         <Field label="ราคา (บาท)" hint="ใส่ 0 ถ้าเป็นคอร์สฟรี">
           <input className="form-input" type="number" min={0} step="0.01" value={form.price} onChange={set("price")} />
         </Field>
@@ -71,9 +117,6 @@ export const CourseBasicsForm: React.FC<{ course: InstructorCourse; onSaved: () 
           <input className="form-input" type="number" min={1} value={form.access_duration_days} onChange={set("access_duration_days")} placeholder="ตลอดชีพ" />
         </Field>
       </div>
-      {form.thumbnail_url && (
-        <img src={form.thumbnail_url} alt="ตัวอย่างรูปปก" style={{ width: 200, height: 112, objectFit: "cover", borderRadius: "0.75rem", border: "1px solid var(--border-subtle)" }} />
-      )}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button type="submit" className="tech-button-primary" disabled={saving} style={{ borderRadius: "1rem" }}>{saving ? "กำลังบันทึก..." : "บันทึกข้อมูลคอร์ส"}</button>
         {notice && <span role="status" style={{ fontSize: 13, color: "var(--accent)" }}>{notice}</span>}

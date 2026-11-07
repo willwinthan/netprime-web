@@ -454,3 +454,48 @@ test('SCORM 1.2: upload, manifest launch, API commit completes the lesson, unsaf
   const staffSave = JSON.parse((await raw(`${staffLaunch.url.replace(/\/player$/, '')}/commit`, { method: 'POST', body: '{"cmi":{"lesson_status":"passed"}}', contentType: 'application/json' })).text);
   assert.equal(staffSave.saved, false);
 });
+
+test('instructors upload course cover images; learners and non-images are refused', async () => {
+  // 1x1 transparent PNG
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  const upload = async (token, blob, name) => {
+    const form = new FormData();
+    form.append('file', blob, name);
+    return fetch(`${base}/api/instructor/images`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form, signal: AbortSignal.timeout(10000) });
+  };
+
+  const ok = await upload(instructor.token, new Blob([png], { type: 'image/png' }), 'cover.png');
+  assert.equal(ok.status, 201);
+  const { url } = await ok.json();
+  assert.match(url, /\/api\/public\/images\/[a-f0-9]{32}\.png$/);
+  const served = await raw(new URL(url).pathname);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+
+  assert.equal((await upload(student.token, new Blob([png], { type: 'image/png' }), 'cover.png')).status, 403);
+  // Declared as PNG but not one
+  assert.equal((await upload(instructor.token, new Blob(['<svg/>'], { type: 'image/png' }), 'x.png')).status, 400);
+  assert.equal((await upload(instructor.token, new Blob(['<svg/>'], { type: 'image/svg+xml' }), 'x.svg')).status, 400);
+});
+
+test('instructor course list returns price, cover and access period, and editing keeps them', async () => {
+  const list = async () => (await request('/api/instructor/analytics', { token: instructor.token })).data.courses;
+  const course = (await list())[0];
+  assert.ok(course);
+  assert.ok('price' in course && 'cover_image_url' in course && 'access_duration_days' in course);
+
+  const cover = 'https://example.com/cover.png';
+  assert.equal((await patch(`/api/instructor/courses/${course.id}`, instructor.token, { price: 1490, cover_image_url: cover, access_duration_days: 90 })).status, 200);
+  // Changing only the title keeps the rest (the console form used to post price 0)
+  assert.equal((await patch(`/api/instructor/courses/${course.id}`, instructor.token, { title: course.title })).status, 200);
+  let updated = (await list()).find(c => c.id === course.id);
+  assert.equal(updated.price, 1490);
+  assert.equal(updated.cover_image_url, cover);
+  assert.equal(updated.thumbnail_url, cover, 'the card uses the uploaded cover');
+  assert.equal(updated.access_duration_days, 90);
+
+  assert.equal((await patch(`/api/instructor/courses/${course.id}`, instructor.token, { cover_image_url: null })).status, 200);
+  updated = (await list()).find(c => c.id === course.id);
+  assert.equal(updated.cover_image_url, null);
+  assert.ok(updated.thumbnail_url, 'falls back to a stock picture');
+});

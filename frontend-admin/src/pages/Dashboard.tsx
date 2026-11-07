@@ -585,9 +585,12 @@ export const Dashboard: React.FC = () => {
       }
 
       // Load student progress features if enrolled
+      setQuizzes([]);
       if (data.enrollment) {
         fetchNotes(courseId);
         fetchQuizAttempts(courseId);
+        // Old per-lesson practice quizzes: instructors now use "การวัดผล"; the tab shows only for courses that still have some.
+        fetchQuizzes(courseId);
         
         // Fetch certificate if exists
         try {
@@ -2467,7 +2470,7 @@ export const Dashboard: React.FC = () => {
                     >
                       เอกสารประกอบการเรียน
                     </button>
-                    <button 
+                    {quizzes.length > 0 && <button 
                       onClick={() => {
                         setActiveDetailTab("quizzes");
                         fetchQuizzes(courseDetail.id);
@@ -2475,7 +2478,7 @@ export const Dashboard: React.FC = () => {
                       style={{ padding: "6px 12px", borderRadius: "0.5rem", background: activeDetailTab === "quizzes" ? "var(--primary-glow)" : "none", border: "none", color: activeDetailTab === "quizzes" ? "var(--color-brand-primary)" : "var(--text-secondary)", fontWeight: "600", cursor: "pointer" }}
                     >
                       แบบทดสอบฝึกหัด
-                    </button>
+                    </button>}
                     <button 
                       onClick={() => {
                         setActiveDetailTab("notes");

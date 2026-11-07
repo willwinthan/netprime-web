@@ -8,6 +8,7 @@ import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { createNotification } from "./notifications";
 import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
 import { checkSlip, loadBankTransfer, putSlip, serveSlip } from "./orders";
+import { IMAGE_TYPES, saveSiteImage, siteImageUrl } from "../utils/images";
 
 /**
  * Website content managed by coordinators (admin role):
@@ -1896,26 +1897,12 @@ adminSiteRouter.put("/legal/:key", async (c) => {
 
 // ---------- Images & audit ----------
 
-const IMAGE_TYPES: Record<string, { ext: string; magic: number[] }> = {
-  "image/png": { ext: "png", magic: [0x89, 0x50, 0x4e, 0x47] },
-  "image/jpeg": { ext: "jpg", magic: [0xff, 0xd8, 0xff] },
-  "image/gif": { ext: "gif", magic: [0x47, 0x49, 0x46, 0x38] },
-  "image/webp": { ext: "webp", magic: [0x52, 0x49, 0x46, 0x46] }
-};
-
 adminSiteRouter.post("/images", async (c) => {
   const form = await c.req.parseBody().catch(() => null);
-  const file = form?.file;
-  if (!(file instanceof File)) return c.json({ error: "กรุณาเลือกไฟล์รูปภาพ" }, 400);
-  const type = IMAGE_TYPES[file.type];
-  if (!type) return c.json({ error: "รองรับเฉพาะไฟล์ PNG, JPG, WEBP หรือ GIF" }, 400);
-  if (file.size > 5 * 1024 * 1024) return c.json({ error: "ไฟล์รูปต้องไม่เกิน 5 MB" }, 400);
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!type.magic.every((byte, i) => bytes[i] === byte)) return c.json({ error: "ไฟล์ไม่ใช่รูปภาพตามชนิดที่ระบุ" }, 400);
-  const name = `${crypto.randomUUID().replace(/-/g, "")}.${type.ext}`;
-  await c.env.ASSETS.put(`site/${name}`, bytes, { httpMetadata: { contentType: file.type } });
-  await audit(c, "upload", "image", name, { size: file.size });
-  return c.json({ url: `${new URL(c.req.url).origin}/api/public/images/${name}` }, 201);
+  const saved = await saveSiteImage(c.env, form?.file);
+  if ("error" in saved) return c.json({ error: saved.error }, 400);
+  await audit(c, "upload", "image", saved.name, { size: (form!.file as File).size });
+  return c.json({ url: siteImageUrl(c.req.url, saved.name) }, 201);
 });
 
 adminSiteRouter.get("/audit", async (c) => {
