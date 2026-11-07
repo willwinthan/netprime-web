@@ -8,10 +8,10 @@ import "./course.css";
 import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 /**
- * Course builder for the instructor console (mounted in InstructorConsole › จัดการเนื้อหาหลักสูตร):
- * chapters with drag & drop lesson ordering, typed lessons, drip settings, sales-page fields,
- * category, "เรียนตามลำดับ" and prerequisite courses. Video lessons keep using the console's
- * existing video form (onAddVideoLesson / onEditVideoLesson).
+ * Course builder for the course workspace's "เนื้อหา" tab: chapters with drag & drop lesson
+ * ordering, typed lessons and drip settings. Video lessons keep using the console's video form
+ * (onAddVideoLesson / onEditVideoLesson). Sales-page fields, category, "เรียนตามลำดับ" and
+ * prerequisites are in CourseDetailsForms (tab "ข้อมูลคอร์ส").
  */
 interface Props {
   courseId: string;
@@ -24,7 +24,6 @@ interface Props {
   onDeleteLesson: (lessonId: string) => void;
 }
 
-type Tab = "structure" | "sales" | "access";
 const VIDEO_SOURCE: Record<string, string> = { cloudflare: "อัปโหลดเข้าระบบ", youtube: "YouTube", vimeo: "Vimeo" };
 const hostOf = (url: string) => { try { return new URL(url).hostname; } catch { return url; } };
 interface Layout { unsectioned: string[]; sections: { id: string; title: string; lesson_ids: string[] }[] }
@@ -39,7 +38,6 @@ function layoutOf(outline: CourseOutline): Layout {
 export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVideoLesson, onEditVideoLesson, onManageQuizzes, onDeleteLesson }) => {
   const api = useApi();
   const { confirmDelete, dangerDialog } = useDangerousDelete();
-  const [tab, setTab] = useState<Tab>("structure");
   const [outline, setOutline] = useState<CourseOutline | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,16 +200,10 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
   return (
     <div>
       {dangerDialog}
-      <div className="np-cb-tabs" role="tablist">
-        {([["structure", "โครงสร้างหลักสูตร"], ["sales", "หน้าขายคอร์ส"], ["access", "หมวดหมู่และเงื่อนไข"]] as [Tab, string][]).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={tab === key} className="np-cb-tab" onClick={() => setTab(key)}>{label}</button>
-        ))}
-        {notice && <span role="status" style={{ marginLeft: "auto", alignSelf: "center", fontSize: 13, color: "var(--accent)" }}>{notice}</span>}
-      </div>
+      {notice && <div role="status" style={{ fontSize: 13, color: "var(--accent)", marginBottom: 8 }}>{notice}</div>}
       <ErrorBox message={error} />
 
-      {tab === "structure" && (
-        <div>
+      <div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             <button type="button" className="tech-button-primary" style={{ borderRadius: "1rem" }} onClick={() => setPicking({ sectionId: null })}><Plus size={14} /> เพิ่มบทเรียน</button>
             <form onSubmit={addSection} style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
@@ -244,11 +236,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
                 : <div className="np-cb-empty">ลากบทเรียนมาวางที่นี่</div>}
             </div>
           ))}
-        </div>
-      )}
-
-      {tab === "sales" && <SalesForm courseId={courseId} outline={outline} onSaved={() => { flash("บันทึกหน้าขายคอร์สแล้ว"); load(); }} onError={setError} />}
-      {tab === "access" && <AccessForm courseId={courseId} outline={outline} onSaved={() => { flash("บันทึกเงื่อนไขแล้ว"); load(); }} onError={setError} />}
+      </div>
 
       {picking && (
         <Modal title="เพิ่มบทเรียนแบบไหน?" onClose={() => setPicking(null)} width={720}>
@@ -404,5 +392,40 @@ const AccessForm: React.FC<{ courseId: string; outline: CourseOutline; onSaved: 
       </Field>
       <div><button type="submit" className="tech-button-primary" disabled={saving} style={{ borderRadius: "1rem" }}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button></div>
     </form>
+  );
+};
+
+/** Sales-page fields, category and enrolment conditions of one course (workspace tab "ข้อมูลคอร์ส"). */
+export const CourseDetailsForms: React.FC<{ courseId: string; onSaved?: () => void }> = ({ courseId, onSaved }) => {
+  const api = useApi();
+  const [outline, setOutline] = useState<CourseOutline | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.get<CourseOutline>(`/instructor/courses/${courseId}/outline`).then(setOutline).catch(err => setError(err.message));
+  }, [courseId, api.token]);
+  useEffect(() => { load(); }, [load]);
+  const saved = (message: string) => {
+    setError(null);
+    setNotice(message);
+    window.setTimeout(() => setNotice(null), 2500);
+    load();
+    onSaved?.();
+  };
+  if (!outline) return error ? <ErrorBox message={error} /> : <p style={{ color: "var(--text-muted)" }}>กำลังโหลด...</p>;
+  return (
+    <div style={{ display: "grid", gap: 28 }}>
+      {notice && <div role="status" style={{ fontSize: 13, color: "var(--accent)" }}>{notice}</div>}
+      <ErrorBox message={error} />
+      <section>
+        <h4 className="np-ws-subhead">หน้าขายคอร์ส</h4>
+        <p className="np-ws-subdesc">สิ่งที่ผู้สนใจเห็นในหน้ารายละเอียดคอร์สบนเว็บไซต์</p>
+        <SalesForm courseId={courseId} outline={outline} onSaved={() => saved("บันทึกหน้าขายคอร์สแล้ว")} onError={setError} />
+      </section>
+      <section>
+        <h4 className="np-ws-subhead">หมวดหมู่และเงื่อนไขการเรียน</h4>
+        <AccessForm courseId={courseId} outline={outline} onSaved={() => saved("บันทึกเงื่อนไขแล้ว")} onError={setError} />
+      </section>
+    </div>
   );
 };

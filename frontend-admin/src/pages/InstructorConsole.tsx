@@ -3,9 +3,10 @@ import { useApi, hasRole } from "../hooks/useApi";
 import { Chip } from "../components/site-admin/ui";
 import { COURSE_STATUS, CourseStatus } from "./CoursesAdminPage";
 import { MetricsCard } from "../components/MetricsCard";
-import { CourseAssessments } from "../components/assessment/CourseAssessments";
-import { CourseLiveClassesPanel } from "../components/settings/CourseLiveClasses";
-import { CourseAnnouncements } from "../components/communication/CourseAnnouncements";
+import { CourseWorkspace } from "../components/instructor/CourseWorkspace";
+import { StudentEmailLookup } from "../components/instructor/StudentEmailLookup";
+import { InstructorCourse, WorkspaceTab, isWorkspaceTab } from "../components/instructor/types";
+import { navigate, useLocation } from "../site/router";
 import { CourseBuilder } from "../components/course/CourseBuilder";
 import { AiInstructorTools } from "../components/ai/AiInstructorTools";
 import { motion, AnimatePresence } from "framer-motion";
@@ -34,24 +35,6 @@ import {
   X
 } from "lucide-react";
 import { useDangerousDelete } from "../components/security/DangerConfirmDialog";
-
-interface InstructorCourse {
-  id: string;
-  title: string;
-  description: string;
-  thumbnail_url: string;
-  cover_image_url?: string | null;
-  access_duration_days?: number | null;
-  price?: number;
-  created_at: string;
-  student_count: number;
-  avg_progress: number | null;
-  status: CourseStatus;
-  submitted_at?: string | null;
-  published_at?: string | null;
-  /** Reviewer's note when the course was sent back. */
-  review_note?: string | null;
-}
 
 /** Workers reject request bodies above 100 MB; bigger videos upload straight to Cloudflare Stream. */
 const WORKER_UPLOAD_LIMIT = 100 * 1024 * 1024;
@@ -103,27 +86,24 @@ export function parseVideoLink(input: string): { id: string; provider?: "youtube
   return { id: value };
 }
 
-const ENROLLMENT_STATUS_LABELS: Record<string, string> = {
-  active: "ใช้งานอยู่",
-  completed: "เรียนจบ",
-  expired: "หมดอายุ",
-  suspended: "ระงับ",
-  pending: "รอดำเนินการ",
-};
-
-type ConsoleView = 
+/**
+ * Pages of the console besides the course list and a course's workspace. The open page is kept in the
+ * URL (?view=...) next to the course (?course=<id>&tab=<tab>), so Back and refresh behave.
+ * "dashboard" and "curriculum" both mean "no page open": the list, or the open course's workspace.
+ */
+type ConsoleView =
   | "dashboard"
-  | "create-course"
-  | "edit-course"
   | "curriculum"
+  | "create-course"
   | "create-lesson"
   | "edit-lesson"
   | "quizzes"
   | "vouchers"
   | "groups"
-  | "access-control"
   | "telemetry"
   | "qa";
+
+const PAGE_VIEWS: ConsoleView[] = ["create-course", "create-lesson", "edit-lesson", "quizzes", "vouchers", "groups", "telemetry", "qa"];
 
 export const InstructorConsole: React.FC = () => {
   const api = useApi();
@@ -134,7 +114,31 @@ export const InstructorConsole: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   
   // Navigation View State
-  const [view, setView] = useState<ConsoleView>("dashboard");
+  const location = useLocation();
+  const viewParam = location.searchParams.get("view") as ConsoleView | null;
+  const courseParam = location.searchParams.get("course");
+  const tabParam = location.searchParams.get("tab");
+  const workspaceTab: WorkspaceTab = isWorkspaceTab(tabParam) ? tabParam : "overview";
+  const requestedView: ConsoleView = viewParam && PAGE_VIEWS.includes(viewParam) ? viewParam : "dashboard";
+
+  /** Opens a page (pushes ?view=), or closes the open one with "dashboard" / "curriculum". */
+  const setView = (next: ConsoleView) => {
+    const url = new URL(window.location.href);
+    if (!PAGE_VIEWS.includes(next)) {
+      if (!url.searchParams.has("view")) return;
+      // Pages we opened are their own history entry: go back to it so Forward/Back stay natural.
+      if (window.history.state?.npConsolePage) { window.history.back(); return; }
+      url.searchParams.delete("view");
+      navigate(url.pathname + url.search, { replace: true });
+      return;
+    }
+    const replace = url.searchParams.has("view");
+    url.searchParams.set("view", next);
+    navigate(url.pathname + url.search, { replace, state: { npConsolePage: true } });
+  };
+  const openCourse = (courseId: string, tab: WorkspaceTab = "overview", replace = false) =>
+    navigate(`${window.location.pathname}?course=${encodeURIComponent(courseId)}&tab=${tab}`, { replace });
+  const closeCourse = () => navigate(window.location.pathname);
   // Course list: search, status filter and the "เพิ่มเติม" menu for occasional tools
   const [courseQuery, setCourseQuery] = useState("");
   const [courseFilter, setCourseFilter] = useState<"all" | CourseStatus>("all");
@@ -158,10 +162,6 @@ export const InstructorConsole: React.FC = () => {
   const [lessonHandoutKey, setLessonHandoutKey] = useState("");
 
   // Course CRUD state
-  const [editingCourse, setEditingCourse] = useState<InstructorCourse | null>(null);
-  const [editCourseTitle, setEditCourseTitle] = useState("");
-  const [editCourseDesc, setEditCourseDesc] = useState("");
-  const [editCourseThumb, setEditCourseThumb] = useState("");
 
   // Curriculum State
   const [selectedCourseForCurriculum, setSelectedCourseForCurriculum] = useState<InstructorCourse | null>(null);
@@ -189,15 +189,8 @@ export const InstructorConsole: React.FC = () => {
   const [courseCover, setCourseCover] = useState<string>("");
   const [courseDuration, setCourseDuration] = useState<string>("");
 
-  const [editCoursePrice, setEditCoursePrice] = useState<number>(0);
-  const [editCourseCover, setEditCourseCover] = useState<string>("");
-  const [editCourseDuration, setEditCourseDuration] = useState<string>("");
 
   // Access Control states
-  const [courseEnrollments, setCourseEnrollments] = useState<any[]>([]);
-  const [assignTargetType, setAssignTargetType] = useState<"student" | "partner" | "group">("student");
-  const [assignTargetId, setAssignTargetId] = useState<string>("");
-  const [allPartners, setAllPartners] = useState<any[]>([]);
 
   // Voucher states
   const [vouchers, setVouchers] = useState<any[]>([]);
@@ -409,40 +402,44 @@ export const InstructorConsole: React.FC = () => {
     }
   };
 
-  const loadAccessControl = async (courseId: string) => {
-    try {
-      setActionLoading(true);
-      setModalError(null);
-      
-      const enrolls = await api.get<any[]>(`/instructor/courses/${courseId}/enrollments`);
-      setCourseEnrollments(enrolls);
-      
-      const students = await api.get<any[]>("/instructor/students");
-      setAllStudents(students);
-      
-      const partners = await api.get<any[]>("/business/partners");
-      setAllPartners(partners);
-
-      const grps = await api.get<any[]>("/instructor/groups");
-      setGroups(grps);
-
-      if (students.length > 0) {
-        setAssignTargetId(students[0].id);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setModalError(err.message || "โหลดข้อมูลสิทธิ์การเข้าถึงไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   useEffect(() => {
-    if (hasRole(api.user, "instructor", "admin")) {
-      fetchAnalytics();
-      setView("dashboard"); // Reset to main dashboard upon auth node refreshes
-    }
+    if (hasRole(api.user, "instructor", "admin")) fetchAnalytics();
   }, [api.token]);
+
+  // The open course comes from the URL (?course=<id>); load its lessons when it changes.
+  const missingCourseCheck = React.useRef<string | null>(null);
+  const openCourseData = courseParam ? data?.courses.find(c => c.id === courseParam) ?? null : null;
+  useEffect(() => {
+    if (!courseParam) { setSelectedCourseForCurriculum(null); return; }
+    if (!data) return;
+    if (!openCourseData) {
+      // The URL can change before the list that contains a just-created course is rendered:
+      // reload the list once, and only then treat the course as gone (deleted / not this instructor's).
+      if (missingCourseCheck.current !== courseParam) { missingCourseCheck.current = courseParam; fetchAnalytics(); return; }
+      navigate(window.location.pathname, { replace: true });
+      return;
+    }
+    setSelectedCourseForCurriculum(openCourseData);
+    if (selectedCourseForCurriculum?.id !== openCourseData.id) loadCurriculum(openCourseData.id);
+  }, [courseParam, data]);
+
+  // Pages that hold unsaved form state cannot be restored after a refresh; fall back to the course.
+  const pageReady = (v: ConsoleView) =>
+    v === "create-lesson" ? !!lessonCourseId && !!openCourseData
+    : v === "edit-lesson" ? !!editingLesson
+    : v === "quizzes" ? !!selectedLessonForQuizzes
+    : true;
+  const view: ConsoleView = pageReady(requestedView) ? requestedView : "dashboard";
+  useEffect(() => {
+    if (requestedView !== view) setView("dashboard");
+  }, [requestedView, view]);
+  // List pages load their data when opened, including after a refresh.
+  useEffect(() => {
+    if (view === "vouchers") fetchVouchers();
+    else if (view === "groups") fetchGroups();
+    else if (view === "telemetry") fetchTelemetry();
+    else if (view === "qa") fetchInstructorQuestions();
+  }, [view]);
 
   const handleAddCourse = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -455,7 +452,7 @@ export const InstructorConsole: React.FC = () => {
       setActionLoading(true);
       setModalError(null);
       
-      await api.post("/instructor/courses", {
+      const created = await api.post<{ course: { id: string } }>("/instructor/courses", {
         title: courseTitle,
         description: courseDesc,
         thumbnail_url: courseThumb || undefined,
@@ -471,9 +468,11 @@ export const InstructorConsole: React.FC = () => {
       setCoursePrice(0);
       setCourseCover("");
       setCourseDuration("");
-      setView("dashboard");
 
       await fetchAnalytics();
+      // Straight into the new course, replacing the create form in the history.
+      if (created?.course?.id) openCourse(created.course.id, "content", true);
+      else setView("dashboard");
     } catch (err: any) {
       console.error(err);
       setModalError(err.message || "บันทึกคอร์สใหม่ไม่สำเร็จ");
@@ -539,54 +538,10 @@ export const InstructorConsole: React.FC = () => {
       if (done.archived) alert(done.message);
       setActionLoading(true);
       await fetchAnalytics();
-      if (selectedCourseForCurriculum?.id === courseId) {
-        setSelectedCourseForCurriculum(null);
-        setView("dashboard");
-      }
+      if (courseParam === courseId) closeCourse();
     } catch (err: any) {
       console.error(err);
       setError(err.message || "ลบคอร์สไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleEditCourseClick = (course: InstructorCourse) => {
-    setEditingCourse(course);
-    setEditCourseTitle(course.title);
-    setEditCourseDesc(course.description);
-    setEditCourseThumb(course.thumbnail_url || "");
-    setEditCoursePrice(course.price || 0);
-    setEditCourseCover(course.cover_image_url || "");
-    setEditCourseDuration(course.access_duration_days ? String(course.access_duration_days) : "");
-    setModalError(null);
-    setView("edit-course");
-  };
-
-  const handleUpdateCourse = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingCourse) return;
-    if (!editCourseTitle || !editCourseDesc) {
-      setModalError("กรุณากรอกชื่อคอร์สและคำอธิบาย");
-      return;
-    }
-    try {
-      setActionLoading(true);
-      setModalError(null);
-      await api.patch(`/instructor/courses/${editingCourse.id}`, {
-        title: editCourseTitle,
-        description: editCourseDesc,
-        thumbnail_url: editCourseThumb || undefined,
-        price: Number(editCoursePrice),
-        cover_image_url: editCourseCover || undefined,
-        access_duration_days: editCourseDuration ? Number(editCourseDuration) : null
-      });
-      setEditingCourse(null);
-      setView("dashboard");
-      await fetchAnalytics();
-    } catch (err: any) {
-      console.error(err);
-      setModalError(err.message || "อัปเดตคอร์สไม่สำเร็จ");
     } finally {
       setActionLoading(false);
     }
@@ -606,11 +561,7 @@ export const InstructorConsole: React.FC = () => {
     }
   };
 
-  const handleManageCurriculumClick = async (course: InstructorCourse) => {
-    setSelectedCourseForCurriculum(course);
-    setView("curriculum");
-    await loadCurriculum(course.id);
-  };
+  const handleManageCurriculumClick = (course: InstructorCourse) => openCourse(course.id, "content");
 
   // Lesson Operations
   const handleDeleteLesson = async (lessonId: string) => {
@@ -773,7 +724,6 @@ export const InstructorConsole: React.FC = () => {
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button 
               onClick={() => {
-                fetchInstructorQuestions();
                 setView("qa");
               }}
               className="tech-button-outline"
@@ -797,9 +747,9 @@ export const InstructorConsole: React.FC = () => {
               {moreOpen && (
                 <div role="menu" className="glass-card" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 50, background: "#fff", padding: "6px", minWidth: "220px", display: "grid", gap: "2px" }}>
                   {([
-                    ["โค้ดส่วนลด", <Ticket size={15} />, () => { fetchVouchers(); setView("vouchers"); }],
-                    ["กลุ่มเรียน", <Users size={15} />, () => { fetchGroups(); setView("groups"); }],
-                    ["จุดที่ผู้เรียนติดขัด", <TrendingUp size={15} />, () => { fetchTelemetry(); setView("telemetry"); }]
+                    ["โค้ดส่วนลด", <Ticket size={15} />, () => setView("vouchers")],
+                    ["กลุ่มเรียน", <Users size={15} />, () => setView("groups")],
+                    ["จุดที่ผู้เรียนติดขัด", <TrendingUp size={15} />, () => setView("telemetry")]
                   ] as [string, React.ReactNode, () => void][]).map(([label, icon, open]) => (
                     <button key={label} type="button" role="menuitem" onClick={() => { setMoreOpen(false); open(); }}
                       style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: "none", background: "none", borderRadius: "0.6rem", cursor: "pointer", fontFamily: "inherit", fontSize: "14px", color: "var(--text-primary)", textAlign: "left" }}
@@ -938,7 +888,7 @@ export const InstructorConsole: React.FC = () => {
                             />
                             <div>
                               <h4 style={{ fontSize: "15px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                <button type="button" onClick={() => handleManageCurriculumClick(course)} title="จัดการเนื้อหาคอร์สนี้"
+                                <button type="button" onClick={() => openCourse(course.id)} title="เปิดคอร์สนี้"
                                   style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left" }}>
                                   {course.title}
                                 </button>
@@ -989,37 +939,19 @@ export const InstructorConsole: React.FC = () => {
                               ส่งตรวจ
                             </button>
                           )}
-                          <button 
-                            onClick={() => handleManageCurriculumClick(course)}
+                          <button
+                            onClick={() => openCourse(course.id, "learners")}
                             className="tech-button-outline"
                             style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.5rem" }}
                           >
-                            จัดการเนื้อหา
+                            ผู้เรียน
                           </button>
-                          <button 
-                            onClick={() => {
-                              setSelectedCourseForCurriculum(course);
-                              loadAccessControl(course.id);
-                              setView("access-control");
-                            }}
-                            className="tech-button-outline"
-                            style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.5rem", borderColor: "var(--border-active)" }}
+                          <button
+                            onClick={() => openCourse(course.id)}
+                            className={course.status === "draft" ? "tech-button-outline" : "tech-button-primary"}
+                            style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.5rem" }}
                           >
-                            จัดการสิทธิ์เข้าถึง
-                          </button>
-                          <button 
-                            onClick={() => handleEditCourseClick(course)}
-                            className="tech-button-outline"
-                            style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.5rem", borderColor: "var(--border-active)" }}
-                          >
-                            แก้ไขคอร์ส
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteCourse(course.id)}
-                            className="tech-button-outline"
-                            style={{ padding: "6px 12px", fontSize: "12px", borderRadius: "0.5rem", color: "var(--danger)", borderColor: "rgba(239, 68, 68, 0.2)" }}
-                          >
-                            ลบคอร์ส
+                            จัดการคอร์ส
                           </button>
                         </div>
                       </div>
@@ -1187,167 +1119,50 @@ export const InstructorConsole: React.FC = () => {
     );
   };
 
-  const renderEditCourse = () => {
+  /** One course with its tabs; "เนื้อหา" uses the console's video and quiz forms. */
+  const renderWorkspace = (course: InstructorCourse) => {
+    const startVideoLesson = (sectionId: string | null) => {
+      setLessonSectionId(sectionId);
+      setLessonCourseId(course.id);
+      setLessonTitle("");
+      setLessonStreamUid("");
+      setLessonSortOrder(curriculumLessons.length + 1);
+      setLessonProvider("cloudflare");
+      setLessonHandoutKey("");
+      setModalError(null);
+      setView("create-lesson");
+    };
     return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => setView("dashboard")} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปแดชบอร์ด
-        </button>
-
-        <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", color: "var(--text-primary)" }}>
-          <Edit size={24} color="var(--primary)" />
-          แก้ไขคอร์ส
-        </h3>
-        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "24px" }}>
-          แก้ไขชื่อ รายละเอียด และข้อมูลของคอร์ส
-        </p>
-
-        {modalError && (
-          <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--danger)", padding: "12px", borderRadius: "1rem", fontSize: "13px", marginBottom: "20px" }}>
-            <strong>ข้อผิดพลาด:</strong> {modalError}
+      <>
+        {error && (
+          <div className="glass-card" style={{ borderLeft: "4px solid var(--danger)", background: "rgba(239, 68, 68, 0.08)", color: "var(--danger)", padding: "16px", marginBottom: "16px" }}>
+            {error}
           </div>
         )}
-
-        <form onSubmit={handleUpdateCourse} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="form-group">
-            <label className="form-label">ชื่อคอร์ส</label>
-            <input
-              type="text"
-              value={editCourseTitle}
-              onChange={(e) => setEditCourseTitle(e.target.value)}
-              className="form-input"
-              required
+        <CourseWorkspace
+          course={course}
+          tab={workspaceTab}
+          onTabChange={tab => openCourse(course.id, tab)}
+          onBack={closeCourse}
+          onSubmitForReview={() => handleSubmitForReview(course)}
+          onDelete={() => handleDeleteCourse(course.id)}
+          onCourseChanged={() => fetchAnalytics()}
+          busy={actionLoading}
+          lessonsVersion={curriculumLessons}
+          aiTools={<AiInstructorTools courses={data?.courses ?? []} course={course} lessons={curriculumLessons}
+            onChanged={() => loadCurriculum(course.id)} />}
+          content={
+            <CourseBuilder
+              courseId={course.id}
+              refreshToken={curriculumLessons}
+              onAddVideoLesson={startVideoLesson}
+              onEditVideoLesson={lesson => handleEditLessonClick(lesson)}
+              onManageQuizzes={lesson => handleManageQuizzesClick(lesson)}
+              onDeleteLesson={lessonId => handleDeleteLesson(lessonId)}
             />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">คำอธิบาย</label>
-            <textarea
-              rows={6}
-              value={editCourseDesc}
-              onChange={(e) => setEditCourseDesc(e.target.value)}
-              className="form-input"
-              style={{ resize: "none", fontFamily: "inherit", borderRadius: "1rem" }}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">URL รูปปก (ไม่บังคับ)</label>
-            <input
-              type="url"
-              value={editCourseThumb}
-              onChange={(e) => setEditCourseThumb(e.target.value)}
-              className="form-input"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">URL แบนเนอร์หน้าปก (ไม่บังคับ)</label>
-            <input
-              type="url"
-              placeholder="https://images.unsplash.com/... (URL รูปแบนเนอร์ขนาดใหญ่)"
-              value={editCourseCover}
-              onChange={(e) => setEditCourseCover(e.target.value)}
-              className="form-input"
-            />
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div className="form-group">
-              <label className="form-label">ราคาคอร์ส (บาท)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={editCoursePrice}
-                onChange={(e) => setEditCoursePrice(Number(e.target.value))}
-                className="form-input"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">ระยะเวลาเข้าถึง (วัน)</label>
-              <input
-                type="number"
-                min="1"
-                placeholder="เว้นว่าง = เข้าถึงตลอดชีพ"
-                value={editCourseDuration}
-                onChange={(e) => setEditCourseDuration(e.target.value)}
-                className="form-input"
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setView("dashboard")} className="tech-button-outline" style={{ borderRadius: "1rem" }}>ยกเลิก</button>
-            <button type="submit" disabled={actionLoading} className="tech-button-primary" style={{ borderRadius: "1rem" }}>
-              {actionLoading ? "กำลังอัปเดต..." : "บันทึกการเปลี่ยนแปลง"}
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  };
-
-  const renderCurriculum = () => {
-    if (!selectedCourseForCurriculum) return null;
-
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => setView("dashboard")} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปแดชบอร์ด
-        </button>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px", gap: "16px" }}>
-          <div>
-            <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", color: "var(--text-primary)" }}>
-              <LayoutGrid size={24} color="var(--primary)" />
-              จัดการเนื้อหาหลักสูตร
-            </h3>
-            <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              คอร์ส: <strong style={{ color: "var(--text-primary)" }}>{selectedCourseForCurriculum.title}</strong>
-            </p>
-          </div>
-
-          <div style={{ display: "flex", gap: "12px", flexShrink: 0 }}>
-          <AiInstructorTools courses={data?.courses ?? []} course={selectedCourseForCurriculum} lessons={curriculumLessons}
-            onChanged={() => loadCurriculum(selectedCourseForCurriculum.id)} />
-          </div>
-        </div>
-
-        {/* Chapters, typed lessons, drip, sales page and prerequisites: components/course/CourseBuilder.tsx */}
-        <CourseBuilder
-          courseId={selectedCourseForCurriculum.id}
-          refreshToken={curriculumLessons}
-          onAddVideoLesson={sectionId => {
-            setLessonSectionId(sectionId);
-            setLessonCourseId(selectedCourseForCurriculum.id);
-            setLessonTitle("");
-            setLessonStreamUid("");
-            setLessonSortOrder(curriculumLessons.length + 1);
-            setLessonProvider("cloudflare");
-            setLessonHandoutKey("");
-            setModalError(null);
-            setView("create-lesson");
-          }}
-          onEditVideoLesson={lesson => handleEditLessonClick(lesson)}
-          onManageQuizzes={lesson => handleManageQuizzesClick(lesson)}
-          onDeleteLesson={lessonId => handleDeleteLesson(lessonId)}
+          }
         />
-        {/* Question bank, exams, assignments, video questions and grading: components/assessment */}
-        <CourseAssessments courseId={selectedCourseForCurriculum.id} />
-        <CourseLiveClassesPanel courseId={selectedCourseForCurriculum.id} />
-        <CourseAnnouncements courseId={selectedCourseForCurriculum.id} />
-      </div>
+      </>
     );
   };
 
@@ -2314,272 +2129,6 @@ export const InstructorConsole: React.FC = () => {
     );
   };
 
-  const renderAccessControl = () => {
-    if (!selectedCourseForCurriculum) return null;
-
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => {
-            setSelectedCourseForCurriculum(null);
-            setView("dashboard");
-          }} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปแดชบอร์ด
-        </button>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "16px" }}>
-          <div>
-            <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", color: "var(--text-primary)" }}>
-              <Key size={24} color="var(--primary)" />
-              สิทธิ์เข้าถึงและการลงทะเบียนเรียน
-            </h3>
-            <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              คอร์ส: <strong style={{ color: "var(--text-primary)" }}>{selectedCourseForCurriculum.title}</strong> • กำหนดสิทธิ์เข้าถึงและมอบหมายคอร์สให้ผู้เรียน องค์กร หรือกลุ่มเรียน
-            </p>
-          </div>
-        </div>
-
-        {modalError && (
-          <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--danger)", padding: "12px", borderRadius: "1rem", fontSize: "13px", marginBottom: "20px" }}>
-            <strong>ข้อผิดพลาด:</strong> {modalError}
-          </div>
-        )}
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "32px" }}>
-          
-          {/* Assignment Section */}
-          <div className="glass-card" style={{ padding: "24px", background: "rgba(255, 255, 255, 0.45)", borderRadius: "1.25rem", border: "1px solid var(--border-subtle)" }}>
-            <h4 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "16px", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "6px" }}>
-              <PlusCircle size={18} color="var(--primary)" />
-              มอบสิทธิ์เข้าถึงคอร์ส / จัดสรรที่นั่ง
-            </h4>
-            
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!assignTargetId) {
-                alert("กรุณาเลือกผู้เรียน พาร์ตเนอร์องค์กร หรือกลุ่มเรียน");
-                return;
-              }
-              try {
-                setActionLoading(true);
-                setModalError(null);
-                
-                const res = await api.post<any>(`/instructor/courses/${selectedCourseForCurriculum.id}/assign`, {
-                  target_type: assignTargetType,
-                  target_id: assignTargetId
-                });
-
-                alert(res.message || "มอบสิทธิ์เข้าถึงสำเร็จ");
-                await loadAccessControl(selectedCourseForCurriculum.id);
-              } catch (err: any) {
-                console.error(err);
-                setModalError(err.message || "มอบสิทธิ์เข้าถึงคอร์สไม่สำเร็จ");
-              } finally {
-                setActionLoading(false);
-              }
-            }} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "20px" }}>
-                
-                <div className="form-group">
-                  <label className="form-label">รูปแบบการมอบหมาย</label>
-                  <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "var(--text-primary)", cursor: "pointer" }}>
-                      <input
-                        type="radio"
-                        name="assignTargetType"
-                        value="student"
-                        checked={assignTargetType === "student"}
-                        onChange={() => {
-                          setAssignTargetType("student");
-                          if (allStudents.length > 0) setAssignTargetId(allStudents[0].id);
-                        }}
-                      />
-                      ผู้เรียนรายบุคคล
-                    </label>
-
-                    <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "var(--text-primary)", cursor: "pointer" }}>
-                      <input
-                        type="radio"
-                        name="assignTargetType"
-                        value="partner"
-                        checked={assignTargetType === "partner"}
-                        onChange={() => {
-                          setAssignTargetType("partner");
-                          if (allPartners.length > 0) setAssignTargetId(allPartners[0].id);
-                          else setAssignTargetId("");
-                        }}
-                      />
-                      องค์กร (B2B)
-                    </label>
-
-                    <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "var(--text-primary)", cursor: "pointer" }}>
-                      <input
-                        type="radio"
-                        name="assignTargetType"
-                        value="group"
-                        checked={assignTargetType === "group"}
-                        onChange={() => {
-                          setAssignTargetType("group");
-                          if (groups.length > 0) setAssignTargetId(groups[0].id);
-                          else setAssignTargetId("");
-                        }}
-                      />
-                      กลุ่มเรียน
-                    </label>
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">เลือกผู้รับสิทธิ์</label>
-                  {assignTargetType === "student" && (<>
-                    <select
-                      value={assignTargetId}
-                      onChange={(e) => setAssignTargetId(e.target.value)}
-                      className="form-input"
-                      style={{ borderRadius: "1rem", fontSize: "13px" }}
-                      required
-                    >
-                      {allStudents.map((st) => (
-                        <option key={st.id} value={st.id}>{st.name} ({st.email})</option>
-                      ))}
-                    </select>
-                    <StudentEmailLookup onFound={st => { setAllStudents(prev => prev.some(p => p.id === st.id) ? prev : [...prev, st]); setAssignTargetId(st.id); }} />
-                  </>)}
-
-                  {assignTargetType === "partner" && (
-                    <select
-                      value={assignTargetId}
-                      onChange={(e) => setAssignTargetId(e.target.value)}
-                      className="form-input"
-                      style={{ borderRadius: "1rem", fontSize: "13px" }}
-                      required
-                    >
-                      {allPartners.length === 0 ? (
-                        <option value="">ยังไม่มีพาร์ตเนอร์องค์กร</option>
-                      ) : (
-                        allPartners.map((pt) => (
-                          <option key={pt.id} value={pt.id}>{pt.company_name} (จัดสรรแล้ว {pt.allocated_seats}/{pt.total_seats} ที่นั่ง)</option>
-                        ))
-                      )}
-                    </select>
-                  )}
-
-                  {assignTargetType === "group" && (
-                    <select
-                      value={assignTargetId}
-                      onChange={(e) => setAssignTargetId(e.target.value)}
-                      className="form-input"
-                      style={{ borderRadius: "1rem", fontSize: "13px" }}
-                      required
-                    >
-                      {groups.length === 0 ? (
-                        <option value="">ยังไม่มีกลุ่มเรียน</option>
-                      ) : (
-                        groups.map((g) => (
-                          <option key={g.id} value={g.id}>{g.name} ({g.member_count} คน)</option>
-                        ))
-                      )}
-                    </select>
-                  )}
-                </div>
-
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-subtle)", paddingTop: "16px" }}>
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                  {selectedCourseForCurriculum.access_duration_days ? (
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <Calendar size={14} /> จะให้สิทธิ์เข้าถึง {selectedCourseForCurriculum.access_duration_days} วัน
-                    </span>
-                  ) : "จะให้สิทธิ์เข้าถึงตลอดชีพ"}
-                </span>
-                
-                <button
-                  type="submit"
-                  disabled={actionLoading}
-                  className="tech-button-primary"
-                  style={{ padding: "10px 24px", borderRadius: "1rem", fontSize: "13px" }}
-                >
-                  {actionLoading ? "กำลังมอบสิทธิ์..." : "มอบสิทธิ์ / จัดสรรที่นั่ง"}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Active enrollments list */}
-          <div className="glass-card" style={{ padding: "24px", background: "rgba(255, 255, 255, 0.45)", borderRadius: "1.25rem", border: "1px solid var(--border-subtle)" }}>
-            <h4 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "16px", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Users size={18} color="var(--primary)" />
-              ผู้เรียนที่ลงทะเบียนอยู่
-            </h4>
-            
-            {courseEnrollments.length === 0 ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
-                ยังไม่มีผู้เรียนลงทะเบียนในคอร์สนี้
-              </div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid var(--border-subtle)" }}>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>ชื่อผู้เรียน</th>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>อีเมล</th>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>วันที่ลงทะเบียน</th>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>ความคืบหน้า</th>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>สถานะ</th>
-                      <th style={{ padding: "12px", color: "var(--text-secondary)" }}>วันหมดอายุการเข้าถึง</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {courseEnrollments.map((enr) => {
-                      const isExpired = enr.expires_at ? new Date(enr.expires_at).getTime() < Date.now() : false;
-                      return (
-                        <tr key={enr.id} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
-                          <td style={{ padding: "12px", fontWeight: "600" }}>{enr.student_name}</td>
-                          <td style={{ padding: "12px", color: "var(--text-secondary)" }}>{enr.student_email}</td>
-                          <td style={{ padding: "12px", color: "var(--text-secondary)" }}>
-                            {new Date(enr.enrolled_at).toLocaleDateString("th-TH")}
-                          </td>
-                          <td style={{ padding: "12px", fontWeight: "700", color: "var(--color-brand-primary)" }}>
-                            {enr.progress_percent}%
-                          </td>
-                          <td style={{ padding: "12px" }}>
-                            <span className="badge-gamified" style={{
-                              backgroundColor: isExpired ? "rgba(239, 68, 68, 0.1)" : "rgba(16, 185, 129, 0.1)",
-                              color: isExpired ? "var(--danger)" : "var(--accent)",
-                              borderColor: isExpired ? "rgba(239, 68, 68, 0.2)" : "rgba(16, 185, 129, 0.2)",
-                              textTransform: "none",
-                              fontSize: "11px"
-                            }}>
-                              {isExpired ? "หมดอายุ" : (ENROLLMENT_STATUS_LABELS[enr.status] || enr.status)}
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px", color: isExpired ? "var(--danger)" : "var(--text-secondary)" }}>
-                            {enr.expires_at ? (
-                              <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                                {isExpired ? <ShieldAlert size={14} /> : <Calendar size={14} />}
-                                {new Date(enr.expires_at).toLocaleDateString("th-TH")}
-                              </span>
-                            ) : "ตลอดชีพ"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-        </div>
-      </div>
-    );
-  };
-
   const renderTelemetry = () => {
     return (
       <div>
@@ -2852,7 +2401,18 @@ export const InstructorConsole: React.FC = () => {
     <div className="instructor-console-container">
       {dangerDialog}
       <AnimatePresence mode="wait">
-        {view === "dashboard" && (
+        {view === "dashboard" && openCourseData && (
+          <motion.div
+            key={`course-${openCourseData.id}`}
+            initial={{ opacity: 0, x: 15 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -15 }}
+            transition={{ duration: 0.2 }}
+          >
+            {renderWorkspace(openCourseData)}
+          </motion.div>
+        )}
+        {view === "dashboard" && !courseParam && (
           <motion.div 
             key="dashboard" 
             initial={{ opacity: 0, x: -15 }}
@@ -2872,28 +2432,6 @@ export const InstructorConsole: React.FC = () => {
             transition={{ duration: 0.2 }}
           >
             {renderCreateCourse()}
-          </motion.div>
-        )}
-        {view === "edit-course" && (
-          <motion.div 
-            key="edit-course"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderEditCourse()}
-          </motion.div>
-        )}
-        {view === "curriculum" && (
-          <motion.div 
-            key="curriculum"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderCurriculum()}
           </motion.div>
         )}
         {view === "create-lesson" && (
@@ -2951,17 +2489,6 @@ export const InstructorConsole: React.FC = () => {
             {renderGroups()}
           </motion.div>
         )}
-        {view === "access-control" && (
-          <motion.div 
-            key="access-control"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderAccessControl()}
-          </motion.div>
-        )}
         {view === "telemetry" && (
           <motion.div 
             key="telemetry"
@@ -2990,31 +2517,3 @@ export const InstructorConsole: React.FC = () => {
 };
 
 export default InstructorConsole;
-
-/**
- * Instructors only see learners of their own courses and groups; anyone else is found by exact email.
- */
-const StudentEmailLookup: React.FC<{ onFound: (student: { id: string; name: string; email: string }) => void }> = ({ onFound }) => {
-  const api = useApi();
-  const [email, setEmail] = React.useState("");
-  const [message, setMessage] = React.useState<string | null>(null);
-  const lookup = async () => {
-    if (!email.trim()) return;
-    try {
-      setMessage(null);
-      const found = await api.get<Array<{ id: string; name: string; email: string }>>(`/instructor/students?email=${encodeURIComponent(email.trim())}`);
-      if (found.length) { onFound(found[0]); setEmail(""); setMessage(`เลือก ${found[0].name} แล้ว`); }
-      else setMessage("ไม่พบผู้เรียนที่ใช้อีเมลนี้");
-    } catch (err: any) { setMessage(err.message); }
-  };
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-      <input type="email" className="form-input" value={email} onChange={e => setEmail(e.target.value)}
-        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); lookup(); } }}
-        placeholder="ไม่อยู่ในรายการ? ค้นหาด้วยอีเมล" aria-label="ค้นหาผู้เรียนด้วยอีเมล"
-        style={{ flex: "1 1 200px", borderRadius: "1rem", fontSize: "13px" }} />
-      <button type="button" className="tech-button-outline" onClick={lookup} style={{ padding: "8px 14px", fontSize: "12px", borderRadius: "1rem" }}>ค้นหา</button>
-      {message && <span role="status" style={{ fontSize: 12, color: "var(--text-secondary)" }}>{message}</span>}
-    </div>
-  );
-};
