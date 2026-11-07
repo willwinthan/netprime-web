@@ -7,8 +7,9 @@ import { audit } from "./accounts";
 import { canApproveCourses, verifiedTokenUserId } from "./courses";
 import { checkLessonAssets } from "./instructor";
 import { requireDeleteConfirmation } from "../utils/dangerConfirm";
+import { previewUrl } from "./selfLearning";
 import {
-  activeEnrollmentId, completeLesson, isCourseStaff, isLessonType, jsonList, LESSON_ORDER, lessonLockResponse
+  activeEnrollmentId, completeLesson, isCourseStaff, isLessonType, jsonList, LESSON_ORDER, LESSON_TYPE_SQL, lessonLockResponse
 } from "../utils/courseContent";
 
 /**
@@ -46,7 +47,14 @@ interface LessonRow {
   video_stream_uid: string | null; video_provider: string | null; handout_r2_key: string | null;
   content_json: string | null; content_md: string | null; pdf_r2_key: string | null; embed_url: string | null;
   scorm_base: string | null; scorm_launch: string | null; available_after_days: number | null; available_on: string | null;
+  self_learning_id: string | null;
 }
+
+/**
+ * Self-learning lessons are stored as type 'embed' with self_learning_id set (the type CHECK cannot change on
+ * D1, see migrations/0034); every API reports them as type 'self_learning'.
+ */
+const lessonType = (l: Pick<LessonRow, "type" | "self_learning_id">) => l.self_learning_id ? "self_learning" : l.type;
 
 // ==========================================
 // Categories
@@ -351,7 +359,7 @@ contentRouter.put("/instructor/courses/:id/details", rbac(["instructor", "admin"
 /** Instructor-facing lesson fields (no content bodies). */
 function builderLesson(l: LessonRow) {
   return {
-    id: l.id, title: l.title, type: l.type, section_id: l.section_id, sort_order: l.sort_order,
+    id: l.id, title: l.title, type: lessonType(l), section_id: l.section_id, sort_order: l.sort_order, self_learning_id: l.self_learning_id,
     video_stream_uid: l.video_stream_uid, video_provider: l.video_provider, handout_r2_key: l.handout_r2_key,
     pdf_r2_key: l.pdf_r2_key, embed_url: l.embed_url, scorm_launch: l.scorm_launch,
     has_text: !!(l.content_json || l.content_md),
@@ -522,7 +530,7 @@ contentRouter.put("/instructor/courses/:id/structure", rbac(["instructor", "admi
 interface LessonInput {
   title?: unknown; type?: unknown; section_id?: unknown; content_json?: unknown; content_md?: unknown; pdf_r2_key?: unknown;
   embed_url?: unknown; video_stream_uid?: unknown; video_provider?: unknown; handout_r2_key?: unknown;
-  available_after_days?: unknown; available_on?: unknown;
+  available_after_days?: unknown; available_on?: unknown; self_learning_id?: unknown;
 }
 
 /** A PDF key the user may attach: their own upload (or one already used in their own lessons); admins any. */
@@ -552,9 +560,19 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
     if (!title || title.length > 200) return { error: "ชื่อบทเรียนต้องมี 1–200 ตัวอักษร" };
     values.title = title;
   }
-  const type = body.type !== undefined ? body.type : current?.type ?? "video";
-  if (!isLessonType(type)) return { error: "ประเภทบทเรียนต้องเป็น video, text, pdf, embed หรือ scorm" };
-  if (body.type !== undefined || !current) values.type = type;
+  const type = body.type !== undefined ? body.type : current ? lessonType(current) : "video";
+  const selfLearning = type === "self_learning";
+  if (!selfLearning && !isLessonType(type)) return { error: "ประเภทบทเรียนต้องเป็น video, text, pdf, embed, scorm หรือ self_learning" };
+  if (body.type !== undefined || !current) values.type = selfLearning ? "embed" : type;
+  if (selfLearning && body.self_learning_id !== undefined) {
+    const id = typeof body.self_learning_id === "string" ? body.self_learning_id : "";
+    const picked = id ? await c.env.DB.prepare("SELECT id FROM self_learning_lessons WHERE id = ? AND status = 'published'").bind(id).first() : null;
+    if (!picked) return { error: "เลือกบทเรียน Self-learning ที่เผยแพร่แล้ว" };
+    values.self_learning_id = id;
+    values.embed_url = null;
+  }
+  // Another type drops the link, so the lesson is not still shown as self-learning.
+  if (!selfLearning && current?.self_learning_id) values.self_learning_id = null;
 
   if (body.section_id !== undefined) {
     if (body.section_id === null || body.section_id === "") values.section_id = null;
@@ -582,7 +600,7 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
     if ((body.content_md || "").length > 200_000) return { error: "เนื้อหาบทเรียนยาวเกิน 200KB" };
     values.content_md = body.content_md || null;
   }
-  if (body.embed_url !== undefined) {
+  if (body.embed_url !== undefined && !selfLearning) {
     const url = typeof body.embed_url === "string" ? body.embed_url.trim() : "";
     if (url && !embedSrc(url)) return { error: `ฝังได้เฉพาะลิงก์ https จาก ${EMBED_PROVIDERS}` };
     values.embed_url = url || null;
@@ -630,6 +648,7 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
   const merged = { ...(current ?? {}), ...values } as Partial<LessonRow>;
   if (type === "video" && !merged.video_stream_uid) return { error: "บทเรียนวิดีโอต้องระบุวิดีโอ" };
   if (type === "embed" && !merged.embed_url) return { error: "บทเรียนแบบฝังเนื้อหาต้องระบุลิงก์" };
+  if (selfLearning && !merged.self_learning_id) return { error: "เลือกบทเรียน Self-learning ที่จะใช้" };
   if (type === "pdf" && !merged.pdf_r2_key) return { error: "บทเรียน PDF ต้องอัปโหลดไฟล์ PDF" };
   return { values };
 }
@@ -699,6 +718,17 @@ contentRouter.patch("/instructor/lessons/:id/settings", rbac(["instructor", "adm
   }
 });
 
+/**
+ * Published self-learning lessons an instructor may put in a course (staff upload them; instructors pick).
+ * GET /api/instructor/self-learning-options
+ */
+contentRouter.get("/instructor/self-learning-options", rbac(["instructor", "admin"]), async (c) => {
+  const rows = await c.env.DB.prepare(`SELECT id, slug, title, visibility, level FROM self_learning_lessons
+    WHERE status = 'published' AND current_file_id IS NOT NULL ORDER BY sort_order, title LIMIT 500`).all();
+  c.header("Cache-Control", "no-store");
+  return c.json({ lessons: rows.results });
+});
+
 // ==========================================
 // Learner: lesson content, mark complete, PDF viewer
 // ==========================================
@@ -730,13 +760,22 @@ contentRouter.get("/student/lessons/:id/content", rbac(), async (c) => {
     const l = found.lesson;
     const progress = await c.env.DB.prepare("SELECT completed FROM lesson_progress WHERE user_id = ? AND lesson_id = ?")
       .bind(user.id, l.id).first<{ completed: number }>();
-    if (found.enrolled) await trackEvent(c.env.DB, user.id, "lesson_view", { courseId: l.course_id, lessonId: l.id, data: { type: l.type } });
+    const type = lessonType(l);
+    if (found.enrolled) await trackEvent(c.env.DB, user.id, "lesson_view", { courseId: l.course_id, lessonId: l.id, data: { type } });
+    // Self-learning: a signed link to the current file, so course-only lessons open here and nowhere else.
+    let selfLearning: { slug: string; title: string; content_url: string } | null = null;
+    if (l.self_learning_id) {
+      const sl = await c.env.DB.prepare("SELECT slug, title, current_file_id FROM self_learning_lessons WHERE id = ? AND status = 'published'")
+        .bind(l.self_learning_id).first<{ slug: string; title: string; current_file_id: string | null }>();
+      if (sl?.current_file_id) selfLearning = { slug: sl.slug, title: sl.title, content_url: await previewUrl(c, sl.current_file_id) };
+    }
     return c.json({
-      lesson: { id: l.id, course_id: l.course_id, title: l.title, type: l.type, section_id: l.section_id },
+      lesson: { id: l.id, course_id: l.course_id, title: l.title, type, section_id: l.section_id },
+      self_learning: selfLearning,
       completed: !!progress?.completed,
       content_json: l.type === "text" ? l.content_json : null,
       content_md: l.type === "text" ? l.content_md : null,
-      embed_src: l.type === "embed" && l.embed_url ? embedSrc(l.embed_url) : null,
+      embed_src: type === "embed" && l.embed_url ? embedSrc(l.embed_url) : null,
       has_pdf: l.type === "pdf" && !!l.pdf_r2_key,
       has_scorm: l.type === "scorm" && !!l.scorm_base,
       has_handout: !!l.handout_r2_key,
@@ -749,8 +788,9 @@ contentRouter.get("/student/lessons/:id/content", rbac(), async (c) => {
 });
 
 /**
- * "ทำเครื่องหมายว่าเรียนแล้ว" for text, PDF and embed lessons (video uses playback progress,
- * SCORM completes from the package).
+ * "ทำเครื่องหมายว่าเรียนแล้ว" for text, PDF, embed and self-learning lessons (stored as 'embed'); video uses
+ * playback progress, SCORM completes from the package, and a self-learning lesson that reports completion
+ * through the Lesson Kit is also marked by selfLearning.ts.
  * POST /api/student/lessons/:id/complete
  */
 contentRouter.post("/student/lessons/:id/complete", rbac(["student", "admin"]), async (c) => {
@@ -818,7 +858,7 @@ contentRouter.get("/courses/:id/overview", async (c) => {
     if (!course) return c.json({ error: "ไม่พบคอร์สนี้" }, 404);
     const [sections, lessons, prerequisites] = await db.batch([
       db.prepare("SELECT id, title FROM course_sections WHERE course_id = ? ORDER BY sort_order, id").bind(courseId),
-      db.prepare(`SELECT l.id, l.title, l.type, l.section_id, l.available_after_days, l.available_on FROM lessons l
+      db.prepare(`SELECT l.id, l.title, ${LESSON_TYPE_SQL} AS type, l.section_id, l.available_after_days, l.available_on FROM lessons l
         LEFT JOIN course_sections s ON s.id = l.section_id WHERE l.course_id = ? ORDER BY ${LESSON_ORDER}`).bind(courseId),
       db.prepare(`SELECT co.id, co.title FROM course_prerequisites p JOIN courses co ON co.id = p.prerequisite_id
         WHERE p.course_id = ? ORDER BY co.title`).bind(courseId)

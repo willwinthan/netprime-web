@@ -192,3 +192,62 @@ test('signed-in learners save and resume progress on published lessons only', as
   assert.equal(done.status, 200);
   assert.ok(!(await expectStatus('/api/me/self-learning', 200, { token: student })).progress.some(p => p.slug === lesson.slug));
 });
+
+test('course-only lessons stay off the public site and open only through a course that uses them', async () => {
+  const lesson = await createLesson(coord, { visibility: 'course' });
+  const { data: { file } } = await upload(coord, lesson.id, lessonHtml('in-course'));
+  await expectStatus(`/api/self-learning/lessons/${lesson.id}/publish`, 200, { method: 'POST', token: coord });
+  const listed = (await expectStatus('/api/self-learning/lessons', 200, { token: coord })).lessons.find(l => l.id === lesson.id);
+  assert.equal(listed.visibility, 'course');
+
+  // Not listed, no public page, no unsigned file, no progress for someone outside the course.
+  assert.ok(!(await expectStatus('/api/public/self-learning', 200)).lessons.some(l => l.slug === lesson.slug));
+  await expectStatus(`/api/public/self-learning/${lesson.slug}`, 404);
+  assert.equal((await fetch(`${base}/api/public/self-learning/files/${file.id}`)).status, 404);
+  await expectStatus(`/api/me/self-learning/${lesson.slug}`, 404, { token: student });
+  await expectStatus('/api/self-learning/lessons/x', 400, { method: 'PATCH', token: coord, body: { visibility: 'hidden' } });
+
+  // Instructors pick it from the library and add it to their course.
+  const { lessons: options } = await expectStatus('/api/instructor/self-learning-options', 200, { token: instructor });
+  assert.ok(options.some(o => o.id === lesson.id && o.visibility === 'course'));
+  await expectStatus('/api/instructor/self-learning-options', 403, { token: student });
+  const missing = await expectStatus('/api/instructor/courses/course_cisco_ccna/lessons', 400, { method: 'POST', token: instructor, body: { title: 'ไม่มีบท', type: 'self_learning' } });
+  assert.match(missing.error, /Self-learning/);
+  const created = await expectStatus('/api/instructor/courses/course_cisco_ccna/lessons', 201, {
+    method: 'POST', token: instructor, body: { title: 'ฝึก DHCP ด้วยตัวเอง', type: 'self_learning', self_learning_id: lesson.id }
+  });
+  assert.equal(created.lesson.type, 'self_learning');
+  assert.equal(created.lesson.self_learning_id, lesson.id);
+  const courseLesson = created.lesson.id;
+
+  // The learner's course shows the type; the player gets a signed link that works.
+  const course = await expectStatus('/api/courses/course_cisco_ccna', 200, { token: student });
+  assert.equal(course.lessons.find(l => l.id === courseLesson)?.type, 'self_learning');
+  const content = await expectStatus(`/api/student/lessons/${courseLesson}/content`, 200, { token: student });
+  assert.equal(content.lesson.type, 'self_learning');
+  assert.equal(content.self_learning.slug, lesson.slug);
+  const opened = await fetch(content.self_learning.content_url);
+  assert.equal(opened.status, 200);
+  assert.match(await opened.text(), /in-course/);
+
+  // Enrolled learners may now save progress; reporting it complete completes the course lesson.
+  await expectStatus(`/api/me/self-learning/${lesson.slug}`, 200, { token: student });
+  const saved = await expectStatus(`/api/me/self-learning/${lesson.slug}`, 200, { method: 'PUT', token: student, body: { percent: 100, completed: true } });
+  assert.equal(saved.completed_in_courses, 1);
+  assert.equal((await expectStatus(`/api/student/lessons/${courseLesson}/content`, 200, { token: student })).completed, true);
+  const again = await expectStatus(`/api/me/self-learning/${lesson.slug}`, 200, { method: 'PUT', token: student, body: { percent: 100, completed: true } });
+  assert.equal(again.completed_in_courses, 0, 'an already completed course lesson is left alone');
+  // Course-only progress is not listed with the public lessons.
+  assert.ok(!(await expectStatus('/api/me/self-learning', 200, { token: student })).progress.some(p => p.slug === lesson.slug));
+
+  // Switching the course lesson to another type drops the link; deleting the library lesson leaves the course lesson empty.
+  const switched = await expectStatus(`/api/instructor/lessons/${courseLesson}/settings`, 200, { method: 'PATCH', token: instructor, body: { type: 'text' } });
+  assert.equal(switched.lesson.type, 'text');
+  assert.equal(switched.lesson.self_learning_id, null);
+  await expectStatus(`/api/instructor/lessons/${courseLesson}/settings`, 200, { method: 'PATCH', token: instructor, body: { type: 'self_learning', self_learning_id: lesson.id } });
+  assert.equal((await request(`/api/self-learning/lessons/${lesson.id}`, { method: 'DELETE', token: coord })).status, 428);
+  const done = await confirmedRequest(`/api/self-learning/lessons/${lesson.id}`, 'self_learning.delete', lesson.id, { token: coord });
+  assert.equal(done.status, 200);
+  const orphan = await expectStatus(`/api/student/lessons/${courseLesson}/content`, 200, { token: student });
+  assert.equal(orphan.self_learning, null);
+});

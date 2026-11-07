@@ -1036,6 +1036,8 @@ CREATE TABLE IF NOT EXISTS self_learning_lessons (
     status TEXT NOT NULL CHECK(status IN ('draft', 'published')) DEFAULT 'draft',
     sort_order INTEGER NOT NULL DEFAULT 0,
     current_file_id TEXT,          -- self_learning_files row shown to learners; NULL until a file is uploaded
+    -- 'course': published but kept off /self-learning; opened only through a course that uses it (migration 0034)
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public', 'course')),
     published_at TEXT,
     created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1569,6 +1571,10 @@ ALTER TABLE lessons ADD COLUMN scorm_launch TEXT;   -- scorm: launch href from i
 -- Drip: unlock N days after enrollment and/or on a date (YYYY-MM-DD, Asia/Bangkok midnight).
 ALTER TABLE lessons ADD COLUMN available_after_days INTEGER;
 ALTER TABLE lessons ADD COLUMN available_on TEXT;
+-- Course lesson showing a self-learning lesson: stored as type 'embed' (the type CHECK cannot change on D1)
+-- and reported by the API as type 'self_learning' (migration 0034, handlers/content.ts).
+ALTER TABLE lessons ADD COLUMN self_learning_id TEXT REFERENCES self_learning_lessons(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_lessons_self_learning ON lessons (self_learning_id);
 CREATE INDEX IF NOT EXISTS idx_lessons_section ON lessons (section_id);
 
 -- Courses: "เรียนตามลำดับ" and sales-page fields (lists/FAQ are JSON arrays).

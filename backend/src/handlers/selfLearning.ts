@@ -3,6 +3,7 @@ import { Env, rbac } from "../middleware/rbac";
 import { permit } from "../utils/permissions";
 import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { allowedOrigins } from "../utils/origins";
+import { completeLesson, lessonGateFor } from "../utils/courseContent";
 
 /**
  * Self-learning lessons (migrations/0032_self_learning.sql). Staff upload one self-contained HTML file
@@ -10,6 +11,11 @@ import { allowedOrigins } from "../utils/origins";
  *   Public:  /api/public/self-learning, /api/public/self-learning/:slug, /api/public/self-learning/files/:id
  *   Console: /api/self-learning/*   (rbac + site.self_learning)
  *   Learner: /api/me/self-learning    (rbac; progress a lesson reports through the Lesson Kit, per account)
+ *
+ * A lesson can also sit in courses (lessons.self_learning_id, migration 0034). visibility 'course' keeps a
+ * published lesson off the public site: its file then opens only through a signed link that the course player
+ * gets from /api/student/lessons/:id/content, and only learners of a course that uses it may save progress.
+ * Reporting a lesson complete also completes it in every course of the learner's that uses it.
  *
  * The uploaded file runs its own scripts, so it is never served from the site's origin (where the JWT sits
  * in localStorage): files come from SELF_LEARNING_ORIGIN, or this Worker's origin, and may only be framed
@@ -21,15 +27,16 @@ const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LEVELS = ["beginner", "intermediate", "advanced"] as const;
+const VISIBILITY = ["public", "course"] as const;
 const MAX_STATE_CHARS = 64 * 1024;
-const LESSON_COLUMNS = ["slug", "title", "title_en", "summary", "summary_en", "cover_url", "level"] as const;
+const LESSON_COLUMNS = ["slug", "title", "title_en", "summary", "summary_en", "cover_url", "level", "visibility"] as const;
 
 type C = Context<Env>;
 type Obj = Record<string, unknown>;
 
 interface LessonRow {
   id: string; slug: string; title: string; title_en: string | null; summary: string | null; summary_en: string | null;
-  cover_url: string | null; level: string | null; status: "draft" | "published"; sort_order: number;
+  cover_url: string | null; level: string | null; status: "draft" | "published"; visibility: "public" | "course"; sort_order: number;
   current_file_id: string | null; published_at: string | null; created_at: string; updated_at: string;
 }
 interface FileRow {
@@ -90,6 +97,11 @@ function parseLesson(body: Obj, partial: boolean): Partial<Record<typeof LESSON_
     if (level !== null && !LEVELS.includes(level as typeof LEVELS[number])) throw new Invalid("ระดับไม่ถูกต้อง");
     values.level = level as string | null;
   }
+  if (has("visibility")) {
+    const visibility = body.visibility === undefined || body.visibility === null || body.visibility === "" ? "public" : body.visibility;
+    if (!VISIBILITY.includes(visibility as typeof VISIBILITY[number])) throw new Invalid("การแสดงผลไม่ถูกต้อง");
+    values.visibility = visibility as string;
+  }
   return values;
 }
 
@@ -133,7 +145,7 @@ async function hmac(secret: string): Promise<CryptoKey> {
 const previewPayload = (fileId: string, exp: number) => new TextEncoder().encode(`self-learning-preview:${fileId}:${exp}`);
 const toHex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
 
-async function previewUrl(c: C, fileId: string): Promise<string> {
+export async function previewUrl(c: C, fileId: string): Promise<string> {
   const exp = Date.now() + PREVIEW_TTL_MS;
   const sig = toHex(await crypto.subtle.sign("HMAC", await hmac(c.env.JWT_SECRET), previewPayload(fileId, exp)));
   return `${fileUrl(c, fileId)}?exp=${exp}&sig=${sig}`;
@@ -147,14 +159,17 @@ async function validPreview(c: C, fileId: string): Promise<boolean> {
   return crypto.subtle.verify("HMAC", await hmac(c.env.JWT_SECRET), bytes, previewPayload(fileId, exp));
 }
 
-/** GET /api/public/self-learning/files/:id — the current file of a published lesson, or any file with a preview signature. */
+/**
+ * GET /api/public/self-learning/files/:id — the current file of a published public lesson, or any file with a
+ * signature (staff previews, and course-only lessons opened from the course player).
+ */
 selfLearningRouter.get("/public/self-learning/files/:id", async (c) => {
   const id = c.req.param("id");
   if (!/^slf_[a-f0-9]{16}$/.test(id)) return c.text("Not found", 404);
-  const file = await c.env.DB.prepare(`SELECT f.r2_key, l.status, l.current_file_id FROM self_learning_files f
-    JOIN self_learning_lessons l ON l.id = f.lesson_id WHERE f.id = ?`).bind(id).first<{ r2_key: string; status: string; current_file_id: string | null }>();
+  const file = await c.env.DB.prepare(`SELECT f.r2_key, l.status, l.visibility, l.current_file_id FROM self_learning_files f
+    JOIN self_learning_lessons l ON l.id = f.lesson_id WHERE f.id = ?`).bind(id).first<{ r2_key: string; status: string; visibility: string; current_file_id: string | null }>();
   if (!file) return c.text("Not found", 404);
-  const live = file.status === "published" && file.current_file_id === id;
+  const live = file.status === "published" && file.visibility === "public" && file.current_file_id === id;
   const preview = !live && c.req.query("sig") ? await validPreview(c, id) : false;
   if (!live && !preview) return c.text("Not found", 404);
   const object = await c.env.ASSETS.get(file.r2_key);
@@ -179,7 +194,7 @@ const PUBLIC_COLUMNS = "slug, title, title_en, summary, summary_en, cover_url, l
 
 selfLearningRouter.get("/public/self-learning", async (c) => {
   const rows = await c.env.DB.prepare(`SELECT ${PUBLIC_COLUMNS} FROM self_learning_lessons
-    WHERE status = 'published' AND current_file_id IS NOT NULL ORDER BY sort_order, published_at LIMIT 200`).all();
+    WHERE status = 'published' AND visibility = 'public' AND current_file_id IS NOT NULL ORDER BY sort_order, published_at LIMIT 200`).all();
   c.header("Cache-Control", "public, max-age=60");
   return c.json({ lessons: rows.results });
 });
@@ -188,7 +203,7 @@ selfLearningRouter.get("/public/self-learning/:slug", async (c) => {
   const slug = c.req.param("slug").toLowerCase();
   if (!SLUG_RE.test(slug)) return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
   const row = await c.env.DB.prepare(`SELECT ${PUBLIC_COLUMNS}, current_file_id FROM self_learning_lessons
-    WHERE slug = ? AND status = 'published' AND current_file_id IS NOT NULL`).bind(slug).first<Obj & { current_file_id: string }>();
+    WHERE slug = ? AND status = 'published' AND visibility = 'public' AND current_file_id IS NOT NULL`).bind(slug).first<Obj & { current_file_id: string }>();
   if (!row) return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
   const { current_file_id, ...lesson } = row;
   c.header("Cache-Control", "public, max-age=60");
@@ -207,7 +222,8 @@ selfLearningRouter.use("/self-learning/*", async (c, next) => {
 
 const CONSOLE_SELECT = `SELECT l.*, f.version AS file_version, f.size_bytes AS file_size, f.uses_kit, f.created_at AS file_uploaded_at,
     (SELECT COUNT(*) FROM self_learning_progress p WHERE p.lesson_id = l.id) AS learners,
-    (SELECT COUNT(*) FROM self_learning_progress p WHERE p.lesson_id = l.id AND p.completed_at IS NOT NULL) AS completed
+    (SELECT COUNT(*) FROM self_learning_progress p WHERE p.lesson_id = l.id AND p.completed_at IS NOT NULL) AS completed,
+    (SELECT COUNT(DISTINCT cl.course_id) FROM lessons cl WHERE cl.self_learning_id = l.id) AS course_count
   FROM self_learning_lessons l LEFT JOIN self_learning_files f ON f.id = l.current_file_id`;
 
 async function loadLesson(c: C, id: string) {
@@ -348,7 +364,9 @@ selfLearningRouter.delete("/self-learning/lessons/:id", async (c) => {
   const denied = await requireDeleteConfirmation(c, "self_learning.delete", id);
   if (denied) return denied;
   const files = await c.env.DB.prepare("SELECT r2_key FROM self_learning_files WHERE lesson_id = ?").bind(id).all<{ r2_key: string }>();
-  const [, , result] = await c.env.DB.batch([
+  // Course lessons that showed it stay in their courses with nothing to show (the player says so).
+  const [, , , result] = await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE lessons SET self_learning_id = NULL WHERE self_learning_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM self_learning_progress WHERE lesson_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM self_learning_files WHERE lesson_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM self_learning_lessons WHERE id = ?").bind(id)
@@ -371,17 +389,31 @@ selfLearningRouter.use("/me/self-learning/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
 });
 
-/** Progress on every published lesson, for the lesson cards. */
+/** Progress on every published public lesson, for the lesson cards and the dashboard. */
 selfLearningRouter.get("/me/self-learning", async (c) => {
-  const rows = await c.env.DB.prepare(`SELECT l.slug, p.percent, p.completed_at, p.updated_at FROM self_learning_progress p
-    JOIN self_learning_lessons l ON l.id = p.lesson_id WHERE p.user_id = ? AND l.status = 'published'`).bind(c.get("user").id).all();
+  const rows = await c.env.DB.prepare(`SELECT l.slug, l.title, l.title_en, p.percent, p.completed_at, p.updated_at FROM self_learning_progress p
+    JOIN self_learning_lessons l ON l.id = p.lesson_id WHERE p.user_id = ? AND l.status = 'published' AND l.visibility = 'public'
+    ORDER BY p.updated_at DESC`).bind(c.get("user").id).all();
   c.header("Cache-Control", "no-store");
   return c.json({ progress: rows.results });
 });
 
-const publishedLesson = (c: C, slug: string) => SLUG_RE.test(slug)
-  ? c.env.DB.prepare("SELECT id FROM self_learning_lessons WHERE slug = ? AND status = 'published'").bind(slug).first<{ id: string }>()
-  : Promise.resolve(null);
+// Courses of the learner's (active, unexpired enrollment) that use a self-learning lesson.
+const ENROLLED_LESSONS = `SELECT cl.id, cl.course_id,
+    EXISTS (SELECT 1 FROM lesson_progress lp WHERE lp.user_id = e.user_id AND lp.lesson_id = cl.id AND lp.completed = 1) AS done
+  FROM lessons cl JOIN enrollments e ON e.course_id = cl.course_id
+  WHERE cl.self_learning_id = ? AND e.user_id = ? AND e.status IN ('active', 'completed') AND (e.expires_at IS NULL OR e.expires_at > CURRENT_TIMESTAMP)`;
+
+/** A published lesson the signed-in user may keep progress on: public, or course-only and used by one of their courses. */
+async function publishedLesson(c: C, slug: string): Promise<{ id: string } | null> {
+  if (!SLUG_RE.test(slug)) return null;
+  const lesson = await c.env.DB.prepare("SELECT id, visibility FROM self_learning_lessons WHERE slug = ? AND status = 'published'")
+    .bind(slug).first<{ id: string; visibility: string }>();
+  if (!lesson) return null;
+  if (lesson.visibility === "public") return lesson;
+  const used = await c.env.DB.prepare(`${ENROLLED_LESSONS} LIMIT 1`).bind(lesson.id, c.get("user").id).first();
+  return used ? lesson : null;
+}
 
 selfLearningRouter.get("/me/self-learning/:slug", async (c) => {
   const lesson = await publishedLesson(c, c.req.param("slug").toLowerCase());
@@ -409,5 +441,16 @@ selfLearningRouter.put("/me/self-learning/:slug", async (c) => {
     ON CONFLICT (user_id, lesson_id) DO UPDATE SET percent = excluded.percent, state = excluded.state,
       completed_at = COALESCE(self_learning_progress.completed_at, excluded.completed_at), updated_at = CURRENT_TIMESTAMP`)
     .bind(c.get("user").id, lesson.id, Math.round(percent), state, completed ? 1 : 0).run();
-  return c.json({ message: "บันทึกความคืบหน้าแล้ว" });
+  // Finishing the lesson finishes it in the learner's courses that use it (unless still locked there).
+  let completedInCourses = 0;
+  if (completed) {
+    const user = c.get("user");
+    const uses = await c.env.DB.prepare(ENROLLED_LESSONS).bind(lesson.id, user.id).all<{ id: string; course_id: string; done: number }>();
+    for (const use of uses.results) {
+      if (use.done || (await lessonGateFor(c.env.DB, user, use.id, use.course_id)).locked) continue;
+      await completeLesson(c.env.DB, user.id, use.id, use.course_id);
+      completedInCourses++;
+    }
+  }
+  return c.json({ message: "บันทึกความคืบหน้าแล้ว", completed_in_courses: completedInCourses });
 });

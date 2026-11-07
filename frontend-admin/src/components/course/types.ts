@@ -1,13 +1,14 @@
 // Shared types and labels for the course builder (instructor) and the learner player.
 
-export type LessonType = "video" | "text" | "pdf" | "embed" | "scorm";
+export type LessonType = "video" | "text" | "pdf" | "embed" | "scorm" | "self_learning";
 
 export const LESSON_TYPE_LABEL: Record<LessonType, string> = {
   video: "วิดีโอ",
   text: "บทความ",
   pdf: "เอกสาร PDF",
   embed: "ฝังเนื้อหา",
-  scorm: "SCORM"
+  scorm: "SCORM",
+  self_learning: "Self-learning"
 };
 
 export const LEVEL_LABEL: Record<string, string> = {
@@ -32,6 +33,8 @@ export interface BuilderLesson {
   pdf_r2_key: string | null;
   embed_url: string | null;
   scorm_launch: string | null;
+  /** Self-learning lesson shown by a lesson of type self_learning. */
+  self_learning_id: string | null;
   has_text: boolean;
   available_after_days: number | null;
   available_on: string | null;

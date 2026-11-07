@@ -4,10 +4,11 @@ import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { BlockRenderer, parseDocument } from "../../site/BlockRenderer";
 import { Markdown, parseMarkdown } from "../../site/Markdown";
 import { LESSON_TYPE_LABEL, PlayerLesson, unlockText } from "./types";
+import { LessonFrame } from "../../site/SelfLearningPage";
 import "./course.css";
 
 /**
- * Learner player for non-video lessons (text, PDF, embed, SCORM) and the lock screen for any
+ * Learner player for non-video lessons (text, PDF, embed, SCORM, self-learning) and the lock screen for any
  * locked lesson. Mounted in Dashboard's video tab instead of VideoPlayer for those lessons.
  */
 interface Props {
@@ -23,6 +24,8 @@ interface Content {
   embed_src: string | null;
   has_pdf: boolean;
   has_scorm: boolean;
+  /** Self-learning lesson: a signed link to its file (course-only lessons open nowhere else). */
+  self_learning: { slug: string; title: string; content_url: string } | null;
   preview: boolean;
 }
 
@@ -104,7 +107,7 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
   }
 
   const blocks = content?.content_json ? parseDocument(content.content_json) : null;
-  const canMark = lesson.type === "text" || lesson.type === "pdf" || lesson.type === "embed";
+  const canMark = lesson.type === "text" || lesson.type === "pdf" || lesson.type === "embed" || lesson.type === "self_learning";
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -137,6 +140,14 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
           </button>
         </>
       ) : !error && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>กำลังโหลดไฟล์ PDF...</div>)}
+
+      {content && lesson.type === "self_learning" && (content.self_learning ? (
+        // A lesson that reports itself complete (Lesson Kit) completes this course lesson on the server;
+        // markComplete then fetches the new course progress. Others use the button below.
+        <LessonFrame key={content.self_learning.content_url} src={content.self_learning.content_url} title={lesson.title}
+          slug={content.preview ? undefined : content.self_learning.slug} shareUrl={window.location.href}
+          onSaved={saved => { if (saved.completed && !completed) markComplete(); }} />
+      ) : <p style={{ color: "var(--text-muted)" }}>บทเรียน Self-learning นี้ยังไม่เปิดให้เรียน กรุณาแจ้งผู้สอน</p>)}
 
       {content && lesson.type === "scorm" && (scormUrl ? (
         <iframe className="np-lesson-frame tall" src={scormUrl} title={lesson.title} allow="fullscreen; autoplay" allowFullScreen

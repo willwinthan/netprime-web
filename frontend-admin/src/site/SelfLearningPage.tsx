@@ -5,7 +5,6 @@ import { publicGet } from "../components/site/PublicSections";
 import { Theme, fontHref, themeVars, useTheme } from "../components/builder/theme";
 import { useApi } from "../hooks/useApi";
 import { Link, usePageMeta } from "./router";
-import { ArrowIcon } from "./shared";
 
 // Self-learning lessons are self-contained HTML files uploaded by staff (backend handlers/selfLearning.ts).
 // Each file runs its own scripts, so it is served from another origin and embedded in a sandboxed iframe;
@@ -40,7 +39,11 @@ function lessonTheme(theme: Theme, custom: boolean) {
  * and restore (the signed-in learner's saved progress). `slug` turns progress saving on; previews omit it.
  * syncUrl keeps the lesson's position in the address bar, so a link opens that spot.
  */
-export const LessonFrame: React.FC<{ src: string; title: string; shareUrl: string; slug?: string; syncUrl?: boolean }> = ({ src, title, shareUrl, slug, syncUrl = false }) => {
+export const LessonFrame: React.FC<{
+  src: string; title: string; shareUrl: string; slug?: string; syncUrl?: boolean;
+  /** Called after the saved progress is stored (signed-in learners only), e.g. to refresh course progress. */
+  onSaved?: (saved: { completed: boolean; completedInCourses: number }) => void;
+}> = ({ src, title, shareUrl, slug, syncUrl = false, onSaved }) => {
   const api = useApi();
   const { theme, custom } = useTheme();
   const frame = useRef<HTMLIFrameElement>(null);
@@ -89,9 +92,10 @@ export const LessonFrame: React.FC<{ src: string; title: string; shareUrl: strin
         window.history.replaceState(window.history.state, "", `#${e.data.hash}`);
       }
       if (type === "progress" && signedIn && Number.isFinite(e.data.percent)) {
-        api.request(`/me/self-learning/${encodeURIComponent(slug!)}`, {
-          method: "PUT", body: JSON.stringify({ percent: e.data.percent, completed: e.data.completed === true, state: e.data.state ?? null })
-        }).catch(() => undefined);
+        const completed = e.data.completed === true;
+        api.request<{ completed_in_courses?: number }>(`/me/self-learning/${encodeURIComponent(slug!)}`, {
+          method: "PUT", body: JSON.stringify({ percent: e.data.percent, completed, state: e.data.state ?? null })
+        }).then(res => onSaved?.({ completed, completedInCourses: res.completed_in_courses ?? 0 })).catch(() => undefined);
       }
     };
     window.addEventListener("message", onMessage);
@@ -153,7 +157,7 @@ const LessonCardBody: React.FC<{ lesson: PublicLesson; progress?: MyProgress[str
   );
 };
 
-const LessonGrid: React.FC<{ lessons: PublicLesson[] | null; error: string | null; onOpen?: (lesson: PublicLesson) => void }> = ({ lessons, error, onOpen }) => {
+const LessonGrid: React.FC<{ lessons: PublicLesson[] | null; error: string | null }> = ({ lessons, error }) => {
   const { t } = useI18n();
   const progress = useMyProgress();
   if (error) return <p role="alert" style={{ color: "#b42318" }}>{error}</p>;
@@ -161,12 +165,7 @@ const LessonGrid: React.FC<{ lessons: PublicLesson[] | null; error: string | nul
   if (!lessons.length) return <div className="ps-card ps-empty">{t("selfLearning.empty")}</div>;
   return (
     <div className="ps-grid">
-      {lessons.map(lesson => onOpen ? (
-        <button key={lesson.slug} type="button" className="ps-card ps-article-card" onClick={() => onOpen(lesson)}
-          style={{ font: "inherit", textAlign: "left", cursor: "pointer", padding: 0, color: "var(--ps-ink)" }}>
-          <LessonCardBody lesson={lesson} progress={progress[lesson.slug]} />
-        </button>
-      ) : (
+      {lessons.map(lesson => (
         <Link key={lesson.slug} to={`/self-learning/${lesson.slug}`} className="ps-card ps-article-card"><LessonCardBody lesson={lesson} progress={progress[lesson.slug]} /></Link>
       ))}
     </div>
@@ -225,38 +224,5 @@ export const SelfLearningLessonPage: React.FC<{ slug: string }> = ({ slug }) => 
         )}
       </div>
     </>
-  );
-};
-
-/** Console tab for learners: the same lessons, opened inside the console. */
-export const SelfLearningLibrary: React.FC = () => {
-  const { t, lang } = useI18n();
-  const { lessons, error } = useLessons();
-  const [open, setOpen] = useState<PublicLesson | null>(null);
-  const [detail, setDetail] = useState<PublicLesson | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  useEffect(() => {
-    setDetail(null);
-    setDetailError(null);
-    if (open) publicGet<{ lesson: PublicLesson }>(`/self-learning/${encodeURIComponent(open.slug)}`).then(d => setDetail(d.lesson)).catch(err => setDetailError(err.message));
-  }, [open?.slug]);
-  // A single lesson opens straight away, as the tab did before there were several.
-  useEffect(() => { if (lessons?.length === 1) setOpen(lessons[0]); }, [lessons]);
-
-  return (
-    <div className="ps" style={{ background: "transparent" }}>
-      {open ? (
-        <>
-          {lessons && lessons.length > 1 && (
-            <button type="button" className="ps-btn ps-btn-ghost" onClick={() => setOpen(null)} style={{ marginBottom: 12 }}>
-              <span style={{ display: "inline-flex", transform: "scaleX(-1)" }}><ArrowIcon size={16} /></span> {t("selfLearning.all")}
-            </button>
-          )}
-          {detailError && <p role="alert" style={{ color: "#b42318" }}>{detailError}</p>}
-          {detail?.content_url && <LessonFrame key={detail.content_url} src={detail.content_url} title={localized(lang, detail.title, detail.title_en)} slug={detail.slug}
-            shareUrl={`${window.location.origin}/self-learning/${detail.slug}`} />}
-        </>
-      ) : <LessonGrid lessons={lessons} error={error} onOpen={setOpen} />}
-    </div>
   );
 };
