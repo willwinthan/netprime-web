@@ -5,6 +5,7 @@ import { ErrorBox, Empty, Field, grid2, formatDateTime } from "./ui";
 import type { HomeContent } from "../../site/HomePage";
 import { Markdown, parseMarkdown } from "../../site/Markdown";
 import { previewCardProps, useBuilderPreview, usePreviewSync } from "../builder/SitePreview";
+import { DraftBar } from "../builder/DraftBar";
 
 type Api = ReturnType<typeof useApi>;
 type Section = "home" | "privacy" | "terms" | "refund-policy";
@@ -62,6 +63,7 @@ const BLANK: { [K in ListKey]: HomeContent[K][number] } = {
 
 const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
   const [form, setForm] = useState<HomeContent | null>(null);
+  const [published, setPublished] = useState<HomeContent | null>(null);
   const [defaults, setDefaults] = useState<HomeContent | null>(null);
   const [icons, setIcons] = useState<string[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -73,7 +75,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
 
   useEffect(() => {
     api.get<{ home: HomeContent; defaults: HomeContent; icons: string[]; updated_at: string | null }>("/admin/site/home")
-      .then(d => { setForm(d.home); setDefaults(d.defaults); setIcons(d.icons); setUpdatedAt(d.updated_at); })
+      .then(d => { setForm(d.home); setPublished(d.home); setDefaults(d.defaults); setIcons(d.icons); setUpdatedAt(d.updated_at); })
       .catch(err => setError(err.message));
   }, [api.token]);
 
@@ -112,13 +114,14 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
       setError(null);
       const data = await api.request<{ home: HomeContent }>("/admin/site/home", { method: "PUT", body: JSON.stringify(form) });
       setForm(data.home);
+      setPublished(data.home);
       setUpdatedAt(new Date().toISOString());
       setSaved(true);
     } catch (err: any) { setError(err.message); } finally { setSaving(false); }
   };
 
   const restoreDefaults = () => {
-    if (defaults && confirm("แทนที่เนื้อหาหน้าแรกทั้งหมดด้วยเนื้อหาเริ่มต้นของระบบ? (ยังไม่บันทึกจนกว่าจะกดบันทึก)")) change(defaults);
+    if (defaults && confirm("แทนที่เนื้อหาหน้าแรกทั้งหมดด้วยเนื้อหาเริ่มต้นของระบบ? (ยังไม่เผยแพร่จนกว่าจะกดเผยแพร่)")) change(defaults);
   };
 
   const ItemTools: React.FC<{ list: ListKey; index: number }> = ({ list, index }) => (
@@ -137,6 +140,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
   return (
     <form onSubmit={save} className="site-form" style={{ display: "grid", gap: "20px" }}>
       <ErrorBox message={error} />
+      <DraftBar draftKey="home" value={form} published={published} onLoad={change} />
       <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "hero")}>
         <h3 style={{ fontSize: "16px", marginBottom: "14px" }}>ส่วนหัวของหน้าแรก</h3>
         <div style={grid2}>
@@ -202,13 +206,13 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
         <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-          {updatedAt ? `บันทึกล่าสุด ${formatDateTime(updatedAt)}` : "ยังใช้เนื้อหาเริ่มต้นของระบบ"}
+          {updatedAt ? `เผยแพร่ล่าสุด ${formatDateTime(updatedAt)}` : "ยังใช้เนื้อหาเริ่มต้นของระบบ"}
         </span>
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-          {saved && <span style={{ color: "var(--accent)", fontSize: "14px" }}>บันทึกแล้ว · หน้าเว็บจะอัปเดตภายใน 1 นาที</span>}
+          {saved && <span style={{ color: "var(--accent)", fontSize: "14px" }}>เผยแพร่แล้ว · หน้าเว็บจะอัปเดตภายใน 1 นาที</span>}
           <button type="button" className="tech-button-outline" onClick={restoreDefaults}><RotateCcw size={16} />ใช้เนื้อหาเริ่มต้น</button>
           <a href="/" target="_blank" rel="noreferrer" className="tech-button-outline"><ExternalLink size={16} />ดูหน้าแรก</a>
-          <button type="submit" className="tech-button-primary" disabled={saving}><Save size={16} />{saving ? "กำลังบันทึก…" : "บันทึกหน้าแรก"}</button>
+          <button type="submit" className="tech-button-primary" disabled={saving}><Save size={16} />{saving ? "กำลังเผยแพร่…" : "เผยแพร่หน้าแรก"}</button>
         </div>
       </div>
     </form>

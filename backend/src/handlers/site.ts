@@ -9,6 +9,7 @@ import { createNotification } from "./notifications";
 import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
 import { checkSlip, loadBankTransfer, putSlip, serveSlip } from "./orders";
 import { IMAGE_TYPES, saveSiteImage, siteImageUrl } from "../utils/images";
+import { recordPublished } from "../utils/siteVersions";
 
 /**
  * Website content managed by coordinators (admin role):
@@ -1705,7 +1706,7 @@ function parseList(raw: unknown, label: string, max: number, spec: Record<string
   return { items };
 }
 
-function parseHome(body: Record<string, any> | null): { home?: HomeContent; error?: string } {
+export function parseHome(body: Record<string, any> | null): { home?: HomeContent; error?: string } {
   const hero = parseFields(body?.hero, {
     eyebrow: { kind: "text", label: "ข้อความเหนือหัวข้อ", max: 60 },
     title: { kind: "text", label: "หัวข้อหลัก", max: 120, required: true },
@@ -1747,7 +1748,9 @@ adminSiteRouter.get("/home", async (c) => {
 adminSiteRouter.put("/home", async (c) => {
   const { home, error } = parseHome(await c.req.json<Record<string, any>>().catch(() => null));
   if (error || !home) return c.json({ error: error || "ข้อมูลไม่ถูกต้อง" }, 400);
+  const before = { value: await loadHome(c.env.DB), updated_at: (await loadJsonSetting(c.env.DB, "home")).updated_at };
   await saveJsonSetting(c, "home", home);
+  await recordPublished(c, "home", home, before);
   await audit(c, "update", "settings", "home");
   return c.json({ home });
 });

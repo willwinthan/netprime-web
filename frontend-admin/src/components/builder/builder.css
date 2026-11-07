@@ -105,3 +105,10 @@
 }
 .np-wb-offer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 8px 12px; border-radius: 10px; background: var(--primary-glow); color: var(--text-primary); }
 .np-wb-offer .tech-button-outline { padding: 4px 12px; font-size: 13px; }
+/* Draft / publish / history bar (DraftBar.tsx) */
+.np-draftbar { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: #fff; }
+.np-draftbar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.np-draftbar-row .tech-button-outline { padding: 6px 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.np-draftbar-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+.np-draftbar-status.is-pending { color: #9a5b00; font-weight: 600; }
+.np-draftbar-notice { font-size: 13px; color: var(--accent); }

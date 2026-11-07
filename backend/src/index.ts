@@ -29,6 +29,7 @@ import { publicApiRouter } from "./handlers/publicapi";
 import { securityRouter } from "./handlers/security";
 import { selfLearningRouter } from "./handlers/selfLearning";
 import { emailAdminRouter } from "./handlers/emailAdmin";
+import { siteDraftsRouter } from "./handlers/siteDrafts";
 import { Env } from "./middleware/rbac";
 import { allowedOrigins } from "./utils/origins";
 import { runScheduledJobs } from "./jobs";
@@ -90,6 +91,7 @@ app.route("/api", marketingRouter);
 app.route("/api", websiteRouter);
 app.route("/api", selfLearningRouter);
 app.route("/api", emailAdminRouter);
+app.route("/api", siteDraftsRouter);
 app.route("/api", analyticsRouter);
 app.route("/api", commerceRouter);
 

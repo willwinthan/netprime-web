@@ -6,6 +6,7 @@ import { ListEditor, Notice, TextInput } from "./adminKit";
 import { isSafeLink } from "./blocks";
 import { NavItem, refreshSiteNav } from "./siteChrome";
 import { previewCardProps, useBuilderPreview, usePreviewSync } from "./SitePreview";
+import { DraftBar } from "./DraftBar";
 
 interface Nav { header: NavItem[]; footer: NavItem[] }
 
@@ -18,6 +19,7 @@ const blank = (): NavItem => ({ label: "", label_en: null, href: "/", new_tab: f
 export const NavPanel: React.FC = () => {
   const api = useApi();
   const [nav, setNav] = useState<Nav | null>(null);
+  const [published, setPublished] = useState<Nav | null>(null);
   const preview = useBuilderPreview();
   usePreviewSync("nav", nav);
   const [defaults, setDefaults] = useState<Nav | null>(null);
@@ -26,7 +28,7 @@ export const NavPanel: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get<{ nav: Nav; defaults: Nav }>("/website/nav").then(d => { setNav(d.nav); setDefaults(d.defaults); }).catch(err => setError(err.message));
+    api.get<{ nav: Nav; defaults: Nav }>("/website/nav").then(d => { setNav(d.nav); setPublished(d.nav); setDefaults(d.defaults); }).catch(err => setError(err.message));
   }, [api.token]);
 
   const save = async () => {
@@ -37,8 +39,9 @@ export const NavPanel: React.FC = () => {
     try {
       const d = await api.request<{ nav: Nav }>("/website/nav", { method: "PUT", body: JSON.stringify(nav) });
       setNav(d.nav);
+      setPublished(d.nav);
       refreshSiteNav();
-      setNotice("บันทึกเมนูแล้ว หน้าเว็บอัปเดตภายใน 2 นาที");
+      setNotice("เผยแพร่เมนูแล้ว หน้าเว็บอัปเดตภายใน 2 นาที");
     } catch (err: any) { setError(err.message); } finally { setSaving(false); }
   };
 
@@ -64,10 +67,11 @@ export const NavPanel: React.FC = () => {
     <div style={{ display: "grid", gap: 16, maxWidth: 900 }}>
       <ErrorBox message={error} />
       {notice && <Notice>{notice}</Notice>}
+      <DraftBar draftKey="nav" value={nav} published={published} onLoad={setNav} />
       {editor("header", "เมนูส่วนหัว (สูงสุด 8)", 8)}
       {editor("footer", "ลิงก์เพิ่มเติมในส่วนท้าย (สูงสุด 16)", 16)}
       <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" className="tech-button-primary" onClick={save} disabled={saving}><Save size={16} />{saving ? "กำลังบันทึก…" : "บันทึกเมนู"}</button>
+        <button type="button" className="tech-button-primary" onClick={save} disabled={saving}><Save size={16} />{saving ? "กำลังเผยแพร่…" : "เผยแพร่เมนู"}</button>
         {defaults && <button type="button" className="tech-button-outline" onClick={() => setNav(defaults)}><RotateCcw size={16} />ใช้เมนูเริ่มต้น</button>}
       </div>
     </div>
