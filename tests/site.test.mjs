@@ -333,7 +333,7 @@ test('confirming a registrant of a round with a course opens an account and the 
   assert.equal(manual.registrations.find(r => r.email === 'site-quiet-manual@example.invalid').account_id, null);
 });
 
-test('instructors schedule their own courses as drafts and see limited registrant details', async () => {
+test('instructors schedule rounds as drafts and see limited registrant details', async () => {
   const instructor = await login('instructor@netprime.com', 'inst123');
   const base = '/api/instructor/sessions';
   await expectStatus(base, 401);
@@ -362,8 +362,17 @@ test('instructors schedule their own courses as drafts and see limited registran
   const edited = await expectStatus(`${base}/${session.id}`, 200, { method: 'PATCH', token: instructor.token, body: { capacity: 8, status: 'open' } });
   assert.equal(edited.session.capacity, 8);
   assert.equal(edited.session.status, 'draft');
-  const cleared = await expectStatus(`${base}/${session.id}`, 400, { method: 'PATCH', token: instructor.token, body: { course_id: '' } });
-  assert.match(cleared.error, /กรุณาเลือกคอร์ส/);
+  // A classroom-only round needs no online course, and a draft can drop its course link.
+  const { course_id: _course, ...classroomOnly } = round;
+  const live = await expectStatus(base, 201, { method: 'POST', token: instructor.token, body: { ...classroomOnly, title: 'คลาสสดไม่มีคอร์สออนไลน์' } });
+  assert.equal(live.session.course_id, null);
+  assert.equal(live.session.status, 'draft');
+  const linked = await expectStatus(`${base}/${live.session.id}`, 200, { method: 'PATCH', token: instructor.token, body: { course_id: courses[0].id } });
+  assert.equal(linked.session.course_id, courses[0].id);
+  const cleared = await expectStatus(`${base}/${live.session.id}`, 200, { method: 'PATCH', token: instructor.token, body: { course_id: '' } });
+  assert.equal(cleared.session.course_id, null);
+  await expectStatus(`${base}/${live.session.id}`, 403, { method: 'PATCH', token: instructor.token, body: { course_id: foreign.id ?? foreign.course.id } });
+  await expectStatus(`${base}/${live.session.id}`, 200, { method: 'DELETE', token: instructor.token });
 
   // Staff open it; from then on changes go through staff.
   await expectStatus(`/api/admin/site/sessions/${session.id}`, 200, { method: 'PATCH', token: admin.token, body: { status: 'open' } });

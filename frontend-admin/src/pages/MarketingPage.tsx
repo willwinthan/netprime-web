@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { BarChart3, Users, FileText, Inbox, Star, Ticket, Radar, ExternalLink } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
+import { FEATURES } from "../features";
 import { LeadFormsPanel, LeadsPanel, TrackingPanel } from "../components/marketing/LeadPanels";
 import { AffiliatesAdminPanel, CampaignsPanel, MarketingAnalyticsPanel, ReviewsModerationPanel } from "../components/marketing/GrowthPanels";
 
@@ -22,7 +23,7 @@ export const MarketingPage: React.FC = () => {
     return <div className="glass-card" style={{ padding: 40, textAlign: "center" }}><h2>บัญชีของคุณไม่มีสิทธิ์จัดการการตลาด</h2></div>;
   }
 
-  const tabs: Array<[Tab, string, React.ReactNode]> = [
+  const allTabs: Array<[Tab, string, React.ReactNode]> = [
     ["overview", "ภาพรวม & แหล่งที่มา", <BarChart3 size={16} />],
     ["affiliates", "Affiliate / แนะนำเพื่อน", <Users size={16} />],
     ["forms", "ฟอร์ม & Popup", <FileText size={16} />],
@@ -31,13 +32,15 @@ export const MarketingPage: React.FC = () => {
     ["campaigns", "แคมเปญคูปอง", <Ticket size={16} />],
     ["tracking", "Tracking & Pixel", <Radar size={16} />]
   ];
+  // The referral programme is out of the MVP (features.ts), so its tab is hidden with the learner menu.
+  const tabs = allTabs.filter(([key]) => key !== "affiliates" || FEATURES.affiliate);
 
   return (
     <div>
       <div className="header-row">
         <div>
           <h1 className="header-title">การตลาด</h1>
-          <p className="header-desc">ติดตามแหล่งที่มาของผู้สมัคร จัดการโปรแกรมแนะนำเพื่อน ฟอร์มเก็บ lead รีวิว และโค้ดส่วนลด</p>
+          <p className="header-desc">{FEATURES.affiliate ? "ติดตามแหล่งที่มาของผู้สมัคร จัดการโปรแกรมแนะนำเพื่อน ฟอร์มเก็บ lead รีวิว และโค้ดส่วนลด" : "ติดตามแหล่งที่มาของผู้สมัคร ฟอร์มเก็บ lead รีวิว และโค้ดส่วนลด"}</p>
         </div>
         <a href="/courses" target="_blank" rel="noreferrer" className="tech-button-outline"><ExternalLink size={16} />ดูหน้าคอร์สบนเว็บ</a>
       </div>
@@ -50,7 +53,7 @@ export const MarketingPage: React.FC = () => {
         ))}
       </nav>
       {tab === "overview" && <MarketingAnalyticsPanel />}
-      {tab === "affiliates" && <AffiliatesAdminPanel />}
+      {tab === "affiliates" && FEATURES.affiliate && <AffiliatesAdminPanel />}
       {tab === "forms" && <LeadFormsPanel onShowLeads={id => { setLeadForm(id); setTab("leads"); }} />}
       {tab === "leads" && <LeadsPanel formId={leadForm} />}
       {tab === "reviews" && <ReviewsModerationPanel />}
