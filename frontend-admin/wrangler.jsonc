@@ -15,6 +15,9 @@
     // Set per environment to the same value as VITE_API_BASE_URL (ends with /api).
     "API_BASE_URL": ""
   },
+  // The backend Worker, for share tags and the sitemap: Workers of one account cannot fetch each other
+  // through *.workers.dev, so the worker calls the API through this binding. Deploy the backend first.
+  "services": [{ "binding": "API", "service": "netprime-backend" }],
   // staging = Worker "netprime-frontend-staging": pnpm run deploy:frontend:staging (build ด้วย .env.staging)
   // vars ไม่สืบทอดข้าม env จึงต้องระบุใหม่; main และ assets สืบทอดจากด้านบน
   "env": {
@@ -23,7 +26,8 @@
       "account_id": "1c8ecd3a5d86428f39ea25f183f66137",
       "vars": {
         "API_BASE_URL": "https://netprime-backend-staging.nfr-apjc-th-cloudthing.workers.dev/api"
-      }
+      },
+      "services": [{ "binding": "API", "service": "netprime-backend-staging" }]
     }
   }
 }

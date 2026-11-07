@@ -241,6 +241,8 @@ Worker ของเว็บ (`frontend-admin/worker/index.ts`) ใส่ tag �
 
 ผูก custom domain: Cloudflare Dashboard → Workers & Pages → `netprime-frontend` → Settings → Domains & Routes → Add Custom Domain หรือเพิ่ม `routes` ใน `frontend-admin/wrangler.jsonc` แบบเดียวกับ backend จากนั้นต้องมี origin นี้ใน `FRONTEND_ORIGINS` ของ backend ไม่งั้น browser จะถูก CORS บล็อก
 
+Worker ของ frontend เรียก API ผ่าน service binding `API` (ตั้งไว้ใน `services` ของ `frontend-admin/wrangler.jsonc`) เพราะ Worker ในบัญชีเดียวกันเรียกกันผ่าน `*.workers.dev` ไม่ได้ (Cloudflare ตอบ 404 ทำให้ share tag และ sitemap ของบทความ คอร์ส และบทเรียนว่าง) ถ้าเปลี่ยนชื่อ Worker ของ backend ต้องแก้ชื่อใน `services` ด้วย และต้อง deploy backend ก่อน frontend
+
 ## 8. เชื่อมบริการภายนอก
 
 | บริการ | ตั้งค่าที่ผู้ให้บริการ |

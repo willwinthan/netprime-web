@@ -31,6 +31,10 @@ const STATUS = {
 };
 const LEVELS: Array<[Level, string]> = [["", "ไม่ระบุ"], ["beginner", "พื้นฐาน"], ["intermediate", "กลาง"], ["advanced", "สูง"]];
 
+// The assets layer serves public/*.html without the extension (it redirects the .html URL), so link
+// to the final path and give the download its .html name.
+const TEMPLATE_PATH = "/lesson-kit/netprime-lesson-template";
+
 const fileSize = (bytes: number | null) => bytes === null ? "—" : bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 export const SelfLearningAdminPage: React.FC = () => {
@@ -69,7 +73,7 @@ export const SelfLearningAdminPage: React.FC = () => {
           <p className="header-desc">อัปโหลดบทเรียนเป็นไฟล์ .html ไฟล์เดียว บทเรียนที่เผยแพร่แล้วจะแสดงที่เมนู Self-learning ของหน้าเว็บ (/self-learning)</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a href="/lesson-kit/netprime-lesson-template.html" download className="tech-button-outline"
+          <a href={TEMPLATE_PATH} download="netprime-lesson-template.html" className="tech-button-outline"
             title="ไฟล์ตัวอย่างที่มี Lesson Kit: สีตามธีมเว็บ ความสูงพอดีกรอบ และเก็บความคืบหน้าของผู้เรียน"><Download size={16} />ไฟล์ต้นแบบ</a>
           <a href="/self-learning" target="_blank" rel="noreferrer" className="tech-button-outline"><ExternalLink size={16} />เปิดหน้าเว็บ</a>
           <button type="button" className="tech-button-primary" onClick={() => setCreating(true)}><FilePlus2 size={16} />เพิ่มบทเรียน</button>
@@ -227,7 +231,7 @@ const LessonEditor: React.FC<{ api: Api; lessonId: string; onClose: () => void }
               <h3 style={{ margin: 0, fontSize: 15 }}>ไฟล์บทเรียน</h3>
               <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
                 ไฟล์ .html ไฟล์เดียว ไม่เกิน 15 MB ใส่ CSS, JavaScript, ฟอนต์และรูปไว้ในไฟล์ (หรือโหลดจากเว็บภายนอก) อัปโหลดใหม่ได้ทุกเมื่อ ลิงก์เดิมไม่เปลี่ยน และย้อนกลับไปเวอร์ชันเก่าได้
-                เริ่มจาก <a href="/lesson-kit/netprime-lesson-template.html" download>ไฟล์ต้นแบบ</a> เพื่อให้สีเปลี่ยนตามธีมของเว็บและเก็บความคืบหน้าของผู้เรียนที่ login ได้
+                เริ่มจาก <a href={TEMPLATE_PATH} download="netprime-lesson-template.html">ไฟล์ต้นแบบ</a> เพื่อให้สีเปลี่ยนตามธีมของเว็บและเก็บความคืบหน้าของผู้เรียนที่ login ได้
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <input ref={fileInput} type="file" accept=".html,.htm,text/html" style={{ display: "none" }} onChange={e => upload(e.target.files?.[0])} />
