@@ -36,11 +36,6 @@ import {
 } from "lucide-react";
 import { useDangerousDelete } from "../components/security/DangerConfirmDialog";
 
-/** Workers reject request bodies above 100 MB; bigger videos upload straight to Cloudflare Stream. */
-const WORKER_UPLOAD_LIMIT = 100 * 1024 * 1024;
-/** tus chunk size for Stream uploads (multiple of 256 KiB, at least 5 MB). */
-const STREAM_CHUNK = 50 * 1024 * 1024;
-
 interface RecentActivity {
   name: string;
   email: string;
@@ -64,29 +59,6 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 /**
- * Accepts a pasted YouTube / Vimeo link (or a bare ID) for the video field and returns the ID the API
- * stores plus the provider the link belongs to, so instructors never have to find a video ID themselves.
- */
-export function parseVideoLink(input: string): { id: string; provider?: "youtube" | "vimeo" } {
-  const value = input.trim();
-  let url: URL;
-  try { url = new URL(value); } catch { return { id: value }; }
-  const host = url.hostname.replace(/^(www|m)\./, "");
-  if (host === "youtu.be") return { id: url.pathname.slice(1).split("/")[0], provider: "youtube" };
-  if (host === "youtube.com" || host === "youtube-nocookie.com") {
-    const v = url.searchParams.get("v");
-    if (v) return { id: v, provider: "youtube" };
-    const m = url.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]+)/);
-    if (m) return { id: m[1], provider: "youtube" };
-  }
-  if (host === "vimeo.com" || host === "player.vimeo.com") {
-    const m = url.pathname.match(/(\d{6,})/);
-    if (m) return { id: m[1], provider: "vimeo" };
-  }
-  return { id: value };
-}
-
-/**
  * Pages of the console besides the course list and a course's workspace. The open page is kept in the
  * URL (?view=...) next to the course (?course=<id>&tab=<tab>), so Back and refresh behave.
  * "dashboard" and "curriculum" both mean "no page open": the list, or the open course's workspace.
@@ -95,15 +67,12 @@ type ConsoleView =
   | "dashboard"
   | "curriculum"
   | "create-course"
-  | "create-lesson"
-  | "edit-lesson"
-  | "quizzes"
   | "vouchers"
   | "groups"
   | "telemetry"
   | "qa";
 
-const PAGE_VIEWS: ConsoleView[] = ["create-course", "create-lesson", "edit-lesson", "quizzes", "vouchers", "groups", "telemetry", "qa"];
+const PAGE_VIEWS: ConsoleView[] = ["create-course", "vouchers", "groups", "telemetry", "qa"];
 
 export const InstructorConsole: React.FC = () => {
   const api = useApi();
@@ -151,38 +120,12 @@ export const InstructorConsole: React.FC = () => {
   const [courseDesc, setCourseDesc] = useState("");
   const [courseThumb, setCourseThumb] = useState("");
 
-  // Add Lesson state
-  const [lessonCourseId, setLessonCourseId] = useState("");
-  const [lessonTitle, setLessonTitle] = useState("");
-  const [lessonStreamUid, setLessonStreamUid] = useState("");
-  const [lessonSortOrder, setLessonSortOrder] = useState(1);
-  // Chapter picked in the course builder for a new video lesson (null = outside chapters).
-  const [lessonSectionId, setLessonSectionId] = useState<string | null>(null);
-  const [lessonProvider, setLessonProvider] = useState("cloudflare");
-  const [lessonHandoutKey, setLessonHandoutKey] = useState("");
-
   // Course CRUD state
 
   // Curriculum State
   const [selectedCourseForCurriculum, setSelectedCourseForCurriculum] = useState<InstructorCourse | null>(null);
   const [curriculumLessons, setCurriculumLessons] = useState<any[]>([]);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
-
-  // Lesson CRUD/Edit state
-  const [editingLesson, setEditingLesson] = useState<any | null>(null);
-  const [editLessonTitle, setEditLessonTitle] = useState("");
-  const [editLessonStreamUid, setEditLessonStreamUid] = useState("");
-  const [editLessonProvider, setEditLessonProvider] = useState("cloudflare");
-  const [editLessonHandoutKey, setEditLessonHandoutKey] = useState("");
-  const [editLessonSortOrder, setEditLessonSortOrder] = useState(1);
-
-  // Quiz Management State
-  const [selectedLessonForQuizzes, setSelectedLessonForQuizzes] = useState<any | null>(null);
-  const [lessonQuizzes, setLessonQuizzes] = useState<any[]>([]);
-  const [quizzesLoading, setQuizzesLoading] = useState(false);
-  const [newQuizQuestion, setNewQuizQuestion] = useState("");
-  const [newQuizOptions, setNewQuizOptions] = useState(["", "", "", ""]);
-  const [newQuizCorrectIndex, setNewQuizCorrectIndex] = useState(0);
 
   // Extended course metadata
   const [coursePrice, setCoursePrice] = useState<number>(0);
@@ -209,11 +152,7 @@ export const InstructorConsole: React.FC = () => {
   const [groupMemberSearchUserId, setGroupMemberSearchUserId] = useState<string>("");
   const [allStudents, setAllStudents] = useState<any[]>([]);
 
-  // Uploader states
-  const [uploadingHandout, setUploadingHandout] = useState(false);
-  const [uploadingVideo, setUploadingVideo] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
 
   // Telemetry & Audit states
   const [quizFailures, setQuizFailures] = useState<any[]>([]);
@@ -229,54 +168,6 @@ export const InstructorConsole: React.FC = () => {
 
   // File upload helper: files up to 100 MB stream through the Worker into R2 (server-issued key);
   // larger videos go directly to Cloudflare Stream with tus and return the Stream video UID.
-  const uploadFile = async (file: File, type: "handout" | "video"): Promise<string> => {
-    if (type === "video" && file.size > WORKER_UPLOAD_LIMIT) return uploadToStream(file);
-
-    // 1. Reserve the upload; the server picks the key and remembers type and size
-    const presignRes = await api.post<{ key: string; uploadUrl: string; contentType: string }>("/instructor/upload/presign", {
-      filename: file.name,
-      type,
-      size: file.size,
-      mimeType: file.type
-    });
-
-    // 2. Upload the raw binary file stream directly to R2 target
-    await api.request<any>(presignRes.uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Type": presignRes.contentType
-      },
-      body: file
-    });
-
-    return presignRes.key;
-  };
-
-  const uploadToStream = async (file: File): Promise<string> => {
-    const { uploadURL, uid } = await api.post<{ uploadURL: string; uid: string }>("/instructor/stream/direct-upload", {
-      size: file.size,
-      filename: file.name
-    });
-    let offset = 0;
-    setUploadProgress(0);
-    try {
-      while (offset < file.size) {
-        const chunk = file.slice(offset, offset + STREAM_CHUNK);
-        const res = await fetch(uploadURL, {
-          method: "PATCH",
-          headers: { "Tus-Resumable": "1.0.0", "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream" },
-          body: chunk
-        });
-        if (!res.ok) throw new Error(`Cloudflare Stream ตอบกลับ ${res.status}`);
-        offset = Number(res.headers.get("Upload-Offset")) || offset + chunk.size;
-        setUploadProgress(Math.round((offset / file.size) * 100));
-      }
-    } finally {
-      setUploadProgress(null);
-    }
-    return uid;
-  };
-
   const handleSubmitForReview = async (course: InstructorCourse) => {
     if (!window.confirm(`ส่งคอร์ส "${course.title}" ให้ผู้ตรวจ? ระหว่างรอตรวจยังแก้ไขเนื้อหาได้`)) return;
     try {
@@ -363,11 +254,7 @@ export const InstructorConsole: React.FC = () => {
       setError(null);
       const res = await api.get<InstructorAnalytics>("/instructor/analytics");
       setData(res);
-      
-      // Select first course by default in the dropdown if courses exist
-      if (res.courses.length > 0 && !lessonCourseId) {
-        setLessonCourseId(res.courses[0].id);
-      }
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || "โหลดคอนโซลผู้สอนไม่สำเร็จ");
@@ -423,16 +310,7 @@ export const InstructorConsole: React.FC = () => {
     if (selectedCourseForCurriculum?.id !== openCourseData.id) loadCurriculum(openCourseData.id);
   }, [courseParam, data]);
 
-  // Pages that hold unsaved form state cannot be restored after a refresh; fall back to the course.
-  const pageReady = (v: ConsoleView) =>
-    v === "create-lesson" ? !!lessonCourseId && !!openCourseData
-    : v === "edit-lesson" ? !!editingLesson
-    : v === "quizzes" ? !!selectedLessonForQuizzes
-    : true;
-  const view: ConsoleView = pageReady(requestedView) ? requestedView : "dashboard";
-  useEffect(() => {
-    if (requestedView !== view) setView("dashboard");
-  }, [requestedView, view]);
+  const view: ConsoleView = requestedView;
   // List pages load their data when opened, including after a refresh.
   useEffect(() => {
     if (view === "vouchers") fetchVouchers();
@@ -476,52 +354,6 @@ export const InstructorConsole: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       setModalError(err.message || "บันทึกคอร์สใหม่ไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleAddLesson = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!lessonCourseId || !lessonTitle || !lessonStreamUid) {
-      setModalError("กรุณากรอกข้อมูลบทเรียนให้ครบทุกช่อง");
-      return;
-    }
-
-    try {
-      setActionLoading(true);
-      setModalError(null);
-
-      const created = await api.post<{ lesson: { id: string } }>("/instructor/lessons", {
-        course_id: lessonCourseId,
-        title: lessonTitle,
-        // A link pasted and saved without leaving the field is still turned into an ID here.
-        video_stream_uid: parseVideoLink(lessonStreamUid).id,
-        video_provider: parseVideoLink(lessonStreamUid).provider ?? lessonProvider,
-        handout_r2_key: lessonHandoutKey || undefined,
-        sort_order: Number(lessonSortOrder)
-      });
-      // The video endpoint has no chapter field; move the new lesson into the chapter it was added from.
-      if (lessonSectionId && created?.lesson?.id) {
-        await api.request(`/instructor/lessons/${created.lesson.id}/settings`, { method: "PATCH", body: JSON.stringify({ section_id: lessonSectionId }) })
-          .catch(() => undefined);
-      }
-
-      // Reset fields and return to curriculum page
-      setLessonTitle("");
-      setLessonStreamUid("");
-      setLessonSortOrder(1);
-      setLessonProvider("cloudflare");
-      setLessonHandoutKey("");
-      setView("curriculum");
-
-      await fetchAnalytics();
-      if (selectedCourseForCurriculum) {
-        await loadCurriculum(selectedCourseForCurriculum.id);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setModalError(err.message || "บันทึกบทเรียนใหม่ไม่สำเร็จ");
     } finally {
       setActionLoading(false);
     }
@@ -582,130 +414,6 @@ export const InstructorConsole: React.FC = () => {
       setActionLoading(false);
     }
   };
-
-  const handleEditLessonClick = (lesson: any) => {
-    setEditingLesson(lesson);
-    setEditLessonTitle(lesson.title);
-    setEditLessonStreamUid(lesson.video_stream_uid || "");
-    setEditLessonProvider(lesson.video_provider || "cloudflare");
-    setEditLessonHandoutKey(lesson.handout_r2_key || "");
-    setEditLessonSortOrder(lesson.sort_order || 1);
-    setModalError(null);
-    setView("edit-lesson");
-  };
-
-  const handleUpdateLesson = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingLesson) return;
-    if (!editLessonTitle || !editLessonStreamUid) {
-      setModalError("กรุณากรอกชื่อบทเรียนและเลือกวิดีโอ");
-      return;
-    }
-    try {
-      setActionLoading(true);
-      setModalError(null);
-      await api.patch(`/instructor/lessons/${editingLesson.id}`, {
-        title: editLessonTitle,
-        // A link pasted and saved without leaving the field is still turned into an ID here.
-        video_stream_uid: parseVideoLink(editLessonStreamUid).id,
-        video_provider: parseVideoLink(editLessonStreamUid).provider ?? editLessonProvider,
-        handout_r2_key: editLessonHandoutKey || null,
-        sort_order: Number(editLessonSortOrder)
-      });
-      setEditingLesson(null);
-      setView("curriculum");
-      if (selectedCourseForCurriculum) {
-        await loadCurriculum(selectedCourseForCurriculum.id);
-      }
-      await fetchAnalytics();
-    } catch (err: any) {
-      console.error(err);
-      setModalError(err.message || "อัปเดตบทเรียนไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Quiz Operations
-  const loadQuizzes = async (lessonId: string) => {
-    try {
-      setQuizzesLoading(true);
-      const res = await api.get<any[]>(`/instructor/lessons/${lessonId}/quizzes`);
-      setLessonQuizzes(res);
-    } catch (err: any) {
-      console.error(err);
-      alert("โหลดแบบทดสอบของบทเรียนไม่สำเร็จ");
-    } finally {
-      setQuizzesLoading(false);
-    }
-  };
-
-  const handleManageQuizzesClick = async (lesson: any) => {
-    setSelectedLessonForQuizzes(lesson);
-    setNewQuizQuestion("");
-    setNewQuizOptions(["", "", "", ""]);
-    setNewQuizCorrectIndex(0);
-    setView("quizzes");
-    await loadQuizzes(lesson.id);
-  };
-
-  const handleDeleteQuiz = async (quizId: string) => {
-    if (!window.confirm("คุณแน่ใจหรือไม่ว่าต้องการลบคำถามแบบทดสอบข้อนี้?")) return;
-    try {
-      setActionLoading(true);
-      await api.request(`/instructor/quizzes/${quizId}`, { method: "DELETE" });
-      if (selectedLessonForQuizzes) {
-        await loadQuizzes(selectedLessonForQuizzes.id);
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "ลบคำถามแบบทดสอบไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleAddQuiz = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedLessonForQuizzes) return;
-    if (!newQuizQuestion || newQuizOptions.some(opt => !opt.trim())) {
-      alert("กรุณากรอกคำถามและตัวเลือกทั้งสี่ข้อ");
-      return;
-    }
-    try {
-      setActionLoading(true);
-      await api.post("/instructor/quizzes", {
-        lesson_id: selectedLessonForQuizzes.id,
-        question: newQuizQuestion,
-        options_json: newQuizOptions,
-        correct_option_index: newQuizCorrectIndex
-      });
-      setNewQuizQuestion("");
-      setNewQuizOptions(["", "", "", ""]);
-      setNewQuizCorrectIndex(0);
-      await loadQuizzes(selectedLessonForQuizzes.id);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "เพิ่มคำถามแบบทดสอบไม่สำเร็จ");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  if (!hasRole(api.user, "instructor", "admin")) {
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "40px", textAlign: "center", borderLeft: "4px solid var(--danger)" }}>
-        <h2 style={{ color: "var(--danger)" }}>ต้องมีสิทธิ์ผู้สอน</h2>
-        <p style={{ color: "var(--text-secondary)", marginTop: "8px" }}>
-          คอนโซลนี้สำหรับผู้สอนเท่านั้น กรุณาเข้าสู่ระบบด้วยบัญชีที่ได้รับอนุญาตเพื่อดำเนินการต่อ
-        </p>
-      </div>
-    );
-  }
-
-  // ==========================================
-  // VIEW RENDER HELPER FUNCTIONS (Dedicated Pages)
-  // ==========================================
 
   const renderDashboard = () => {
     const query = courseQuery.trim().toLowerCase();
@@ -1119,19 +827,8 @@ export const InstructorConsole: React.FC = () => {
     );
   };
 
-  /** One course with its tabs; "เนื้อหา" uses the console's video and quiz forms. */
+  /** One course with its tabs (components/instructor/CourseWorkspace.tsx). */
   const renderWorkspace = (course: InstructorCourse) => {
-    const startVideoLesson = (sectionId: string | null) => {
-      setLessonSectionId(sectionId);
-      setLessonCourseId(course.id);
-      setLessonTitle("");
-      setLessonStreamUid("");
-      setLessonSortOrder(curriculumLessons.length + 1);
-      setLessonProvider("cloudflare");
-      setLessonHandoutKey("");
-      setModalError(null);
-      setView("create-lesson");
-    };
     return (
       <>
         {error && (
@@ -1155,472 +852,11 @@ export const InstructorConsole: React.FC = () => {
             <CourseBuilder
               courseId={course.id}
               refreshToken={curriculumLessons}
-              onAddVideoLesson={startVideoLesson}
-              onEditVideoLesson={lesson => handleEditLessonClick(lesson)}
-              onManageQuizzes={lesson => handleManageQuizzesClick(lesson)}
               onDeleteLesson={lessonId => handleDeleteLesson(lessonId)}
             />
           }
         />
       </>
-    );
-  };
-
-  const renderCreateLesson = () => {
-    if (!selectedCourseForCurriculum) return null;
-
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => setView("curriculum")} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปเนื้อหาหลักสูตร
-        </button>
-
-        <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", color: "var(--text-primary)" }}>
-          <Film size={24} color="var(--primary)" />
-          เพิ่มบทเรียน
-        </h3>
-        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "24px" }}>
-          เพิ่มบทเรียนใหม่ในคอร์ส: <strong style={{ color: "var(--text-primary)" }}>{selectedCourseForCurriculum.title}</strong>
-        </p>
-
-        {modalError && (
-          <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--danger)", padding: "12px", borderRadius: "1rem", fontSize: "13px", marginBottom: "20px" }}>
-            <strong>ข้อผิดพลาด:</strong> {modalError}
-          </div>
-        )}
-
-        <form onSubmit={handleAddLesson} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="form-group">
-            <label className="form-label">ชื่อบทเรียน</label>
-            <input
-              type="text"
-              placeholder="เช่น แนะนำ Workers CLI"
-              value={lessonTitle}
-              onChange={(e) => setLessonTitle(e.target.value)}
-              className="form-input"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">วิดีโอมาจาก</label>
-            <select
-              value={lessonProvider}
-              onChange={(e) => setLessonProvider(e.target.value)}
-              className="form-input"
-              style={{ cursor: "pointer", borderRadius: "1rem" }}
-              required
-            >
-              <option value="cloudflare">อัปโหลดไฟล์เข้าระบบ</option>
-              <option value="youtube">YouTube</option>
-              <option value="vimeo">Vimeo</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">วิดีโอ</label>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <input
-                type="text"
-                placeholder="วางลิงก์ YouTube / Vimeo หรือกด &quot;อัปโหลดวิดีโอ&quot;"
-                value={lessonStreamUid}
-                onChange={(e) => setLessonStreamUid(e.target.value)}
-                onBlur={(e) => {
-                  const parsed = parseVideoLink(e.target.value);
-                  setLessonStreamUid(parsed.id);
-                  if (parsed.provider) setLessonProvider(parsed.provider);
-                }}
-                className="form-input"
-                style={{ flexGrow: 1 }}
-                required
-              />
-              <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingVideo ? (uploadProgress !== null ? `กำลังอัปโหลด ${uploadProgress}%` : "กำลังอัปโหลด...") : "อัปโหลดวิดีโอ"}
-                <input
-                  type="file"
-                  accept="video/*"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    try {
-                      setUploadingVideo(true);
-                      setUploadError(null);
-                      const key = await uploadFile(file, "video");
-                      setLessonStreamUid(key);
-                      setLessonProvider("cloudflare");
-                    } catch (err: any) {
-                      setUploadError("อัปโหลดวิดีโอไม่สำเร็จ: " + err.message);
-                    } finally {
-                      setUploadingVideo(false);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">เอกสารประกอบให้ผู้เรียนดาวน์โหลด (ไม่บังคับ)</label>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <input
-                type="text"
-                placeholder="ยังไม่มีไฟล์ กด &quot;อัปโหลดเอกสาร&quot;"
-                value={lessonHandoutKey}
-                onChange={(e) => setLessonHandoutKey(e.target.value)}
-                className="form-input"
-                style={{ flexGrow: 1 }}
-              />
-              <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลดเอกสาร"}
-                <input
-                  type="file"
-                  accept="application/pdf,.zip,.doc,.docx"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    try {
-                      setUploadingHandout(true);
-                      setUploadError(null);
-                      const key = await uploadFile(file, "handout");
-                      setLessonHandoutKey(key);
-                    } catch (err: any) {
-                      setUploadError("อัปโหลดเอกสารไม่สำเร็จ: " + err.message);
-                    } finally {
-                      setUploadingHandout(false);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-            <small style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
-              รองรับ PDF, Word และ ZIP ผู้เรียนดาวน์โหลดได้จากหน้าบทเรียน
-            </small>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setView("curriculum")} className="tech-button-outline" style={{ borderRadius: "1rem" }}>ยกเลิก</button>
-            <button type="submit" disabled={actionLoading} className="tech-button-primary" style={{ borderRadius: "1rem" }}>
-              {actionLoading ? "กำลังบันทึก..." : "เพิ่มบทเรียน"}
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  };
-
-  const renderEditLesson = () => {
-    if (!editingLesson) return null;
-
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => setView("curriculum")} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปเนื้อหาหลักสูตร
-        </button>
-
-        <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", color: "var(--text-primary)" }}>
-          <Edit size={24} color="var(--primary)" />
-          แก้ไขบทเรียน
-        </h3>
-        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "24px" }}>
-          แก้ไขข้อมูลบทเรียนและไฟล์ที่เกี่ยวข้อง
-        </p>
-
-        {modalError && (
-          <div style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "var(--danger)", padding: "12px", borderRadius: "1rem", fontSize: "13px", marginBottom: "20px" }}>
-            <strong>ข้อผิดพลาด:</strong> {modalError}
-          </div>
-        )}
-
-        <form onSubmit={handleUpdateLesson} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="form-group">
-            <label className="form-label">ชื่อบทเรียน</label>
-            <input
-              type="text"
-              value={editLessonTitle}
-              onChange={(e) => setEditLessonTitle(e.target.value)}
-              className="form-input"
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">วิดีโอมาจาก</label>
-            <select
-              value={editLessonProvider}
-              onChange={(e) => setEditLessonProvider(e.target.value)}
-              className="form-input"
-              style={{ cursor: "pointer", borderRadius: "1rem" }}
-              required
-            >
-              <option value="cloudflare">อัปโหลดไฟล์เข้าระบบ</option>
-              <option value="youtube">YouTube</option>
-              <option value="vimeo">Vimeo</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">วิดีโอ</label>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <input
-                type="text"
-                placeholder="วางลิงก์ YouTube / Vimeo หรือกด &quot;อัปโหลดวิดีโอ&quot;"
-                value={editLessonStreamUid}
-                onChange={(e) => setEditLessonStreamUid(e.target.value)}
-                onBlur={(e) => {
-                  const parsed = parseVideoLink(e.target.value);
-                  setEditLessonStreamUid(parsed.id);
-                  if (parsed.provider) setEditLessonProvider(parsed.provider);
-                }}
-                className="form-input"
-                style={{ flexGrow: 1 }}
-                required
-              />
-              <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingVideo ? (uploadProgress !== null ? `กำลังอัปโหลด ${uploadProgress}%` : "กำลังอัปโหลด...") : "อัปโหลดวิดีโอ"}
-                <input
-                  type="file"
-                  accept="video/*"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    try {
-                      setUploadingVideo(true);
-                      setUploadError(null);
-                      const key = await uploadFile(file, "video");
-                      setEditLessonStreamUid(key);
-                      setEditLessonProvider("cloudflare");
-                    } catch (err: any) {
-                      setUploadError("อัปโหลดวิดีโอไม่สำเร็จ: " + err.message);
-                    } finally {
-                      setUploadingVideo(false);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">เอกสารประกอบให้ผู้เรียนดาวน์โหลด (ไม่บังคับ)</label>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <input
-                type="text"
-                placeholder="ยังไม่มีไฟล์ กด &quot;อัปโหลดเอกสาร&quot;"
-                value={editLessonHandoutKey}
-                onChange={(e) => setEditLessonHandoutKey(e.target.value)}
-                className="form-input"
-                style={{ flexGrow: 1 }}
-              />
-              <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลดเอกสาร"}
-                <input
-                  type="file"
-                  accept="application/pdf,.zip,.doc,.docx"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    try {
-                      setUploadingHandout(true);
-                      setUploadError(null);
-                      const key = await uploadFile(file, "handout");
-                      setEditLessonHandoutKey(key);
-                    } catch (err: any) {
-                      setUploadError("อัปโหลดเอกสารไม่สำเร็จ: " + err.message);
-                    } finally {
-                      setUploadingHandout(false);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "12px" }}>
-            <button type="button" onClick={() => setView("curriculum")} className="tech-button-outline" style={{ borderRadius: "1rem" }}>ยกเลิก</button>
-            <button type="submit" disabled={actionLoading} className="tech-button-primary" style={{ borderRadius: "1rem" }}>
-              {actionLoading ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  };
-
-  const renderQuizzes = () => {
-    if (!selectedLessonForQuizzes) return null;
-
-    return (
-      <div className="glass-card animate-fade-in" style={{ padding: "32px", border: "1px solid var(--border-subtle)", borderRadius: "1.5rem" }}>
-        <button 
-          onClick={() => setView("curriculum")} 
-          style={{ display: "flex", alignItems: "center", gap: "8px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "14px", fontWeight: "600", marginBottom: "24px" }}
-        >
-          <ArrowLeft size={16} />
-          กลับไปเนื้อหาหลักสูตร
-        </button>
-
-        <h3 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "8px", color: "var(--text-primary)", marginBottom: "6px" }}>
-          <ClipboardList size={24} color="var(--primary)" />
-          สร้างแบบทดสอบฝึกหัด
-        </h3>
-        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "24px" }}>
-          จัดการคำถามแบบเลือกตอบของบทเรียน: <strong style={{ color: "var(--text-primary)" }}>{selectedLessonForQuizzes.title}</strong>
-        </p>
-
-        <div className="dashboard-grid">
-          
-          {/* Left Panel: Existing questions */}
-          <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "20px", background: "rgba(255,255,255,0.2)" }}>
-            <h4 style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "10px" }}>
-              แบบทดสอบของบทเรียน ({lessonQuizzes.length})
-            </h4>
-
-            {quizzesLoading ? (
-              <div style={{ display: "flex", justifyContent: "center", padding: "32px" }}>
-                <div className="spinner" style={{ border: "2px solid var(--border-subtle)", borderTop: "2px solid var(--primary)", borderRadius: "50%", width: "28px", height: "28px", animation: "spin 1s linear infinite" }} />
-              </div>
-            ) : lessonQuizzes.length === 0 ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px", border: "1px dashed var(--border-subtle)", borderRadius: "1rem" }}>
-                ยังไม่มีคำถามแบบทดสอบในบทเรียนนี้
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                {lessonQuizzes.map((quiz, idx) => {
-                  let options = [];
-                  try {
-                    options = JSON.parse(quiz.options_json);
-                  } catch (e) {
-                    options = [];
-                  }
-                  return (
-                    <div key={quiz.id} className="glass-card" style={{ padding: "16px", background: "rgba(255, 255, 255, 0.4)", border: "1px solid var(--border-subtle)", borderRadius: "1rem" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
-                        <span style={{ fontWeight: "700", color: "var(--text-primary)", fontSize: "14px", lineHeight: "1.4" }}>
-                          ข้อ {idx + 1}: {quiz.question}
-                        </span>
-                        <button 
-                          onClick={() => handleDeleteQuiz(quiz.id)}
-                          className="tech-button-outline"
-                          style={{ padding: "4px 8px", fontSize: "11px", color: "var(--danger)", borderColor: "rgba(239, 68, 68, 0.2)", borderRadius: "0.5rem", flexShrink: 0 }}
-                        >
-                          ลบ
-                        </button>
-                      </div>
-                      
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
-                        {options.map((opt: string, optIdx: number) => {
-                          const isCorrect = optIdx === quiz.correct_option_index;
-                          return (
-                            <div 
-                              key={optIdx} 
-                              style={{ 
-                                padding: "8px 12px", 
-                                background: isCorrect ? "rgba(16, 185, 129, 0.08)" : "rgba(255,255,255,0.4)",
-                                border: isCorrect ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--border-subtle)",
-                                color: isCorrect ? "var(--accent)" : "var(--text-secondary)",
-                                borderRadius: "8px",
-                                fontSize: "12px",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px"
-                              }}
-                            >
-                              <span style={{ fontWeight: "700" }}>{String.fromCharCode(65 + optIdx)}.</span>
-                              <span>{opt}</span>
-                              {isCorrect && <span style={{ marginLeft: "auto", fontSize: "9px", fontWeight: "800", background: "rgba(16, 185, 129, 0.1)", padding: "2px 4px", borderRadius: "4px" }}>คำตอบที่ถูก</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Right Panel: Add Form */}
-          <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <h4 style={{ fontSize: "16px", fontWeight: "700", color: "var(--color-brand-primary)", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "10px" }}>
-              เพิ่มคำถามแบบทดสอบใหม่
-            </h4>
-
-            <form onSubmit={handleAddQuiz} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div className="form-group">
-                <label className="form-label" style={{ fontSize: "12px" }}>คำถาม</label>
-                <input
-                  type="text"
-                  placeholder="เช่น คำสั่งใดใช้เริ่มต้นฐานข้อมูลภายในเครื่องของ wrangler?"
-                  value={newQuizQuestion}
-                  onChange={(e) => setNewQuizQuestion(e.target.value)}
-                  className="form-input"
-                  style={{ fontSize: "13px" }}
-                  required
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                {newQuizOptions.map((opt, idx) => (
-                  <div key={idx} className="form-group">
-                    <label className="form-label" style={{ fontSize: "11px" }}>ตัวเลือก {String.fromCharCode(65 + idx)}</label>
-                    <input
-                      type="text"
-                      placeholder={`ตัวเลือก ${String.fromCharCode(65 + idx)}`}
-                      value={opt}
-                      onChange={(e) => {
-                        const updated = [...newQuizOptions];
-                        updated[idx] = e.target.value;
-                        setNewQuizOptions(updated);
-                      }}
-                      className="form-input"
-                      style={{ fontSize: "12px" }}
-                      required
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" style={{ fontSize: "12px" }}>เลือกคำตอบที่ถูกต้อง</label>
-                <select
-                  value={newQuizCorrectIndex}
-                  onChange={(e) => setNewQuizCorrectIndex(Number(e.target.value))}
-                  className="form-input"
-                  style={{ fontSize: "13px", cursor: "pointer", borderRadius: "1rem" }}
-                  required
-                >
-                  <option value={0}>ตัวเลือก A</option>
-                  <option value={1}>ตัวเลือก B</option>
-                  <option value={2}>ตัวเลือก C</option>
-                  <option value={3}>ตัวเลือก D</option>
-                </select>
-              </div>
-
-              <button 
-                type="submit" 
-                disabled={actionLoading} 
-                className="tech-button-primary" 
-                style={{ width: "100%", padding: "12px", borderRadius: "1rem", fontSize: "13px", marginTop: "8px" }}
-              >
-                {actionLoading ? "กำลังเพิ่ม..." : "เพิ่มคำถามในบทเรียน"}
-              </button>
-            </form>
-          </div>
-
-        </div>
-      </div>
     );
   };
 
@@ -2144,13 +1380,6 @@ export const InstructorConsole: React.FC = () => {
           </div>
         </div>
 
-        {uploadError && (
-          <div className="alert alert-danger" style={{ marginBottom: "20px", display: "flex", alignItems: "center", gap: "8px", color: "var(--danger)", background: "rgba(239, 68, 68, 0.08)", padding: "12px 16px", borderRadius: "0.75rem" }}>
-            <ShieldAlert size={16} />
-            <span>{uploadError}</span>
-          </div>
-        )}
-
         {telemetryLoading ? (
           <div style={{ display: "flex", justifyContent: "center", padding: "48px" }}>
             <div className="spinner" style={{ border: "3px solid var(--border-subtle)", borderTop: "3px solid var(--primary)", borderRadius: "50%", width: "32px", height: "32px", animation: "spin 1s linear infinite" }} />
@@ -2432,39 +1661,6 @@ export const InstructorConsole: React.FC = () => {
             transition={{ duration: 0.2 }}
           >
             {renderCreateCourse()}
-          </motion.div>
-        )}
-        {view === "create-lesson" && (
-          <motion.div 
-            key="create-lesson"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderCreateLesson()}
-          </motion.div>
-        )}
-        {view === "edit-lesson" && (
-          <motion.div 
-            key="edit-lesson"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderEditLesson()}
-          </motion.div>
-        )}
-        {view === "quizzes" && (
-          <motion.div 
-            key="quizzes"
-            initial={{ opacity: 0, x: 15 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -15 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderQuizzes()}
           </motion.div>
         )}
         {view === "vouchers" && (

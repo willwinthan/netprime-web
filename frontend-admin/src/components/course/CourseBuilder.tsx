@@ -9,18 +9,13 @@ import { useDangerousDelete } from "../security/DangerConfirmDialog";
 
 /**
  * Course builder for the course workspace's "เนื้อหา" tab: chapters with drag & drop lesson
- * ordering, typed lessons and drip settings. Video lessons keep using the console's video form
- * (onAddVideoLesson / onEditVideoLesson). Sales-page fields, category, "เรียนตามลำดับ" and
+ * ordering, lessons of every type (LessonEditorModal) and drip settings. Sales-page fields, category, "เรียนตามลำดับ" and
  * prerequisites are in CourseDetailsForms (tab "ข้อมูลคอร์ส").
  */
 interface Props {
   courseId: string;
   /** Changes whenever the console reloads the lesson list (e.g. after its own video form saved). */
   refreshToken?: unknown;
-  /** Opens the console's video form; the new lesson goes into `sectionId` when given. */
-  onAddVideoLesson: (sectionId: string | null) => void;
-  onEditVideoLesson: (lesson: BuilderLesson) => void;
-  onManageQuizzes: (lesson: BuilderLesson) => void;
   onDeleteLesson: (lessonId: string) => void;
 }
 
@@ -35,7 +30,7 @@ function layoutOf(outline: CourseOutline): Layout {
   };
 }
 
-export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVideoLesson, onEditVideoLesson, onManageQuizzes, onDeleteLesson }) => {
+export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onDeleteLesson }) => {
   const api = useApi();
   const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [outline, setOutline] = useState<CourseOutline | null>(null);
@@ -43,7 +38,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ lesson: BuilderLesson | null; sectionId?: string | null; type?: LessonType } | null>(null);
-  // "เพิ่มบทเรียน": pick the lesson type first; video goes to the console's video form.
+  // "เพิ่มบทเรียน": pick the lesson type first, then fill in LessonEditorModal.
   const [picking, setPicking] = useState<{ sectionId: string | null } | null>(null);
   const [newSection, setNewSection] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -188,9 +183,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
             <option value="">นอกบท</option>
             {layout.sections.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
-          {lesson.type === "video" && <button type="button" className="np-cb-btn" onClick={() => onEditVideoLesson(lesson)}>แก้ไขวิดีโอ</button>}
-          <button type="button" className="np-cb-btn" onClick={() => setEditing({ lesson })}>{lesson.type === "video" ? "ตั้งค่า" : "แก้ไข"}</button>
-          <button type="button" className="np-cb-btn" onClick={() => onManageQuizzes(lesson)}>แบบทดสอบ</button>
+          <button type="button" className="np-cb-btn" onClick={() => setEditing({ lesson })}>แก้ไข</button>
           <button type="button" className="np-cb-btn danger" onClick={() => onDeleteLesson(id)}>ลบ</button>
         </div>
       </div>
@@ -245,8 +238,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
               <button key={type} type="button" className="np-cb-type-card" onClick={() => {
                 const sectionId = picking.sectionId;
                 setPicking(null);
-                if (type === "video") onAddVideoLesson(sectionId);
-                else setEditing({ lesson: null, sectionId, type });
+                setEditing({ lesson: null, sectionId, type });
               }}>
                 <strong>{LESSON_TYPE_LABEL[type]}</strong>
                 <span>{LESSON_TYPE_HINT[type]}</span>

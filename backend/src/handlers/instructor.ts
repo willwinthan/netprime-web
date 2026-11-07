@@ -2,6 +2,7 @@ import { Hono, Context } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { canApproveCourses, notifyCourseApprovers } from "./courses";
 import { createStreamDirectUpload } from "../utils/stream";
+import { saveSiteImage, siteImageUrl } from "../utils/images";
 import { courseHasRecords, dangerAudit, requireDeleteConfirmation } from "../utils/dangerConfirm";
 
 export const instructorRouter = new Hono<Env>();
@@ -56,6 +57,7 @@ instructorRouter.get("/instructor/analytics", rbac(["instructor", "admin"]), asy
     // 1. Fetch instructor's courses list with student count and average progress metrics
     const coursesQuery = isGlobal 
       ? `SELECT c.id, c.title, c.description, c.created_at, c.status, c.submitted_at, c.published_at, c.review_note,
+                c.price, c.cover_image_url, c.access_duration_days,
                 COUNT(e.id) as student_count,
                 AVG(e.progress_percent) as avg_progress
          FROM courses c
@@ -63,6 +65,7 @@ instructorRouter.get("/instructor/analytics", rbac(["instructor", "admin"]), asy
          GROUP BY c.id
          ORDER BY c.created_at DESC`
       : `SELECT c.id, c.title, c.description, c.created_at, c.status, c.submitted_at, c.published_at, c.review_note,
+                c.price, c.cover_image_url, c.access_duration_days,
                 COUNT(e.id) as student_count,
                 AVG(e.progress_percent) as avg_progress
          FROM courses c
@@ -72,7 +75,7 @@ instructorRouter.get("/instructor/analytics", rbac(["instructor", "admin"]), asy
          ORDER BY c.created_at DESC`;
 
     const coursesStmt = isGlobal ? db.prepare(coursesQuery) : db.prepare(coursesQuery).bind(targetId);
-    const coursesResult = await coursesStmt.all<{ id: string; title: string; description: string; created_at: string; status: string; submitted_at: string | null; published_at: string | null; review_note: string | null; student_count: number; avg_progress: number | null }>();
+    const coursesResult = await coursesStmt.all<{ id: string; title: string; description: string; created_at: string; status: string; submitted_at: string | null; published_at: string | null; review_note: string | null; price: number; cover_image_url: string | null; access_duration_days: number | null; student_count: number; avg_progress: number | null }>();
 
     // 2. Fetch total unique students
     const studentsQuery = isGlobal
@@ -113,7 +116,7 @@ instructorRouter.get("/instructor/analytics", rbac(["instructor", "admin"]), asy
     const activityStmt = isGlobal ? db.prepare(activityQuery) : db.prepare(activityQuery).bind(targetId);
     const activityResult = await activityStmt.all<{ name: string; email: string; course_title: string; progress_percent: number; completed_at: string | null }>();
 
-    // Add placeholder thumbnails dynamically for the premium UI cards
+    // Card picture: the uploaded cover, or a stock placeholder picked from the title
     const coursesClean = coursesResult.results.map((c, index) => {
       // Pick dynamic tech thumbnails based on title keywords or index
       const titleLower = c.title.toLowerCase();
@@ -132,7 +135,8 @@ instructorRouter.get("/instructor/analytics", rbac(["instructor", "admin"]), asy
       
       return {
         ...c,
-        thumbnail_url: thumb,
+        // The course's own cover when it has one; otherwise a stock picture for the card.
+        thumbnail_url: c.cover_image_url || thumb,
         avg_progress: c.avg_progress !== null ? Math.round(c.avg_progress) : null
       };
     });
@@ -1234,6 +1238,18 @@ instructorRouter.post("/instructor/upload", rbac(["instructor", "admin"]), async
     console.error("Upload failed:", err);
     return c.json({ error: "อัปโหลดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" }, 500);
   }
+});
+
+/**
+ * Course cover / banner image. Stored with the site images (R2 site/) because course pictures are
+ * public: they appear on the catalogue and the course page.
+ * POST /api/instructor/images (multipart: file)
+ */
+instructorRouter.post("/instructor/images", rbac(["instructor", "admin"]), async (c) => {
+  const form = await c.req.parseBody().catch(() => null);
+  const saved = await saveSiteImage(c.env, form?.file);
+  if ("error" in saved) return c.json({ error: saved.error }, 400);
+  return c.json({ url: siteImageUrl(c.req.url, saved.name) }, 201);
 });
 
 /**

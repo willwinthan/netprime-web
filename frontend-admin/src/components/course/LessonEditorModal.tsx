@@ -3,6 +3,7 @@ import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { ErrorBox, Field, Modal, grid2 } from "../site-admin/ui";
 import type { LessonTextEditorHandle } from "./LessonTextEditor";
 import { BuilderLesson, CourseSection, LESSON_TYPE_LABEL, LessonType } from "./types";
+import { VIDEO_SOURCE_LABEL, VideoProvider, parseVideoLink, uploadLessonFile } from "./lessonUploads";
 import "./course.css";
 
 // BlockNote is large; load it only when a text lesson is edited.
@@ -31,7 +32,7 @@ interface Props {
 
 interface SelfLearningOption { id: string; slug: string; title: string; visibility: "public" | "course" }
 
-/** Create or edit a text / PDF / embed / SCORM / self-learning lesson, its chapter and drip settings. */
+/** Create or edit any lesson (video, text, PDF, embed, SCORM, self-learning), its chapter and drip settings. */
 export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections, embedProviders, defaultSectionId, defaultType, onClose, onSaved }) => {
   const api = useApi();
   const [title, setTitle] = useState(lesson?.title ?? "");
@@ -39,6 +40,10 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
   const [sectionId, setSectionId] = useState<string>(lesson ? lesson.section_id ?? "" : defaultSectionId ?? "");
   const [embedUrl, setEmbedUrl] = useState(lesson?.embed_url ?? "");
   const [pdfKey, setPdfKey] = useState(lesson?.pdf_r2_key ?? "");
+  const [videoInput, setVideoInput] = useState(lesson?.video_stream_uid ?? "");
+  const [videoProvider, setVideoProvider] = useState<VideoProvider>((lesson?.video_provider as VideoProvider) ?? "cloudflare");
+  const [handoutKey, setHandoutKey] = useState(lesson?.handout_r2_key ?? "");
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [selfLearningId, setSelfLearningId] = useState(lesson?.self_learning_id ?? "");
   const [selfLearningOptions, setSelfLearningOptions] = useState<SelfLearningOption[] | null>(null);
   const [dripDays, setDripDays] = useState(lesson?.available_after_days ? String(lesson.available_after_days) : "");
@@ -87,6 +92,34 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     }
   };
 
+  const uploadVideo = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (!file.type.startsWith("video/")) return setError("เลือกไฟล์วิดีโอเท่านั้น");
+    setBusy("กำลังอัปโหลดวิดีโอ...");
+    try {
+      setVideoInput(await uploadLessonFile(api, file, "video", setUploadPercent));
+      setVideoProvider("cloudflare");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const uploadHandout = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    setBusy("กำลังอัปโหลดเอกสาร...");
+    try {
+      setHandoutKey(await uploadLessonFile(api, file, "handout"));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const uploadScorm = async (lessonId: string, file: File) => {
     setBusy("กำลังอัปโหลดและแตกไฟล์แพ็กเกจ SCORM...");
     const response = await fetch(`${API_BASE_URL}/instructor/lessons/${lessonId}/scorm`, {
@@ -105,6 +138,14 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
       available_after_days: dripDays ? Number(dripDays) : null,
       available_on: availableOn || null
     };
+    if (type === "video") {
+      // A link pasted and saved without leaving the field is still turned into an ID here.
+      const parsed = parseVideoLink(videoInput);
+      if (!parsed.id) return setError("ใส่ลิงก์วิดีโอหรืออัปโหลดไฟล์วิดีโอ");
+      body.video_stream_uid = parsed.id;
+      body.video_provider = parsed.provider ?? videoProvider;
+      body.handout_r2_key = handoutKey || null;
+    }
     if (type === "embed") body.embed_url = embedUrl;
     if (type === "pdf") body.pdf_r2_key = pdfKey;
     if (type === "self_learning") {
@@ -129,8 +170,7 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     }
   };
 
-  // A lesson can become video only through the video form (asset checks, Stream upload).
-  const typeOptions = (Object.keys(LESSON_TYPE_LABEL) as LessonType[]).filter(t => t !== "video" || lesson?.type === "video");
+  const typeOptions = Object.keys(LESSON_TYPE_LABEL) as LessonType[];
 
   return (
     <Modal title={lesson ? `แก้ไขบทเรียน: ${lesson.title}` : `เพิ่มบทเรียน: ${LESSON_TYPE_LABEL[type]}`} onClose={onClose} width={type === "text" ? 900 : 640}>
@@ -159,6 +199,35 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
               <LessonTextEditor ref={editorRef} initialJson={text.json} initialMarkdown={text.md} />
             </Suspense>
           ) : <div className="np-lesson-editor" style={{ padding: 24, color: "var(--text-muted)" }}>กำลังโหลดเนื้อหา...</div>
+        )}
+
+        {type === "video" && (
+          <>
+            <div style={grid2}>
+              <Field label="วิดีโอมาจาก">
+                <select className="form-input" value={videoProvider} onChange={e => { setVideoProvider(e.target.value as VideoProvider); setVideoInput(""); }}>
+                  {(Object.keys(VIDEO_SOURCE_LABEL) as VideoProvider[]).map(p => <option key={p} value={p}>{VIDEO_SOURCE_LABEL[p]}</option>)}
+                </select>
+              </Field>
+            </div>
+            {videoProvider === "cloudflare" ? (
+              <Field label="ไฟล์วิดีโอ" hint={uploadPercent !== null ? `กำลังอัปโหลด ${uploadPercent}%` : videoInput ? "อัปโหลดแล้ว เลือกไฟล์ใหม่เพื่อแทนที่" : "ไฟล์ใหญ่กว่า 100MB อัปโหลดได้ ระบบแบ่งส่งให้เอง"}>
+                <input type="file" accept="video/*" onChange={e => uploadVideo(e.target.files?.[0])} disabled={!!busy} />
+              </Field>
+            ) : (
+              <Field label={`ลิงก์ ${VIDEO_SOURCE_LABEL[videoProvider]}`} hint="วางลิงก์จากแถบที่อยู่หรือปุ่มแชร์ของวิดีโอ">
+                <input className="form-input" value={videoInput} onChange={e => setVideoInput(e.target.value)} required
+                  onBlur={e => { const parsed = parseVideoLink(e.target.value); setVideoInput(parsed.id); if (parsed.provider) setVideoProvider(parsed.provider); }}
+                  placeholder={videoProvider === "youtube" ? "https://www.youtube.com/watch?v=..." : "https://vimeo.com/..."} />
+              </Field>
+            )}
+            <Field label="เอกสารประกอบให้ดาวน์โหลด (ไม่บังคับ)" hint={handoutKey ? `ไฟล์ปัจจุบัน: ${handoutKey.split("/").pop()}` : "PDF, Word หรือ ZIP"}>
+              <span style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input type="file" accept="application/pdf,.zip,.doc,.docx" onChange={e => uploadHandout(e.target.files?.[0])} disabled={!!busy} />
+                {handoutKey && <button type="button" className="np-cb-btn danger" onClick={() => setHandoutKey("")}>เอาเอกสารออก</button>}
+              </span>
+            </Field>
+          </>
         )}
 
         {type === "embed" && (
