@@ -3,7 +3,7 @@ import { RotateCcw, Save } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
 import { Empty, ErrorBox, Field, grid2 } from "../site-admin/ui";
 import { ImageInput, Notice, SelectInput, TextInput } from "./adminKit";
-import { DEFAULT_THEME, FONTS, FontName, Theme, contrastRatio, fontStack, isHex, loadFont, publishTheme, themeVars } from "./theme";
+import { Background, ButtonStyle, DEFAULT_THEME, FONTS, FontName, FooterStyle, HeaderStyle, HeroLayout, Theme, contrastRatio, fontStack, isHex, loadFont, publishTheme, themeVars } from "./theme";
 import fullLogo from "../../../logo/NetPrimeFullLogo.png";
 import "../../site/site.css";
 import { useBuilderPreview, usePreviewSync } from "./SitePreview";
@@ -12,6 +12,34 @@ import { useBuilderPreview, usePreviewSync } from "./SitePreview";
  * Tab "ธีมและแบรนด์": school name, logo, favicon, colors (contrast-checked like the server), font and corner radius,
  * with a live preview of the public header and buttons. Saving applies the theme everywhere immediately.
  */
+/** Ready-made looks: colors and styles only (name, logo and favicon stay as they are). */
+type ThemeStyle = Omit<Theme, "school_name" | "tagline" | "logo_url" | "favicon_url" | "hero_image_url">;
+const PRESETS: Array<{ name: string; style: ThemeStyle }> = [
+  { name: "NetPrime (ค่าเริ่มต้น)", style: { primary_color: "#c2541a", secondary_color: "#182443", accent_color: null, font: "Anuphan", heading_font: null, radius: 14, header_style: "light", button_style: "solid", background: "cream", footer_style: "dark", hero_layout: "split" } },
+  { name: "องค์กร", style: { primary_color: "#1d4ea8", secondary_color: "#14213d", accent_color: "#5b8def", font: "IBM Plex Sans Thai", heading_font: null, radius: 8, header_style: "dark", button_style: "solid", background: "white", footer_style: "dark", hero_layout: "split" } },
+  { name: "สดใส", style: { primary_color: "#c2410c", secondary_color: "#1f2937", accent_color: "#f59e0b", font: "Anuphan", heading_font: "Kanit", radius: 18, header_style: "brand", button_style: "pill", background: "white", footer_style: "light", hero_layout: "center" } },
+  { name: "ธรรมชาติ", style: { primary_color: "#1d6f5f", secondary_color: "#16302b", accent_color: "#6fbf9f", font: "Sarabun", heading_font: "Prompt", radius: 16, header_style: "light", button_style: "pill", background: "cream", footer_style: "brand", hero_layout: "split" } },
+  { name: "มินิมอล", style: { primary_color: "#1f2937", secondary_color: "#111827", accent_color: "#9ca3af", font: "IBM Plex Sans Thai", heading_font: null, radius: 4, header_style: "light", button_style: "outline", background: "white", footer_style: "light", hero_layout: "center" } },
+  { name: "เทคโนโลยี", style: { primary_color: "#5b3cc4", secondary_color: "#1e1b4b", accent_color: "#a78bfa", font: "Noto Sans Thai", heading_font: "Prompt", radius: 12, header_style: "dark", button_style: "solid", background: "gray", footer_style: "dark", hero_layout: "split" } }
+];
+
+const isPreset = (theme: Theme, style: ThemeStyle) => (Object.keys(style) as Array<keyof ThemeStyle>).every(k => (theme[k] ?? null) === (style[k] ?? null));
+
+/** A row of choice buttons (radio group). */
+function Choice<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<[T, string]>; onChange: (v: T) => void }) {
+  return (
+    <div className="form-group" style={{ display: "grid", gap: 6 }}>
+      <span className="form-label">{label}</span>
+      <div role="radiogroup" aria-label={label} style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {options.map(([key, text]) => (
+          <button key={key} type="button" role="radio" aria-checked={value === key} onClick={() => onChange(key)}
+            className={value === key ? "tech-button-primary" : "tech-button-outline"} style={{ padding: "6px 12px", fontSize: 13, borderRadius: 10 }}>{text}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export const ThemePanel: React.FC = () => {
   const api = useApi();
   const [theme, setTheme] = useState<Theme | null>(null);
@@ -37,7 +65,7 @@ export const ThemePanel: React.FC = () => {
 
   if (!theme) return error ? <ErrorBox message={error} /> : <Empty text="กำลังโหลด…" />;
   const set = (patch: Partial<Theme>) => { setTheme({ ...theme, ...patch }); setNotice(null); };
-  const valid = checks.every(c => c.ok) && theme.school_name.trim() !== "";
+  const valid = checks.every(c => c.ok) && theme.school_name.trim() !== "" && (theme.hero_layout !== "image" || !!theme.hero_image_url);
 
   const save = async () => {
     setSaving(true); setError(null); setNotice(null);
@@ -55,6 +83,27 @@ export const ThemePanel: React.FC = () => {
       <div className="glass-card" style={{ padding: 20, display: "grid", gap: 14 }}>
         <ErrorBox message={error} />
         {notice && <Notice>{notice}</Notice>}
+        <div style={{ display: "grid", gap: 8 }}>
+          <span className="form-label">ธีมสำเร็จรูป</span>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+            {PRESETS.map(p => {
+              const on = isPreset(theme, p.style);
+              return (
+                <button key={p.name} type="button" aria-pressed={on} onClick={() => set(p.style)}
+                  style={{ display: "grid", gap: 6, padding: 10, borderRadius: 12, cursor: "pointer", textAlign: "left", font: "inherit", fontSize: 13,
+                    background: "#fff", border: on ? "2px solid var(--primary)" : "1px solid var(--border-subtle)" }}>
+                  <span style={{ display: "flex", gap: 4 }}>
+                    {[p.style.primary_color, p.style.secondary_color, p.style.accent_color ?? p.style.primary_color].map((c, i) => (
+                      <span key={i} style={{ width: 22, height: 22, borderRadius: 6, background: c }} />
+                    ))}
+                  </span>
+                  <span style={{ fontWeight: on ? 700 : 500 }}>{p.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>กดแล้วปรับต่อได้ทุกค่า ชื่อโรงเรียนและโลโก้ไม่เปลี่ยน</span>
+        </div>
         <div style={grid2}>
           <TextInput label="ชื่อโรงเรียน" required value={theme.school_name} max={80} onChange={v => set({ school_name: v })} />
           <TextInput label="คำโปรยใต้ชื่อ" value={theme.tagline} max={120} onChange={v => set({ tagline: v })} />
@@ -72,6 +121,33 @@ export const ThemePanel: React.FC = () => {
           <Field label={`ความมนของมุม: ${theme.radius}px`}>
             <input type="range" min={0} max={24} value={theme.radius} onChange={e => set({ radius: Number(e.target.value) })} />
           </Field>
+          <SelectInput label="ฟอนต์หัวข้อ" value={(theme.heading_font ?? "") as FontName | ""}
+            options={[["", "เหมือนฟอนต์หลัก"] as [FontName | "", string], ...FONTS.map(f => [f, f] as [FontName | "", string])]}
+            onChange={v => set({ heading_font: (v || null) as FontName | null })} />
+          <Field label="สีเน้น" hint="ใช้กับป้ายและจุดตกแต่ง">
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="color" value={theme.accent_color && isHex(theme.accent_color) ? theme.accent_color : "#e56b25"} onChange={e => set({ accent_color: e.target.value })} style={{ width: 44, height: 38, border: 0, background: "none", padding: 0 }} aria-label="เลือกสีเน้น" />
+              <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+                <input type="checkbox" checked={theme.accent_color === null} onChange={e => set({ accent_color: e.target.checked ? null : theme.primary_color })} />ใช้สีจากสีหลักอัตโนมัติ
+              </label>
+            </div>
+          </Field>
+        </div>
+        <div style={{ display: "grid", gap: 14, borderTop: "1px solid var(--border-subtle)", paddingTop: 14 }}>
+          <strong style={{ fontSize: 14 }}>รูปแบบหน้าเว็บ</strong>
+          <Choice<HeaderStyle> label="แถบเมนูด้านบน" value={theme.header_style} onChange={v => set({ header_style: v })}
+            options={[["light", "พื้นขาว"], ["brand", "สีหลัก"], ["dark", "สีเข้ม"]]} />
+          <Choice<ButtonStyle> label="ปุ่ม" value={theme.button_style} onChange={v => set({ button_style: v })}
+            options={[["solid", "ทึบ"], ["pill", "ทรงแคปซูล"], ["outline", "ขอบเส้น"]]} />
+          <Choice<Background> label="พื้นหลังหน้าเว็บ" value={theme.background} onChange={v => set({ background: v })}
+            options={[["cream", "ครีม"], ["white", "ขาว"], ["gray", "เทาอ่อน"]]} />
+          <Choice<FooterStyle> label="ส่วนท้าย" value={theme.footer_style} onChange={v => set({ footer_style: v })}
+            options={[["dark", "สีเข้ม"], ["light", "พื้นขาว"], ["brand", "สีหลัก"]]} />
+          <Choice<HeroLayout> label="ส่วนหัวของหน้าแรก" value={theme.hero_layout} onChange={v => set({ hero_layout: v })}
+            options={[["split", "ข้อความกับรูป"], ["center", "ข้อความตรงกลาง"], ["image", "รูปเต็มพื้นหลัง"]]} />
+          {theme.hero_layout === "image" && (
+            <ImageInput label="รูปพื้นหลังส่วนหัว" value={theme.hero_image_url} token={api.token} hint="รูปแนวนอนกว้างอย่างน้อย 1600px ระบบใส่สีเข้มทับให้อ่านข้อความได้" onChange={v => set({ hero_image_url: v || null })} span />
+          )}
         </div>
         <div style={{ display: "grid", gap: 6 }}>
           {checks.map(c => (

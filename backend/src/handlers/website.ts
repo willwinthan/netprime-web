@@ -160,14 +160,34 @@ function validate<T>(fn: () => T): { value?: T; error?: string } {
 /** Thai-capable Google Fonts the site may load (Anuphan is the built-in default). */
 export const FONTS = ["Anuphan", "IBM Plex Sans Thai", "Noto Sans Thai", "Sarabun", "Prompt", "Kanit"] as const;
 
+/** Style choices of the public site (applied as data-np-* attributes, see frontend site.css). */
+export const HEADER_STYLES = ["light", "brand", "dark"] as const;
+export const BUTTON_STYLES = ["solid", "pill", "outline"] as const;
+export const BACKGROUNDS = ["cream", "white", "gray"] as const;
+export const FOOTER_STYLES = ["dark", "light", "brand"] as const;
+export const HERO_LAYOUTS = ["split", "center", "image"] as const;
+
 export interface Theme {
   school_name: string; tagline: string | null; logo_url: string | null; favicon_url: string | null;
   primary_color: string; secondary_color: string; font: typeof FONTS[number]; radius: number;
+  /** Decorative highlights (eyebrows, tags); null = a lighter shade of the primary color. */
+  accent_color: string | null;
+  /** Font for headings; null = same as `font`. */
+  heading_font: typeof FONTS[number] | null;
+  header_style: typeof HEADER_STYLES[number];
+  button_style: typeof BUTTON_STYLES[number];
+  background: typeof BACKGROUNDS[number];
+  footer_style: typeof FOOTER_STYLES[number];
+  hero_layout: typeof HERO_LAYOUTS[number];
+  /** Background picture of the homepage header when hero_layout is "image". */
+  hero_image_url: string | null;
 }
 
 export const DEFAULT_THEME: Theme = {
   school_name: "NetPrime", tagline: "ศูนย์ฝึกอบรมด้าน IT", logo_url: null, favicon_url: null,
-  primary_color: "#c2541a", secondary_color: "#182443", font: "Anuphan", radius: 14
+  primary_color: "#c2541a", secondary_color: "#182443", font: "Anuphan", radius: 14,
+  accent_color: null, heading_font: null, header_style: "light", button_style: "solid",
+  background: "cream", footer_style: "dark", hero_layout: "split", hero_image_url: null
 };
 
 /** Buttons and links use the primary color with white text, headings use the secondary color on white: both need 4.5:1. */
@@ -180,8 +200,17 @@ export function parseTheme(body: Obj): Theme {
     primary_color: color(body, "primary_color", "สีหลัก", DEFAULT_THEME.primary_color),
     secondary_color: color(body, "secondary_color", "สีรอง", DEFAULT_THEME.secondary_color),
     font: oneOf(body, "font", "ฟอนต์", FONTS, DEFAULT_THEME.font),
-    radius: Math.round(int(body, "radius", "ความมนของมุม", 0, 24, DEFAULT_THEME.radius))
+    radius: Math.round(int(body, "radius", "ความมนของมุม", 0, 24, DEFAULT_THEME.radius)),
+    accent_color: body.accent_color === null || body.accent_color === "" || body.accent_color === undefined ? null : color(body, "accent_color", "สีเน้น", DEFAULT_THEME.primary_color),
+    heading_font: body.heading_font === null || body.heading_font === "" || body.heading_font === undefined ? null : oneOf(body, "heading_font", "ฟอนต์หัวข้อ", FONTS, DEFAULT_THEME.font),
+    header_style: oneOf(body, "header_style", "แบบแถบเมนู", HEADER_STYLES, DEFAULT_THEME.header_style),
+    button_style: oneOf(body, "button_style", "แบบปุ่ม", BUTTON_STYLES, DEFAULT_THEME.button_style),
+    background: oneOf(body, "background", "พื้นหลัง", BACKGROUNDS, DEFAULT_THEME.background),
+    footer_style: oneOf(body, "footer_style", "แบบส่วนท้าย", FOOTER_STYLES, DEFAULT_THEME.footer_style),
+    hero_layout: oneOf(body, "hero_layout", "แบบส่วนหัวหน้าแรก", HERO_LAYOUTS, DEFAULT_THEME.hero_layout),
+    hero_image_url: image(body, "hero_image_url", "รูปพื้นหลังส่วนหัวหน้าแรก")
   };
+  if (theme.hero_layout === "image" && !theme.hero_image_url) fail("เลือกรูปพื้นหลังของส่วนหัวหน้าแรกก่อน หรือเปลี่ยนเป็นแบบอื่น");
   const primary = contrastRatio(theme.primary_color, "#ffffff");
   if (primary < 4.5) fail(`สีหลักอ่อนเกินไป ตัวอักษรสีขาวบนปุ่มอ่านยาก (คอนทราสต์ ${primary.toFixed(2)}:1 ต้องอย่างน้อย 4.5:1) ลองเลือกสีที่เข้มขึ้น`);
   const secondary = contrastRatio(theme.secondary_color, "#ffffff");
