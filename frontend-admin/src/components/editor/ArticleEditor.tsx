@@ -5,9 +5,10 @@ import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core/extensions";
 import { createReactBlockSpec, getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/ariakit";
-import { ArrowLeft, ImagePlus, Download, Settings2, Trash2, X, ExternalLink, History, RotateCcw, AlertTriangle } from "lucide-react";
+import { ArrowLeft, ImagePlus, LayoutTemplate, Download, Settings2, Trash2, X, ExternalLink, History, RotateCcw, AlertTriangle } from "lucide-react";
 import { API_BASE_URL, can, useApi } from "../../hooks/useApi";
 import { ErrorBox, Modal, Field, uploadImage, formatDateTime } from "../site-admin/ui";
+import { CoverMaker } from "./CoverMaker";
 import { uploadInlineImages } from "./inlineImages";
 import { notionEmbedUrl } from "../../site/notionEmbed";
 import { thaiDictionary } from "./thaiDictionary";
@@ -271,6 +272,14 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
     }
   };
 
+  const [coverMaker, setCoverMaker] = useState(false);
+  const applyMadeCover = async (file: File) => {
+    const url = await uploadImage(file, api.token);
+    setMeta(m => ({ ...m, cover_url: url }));
+    setDirty(true);
+    setCoverMaker(false);
+  };
+
   const changeCover = async (fileList: FileList | null) => {
     const f = fileList?.[0];
     if (!f) return;
@@ -348,12 +357,19 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
               {canEditContent && (
                 <div className="np-cover-actions">
                   <label className="np-icon-button">เปลี่ยนรูปปก<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => changeCover(e.target.files)} /></label>
+                  <button className="np-icon-button" onClick={() => setCoverMaker(true)}>สร้างจาก template</button>
                   <button className="np-icon-button" onClick={() => { setMeta(m => ({ ...m, cover_url: "" })); setDirty(true); }}>ลบรูปปก</button>
                 </div>
               )}
             </div>
           ) : canEditContent && (
-            <label className="np-add-cover"><ImagePlus size={16} /> เพิ่มรูปปก<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => changeCover(e.target.files)} /></label>
+            <div className="np-cover-choices">
+              <label className="np-add-cover"><ImagePlus size={16} /> อัปโหลดรูปปก<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={e => changeCover(e.target.files)} /></label>
+              <button type="button" className="np-add-cover" style={{ border: "none", background: "none", font: "inherit" }} onClick={() => setCoverMaker(true)}><LayoutTemplate size={16} /> สร้างหน้าปกจาก template</button>
+            </div>
+          )}
+          {coverMaker && (
+            <CoverMaker title={title} category={meta.category} slug={meta.slug} onClose={() => setCoverMaker(false)} onUse={applyMadeCover} />
           )}
 
           <textarea className="np-title" aria-label="หัวข้อบทความ" placeholder="ไม่มีชื่อ" rows={1} maxLength={200} readOnly={!canEditContent}
