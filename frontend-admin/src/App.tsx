@@ -149,7 +149,17 @@ const PRIMARY_GROUP: Partial<Record<User["role"], string>> = {
 const ALL_TABS = new Set<string>(["profile", ...NAV_GROUPS.flatMap(g => g.items.map(i => i.tab))]);
 const NAV_COLLAPSED_KEY = "netprime.nav.collapsed";
 
-/** Starting console for the primary (highest) role; other roles are reachable from the sidebar. */
+/**
+ * Starting console: the instructor console when the URL points into it (?course= / ?view=, which it
+ * owns), otherwise the one for the primary (highest) role; other roles are reachable from the sidebar.
+ */
+function startTab(user: User | null): ConsoleTab {
+  const params = new URLSearchParams(window.location.search);
+  if ((params.has("course") || params.has("view")) && hasRole(user, "instructor", "admin")) return "instructor";
+  return homeTab(user?.role);
+}
+
+/** Starting console for the primary (highest) role. */
 function homeTab(role?: User["role"]): ConsoleTab {
   if (role === "admin") return "admin";
   if (role === "coordinator") return "site";
@@ -180,7 +190,7 @@ export const App: React.FC = () => {
   const api = useApi();
   // Re-render on client-side navigation; the URL decides between the public site and the console.
   const location = useLocation();
-  const [currentTab, setCurrentTab] = useState<ConsoleTab>(homeTab(api.user?.role));
+  const [currentTab, setCurrentTab] = useState<ConsoleTab>(startTab(api.user));
   const [oauthProcessing, setOauthProcessing] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const processingCode = React.useRef<string | null>(null);
@@ -188,7 +198,7 @@ export const App: React.FC = () => {
     api.refreshUser().catch((error: Error) => setSessionError(error.message));
   }, [api.refreshUser]);
   React.useEffect(() => {
-    setCurrentTab(homeTab(api.user?.role));
+    setCurrentTab(startTab(api.user));
   }, [api.user?.id, api.user?.role]);
   const inConsole = !!api.token && !isPublicPath(location.pathname);
   // Learning is a role of its own: staff see it only when they also hold the student role.
@@ -196,7 +206,12 @@ export const App: React.FC = () => {
   usePresenceHeartbeat();
   // Below the tablet breakpoint the sidebar is a drawer (index.css); picking a page closes it.
   const [navOpen, setNavOpen] = useState(false);
-  const selectTab = (tab: ConsoleTab) => { setCurrentTab(tab); setNavOpen(false); };
+  const selectTab = (tab: ConsoleTab) => {
+    // The instructor console keeps its open course/page in the query string; leaving it clears that.
+    if (window.location.search && /[?&](course|view|tab)=/.test(window.location.search)) navigate(window.location.pathname, { replace: true });
+    setCurrentTab(tab);
+    setNavOpen(false);
+  };
   const openTab = (tab: string) => { if (ALL_TABS.has(tab)) selectTab(tab as ConsoleTab); };
   React.useEffect(() => {
     if (!navOpen) return;
