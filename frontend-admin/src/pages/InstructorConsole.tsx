@@ -11,6 +11,7 @@ import { AiInstructorTools } from "../components/ai/AiInstructorTools";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   BookOpen, 
+  MoreHorizontal, 
   PlusCircle, 
   Film, 
   Plus, 
@@ -74,10 +75,33 @@ interface InstructorAnalytics {
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
-  cloudflare: "Cloudflare Stream",
+  cloudflare: "อัปโหลดเข้าระบบ",
   youtube: "YouTube",
   vimeo: "Vimeo",
 };
+
+/**
+ * Accepts a pasted YouTube / Vimeo link (or a bare ID) for the video field and returns the ID the API
+ * stores plus the provider the link belongs to, so instructors never have to find a video ID themselves.
+ */
+export function parseVideoLink(input: string): { id: string; provider?: "youtube" | "vimeo" } {
+  const value = input.trim();
+  let url: URL;
+  try { url = new URL(value); } catch { return { id: value }; }
+  const host = url.hostname.replace(/^(www|m)\./, "");
+  if (host === "youtu.be") return { id: url.pathname.slice(1).split("/")[0], provider: "youtube" };
+  if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    const v = url.searchParams.get("v");
+    if (v) return { id: v, provider: "youtube" };
+    const m = url.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]+)/);
+    if (m) return { id: m[1], provider: "youtube" };
+  }
+  if (host === "vimeo.com" || host === "player.vimeo.com") {
+    const m = url.pathname.match(/(\d{6,})/);
+    if (m) return { id: m[1], provider: "vimeo" };
+  }
+  return { id: value };
+}
 
 const ENROLLMENT_STATUS_LABELS: Record<string, string> = {
   active: "ใช้งานอยู่",
@@ -111,6 +135,10 @@ export const InstructorConsole: React.FC = () => {
   
   // Navigation View State
   const [view, setView] = useState<ConsoleView>("dashboard");
+  // Course list: search, status filter and the "เพิ่มเติม" menu for occasional tools
+  const [courseQuery, setCourseQuery] = useState("");
+  const [courseFilter, setCourseFilter] = useState<"all" | CourseStatus>("all");
+  const [moreOpen, setMoreOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -124,6 +152,8 @@ export const InstructorConsole: React.FC = () => {
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonStreamUid, setLessonStreamUid] = useState("");
   const [lessonSortOrder, setLessonSortOrder] = useState(1);
+  // Chapter picked in the course builder for a new video lesson (null = outside chapters).
+  const [lessonSectionId, setLessonSectionId] = useState<string | null>(null);
   const [lessonProvider, setLessonProvider] = useState("cloudflare");
   const [lessonHandoutKey, setLessonHandoutKey] = useState("");
 
@@ -463,14 +493,20 @@ export const InstructorConsole: React.FC = () => {
       setActionLoading(true);
       setModalError(null);
 
-      await api.post("/instructor/lessons", {
+      const created = await api.post<{ lesson: { id: string } }>("/instructor/lessons", {
         course_id: lessonCourseId,
         title: lessonTitle,
-        video_stream_uid: lessonStreamUid,
-        video_provider: lessonProvider,
+        // A link pasted and saved without leaving the field is still turned into an ID here.
+        video_stream_uid: parseVideoLink(lessonStreamUid).id,
+        video_provider: parseVideoLink(lessonStreamUid).provider ?? lessonProvider,
         handout_r2_key: lessonHandoutKey || undefined,
         sort_order: Number(lessonSortOrder)
       });
+      // The video endpoint has no chapter field; move the new lesson into the chapter it was added from.
+      if (lessonSectionId && created?.lesson?.id) {
+        await api.request(`/instructor/lessons/${created.lesson.id}/settings`, { method: "PATCH", body: JSON.stringify({ section_id: lessonSectionId }) })
+          .catch(() => undefined);
+      }
 
       // Reset fields and return to curriculum page
       setLessonTitle("");
@@ -611,7 +647,7 @@ export const InstructorConsole: React.FC = () => {
     e.preventDefault();
     if (!editingLesson) return;
     if (!editLessonTitle || !editLessonStreamUid) {
-      setModalError("กรุณากรอกชื่อบทเรียนและรหัสวิดีโอ (UID)");
+      setModalError("กรุณากรอกชื่อบทเรียนและเลือกวิดีโอ");
       return;
     }
     try {
@@ -619,8 +655,9 @@ export const InstructorConsole: React.FC = () => {
       setModalError(null);
       await api.patch(`/instructor/lessons/${editingLesson.id}`, {
         title: editLessonTitle,
-        video_stream_uid: editLessonStreamUid,
-        video_provider: editLessonProvider,
+        // A link pasted and saved without leaving the field is still turned into an ID here.
+        video_stream_uid: parseVideoLink(editLessonStreamUid).id,
+        video_provider: parseVideoLink(editLessonStreamUid).provider ?? editLessonProvider,
         handout_r2_key: editLessonHandoutKey || null,
         sort_order: Number(editLessonSortOrder)
       });
@@ -720,50 +757,20 @@ export const InstructorConsole: React.FC = () => {
   // ==========================================
 
   const renderDashboard = () => {
+    const query = courseQuery.trim().toLowerCase();
+    const visibleCourses = (data?.courses ?? []).filter(course =>
+      (courseFilter === "all" || course.status === courseFilter) && (!query || course.title.toLowerCase().includes(query)));
     return (
       <div>
         <div className="header-row">
           <div>
             <h1 className="header-title">คอนโซลผู้สอน</h1>
             <p className="header-desc">
-              สวัสดี อาจารย์{api.user?.name || "ผู้สอน"} • จัดการคอร์สและเผยแพร่บทเรียนบน Cloudflare CDN
+              สวัสดี อาจารย์{api.user?.name || "ผู้สอน"} • สร้างคอร์ส เพิ่มบทเรียน แล้วกด "ส่งตรวจ" เมื่อพร้อมเผยแพร่
             </p>
           </div>
 
-          <div style={{ display: "flex", gap: "12px" }}>
-            <button 
-              onClick={() => {
-                fetchVouchers();
-                setView("vouchers");
-              }}
-              className="tech-button-outline"
-              style={{ borderRadius: "1rem", display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <Ticket size={16} />
-              โค้ดส่วนลด
-            </button>
-            <button 
-              onClick={() => {
-                fetchGroups();
-                setView("groups");
-              }}
-              className="tech-button-outline"
-              style={{ borderRadius: "1rem", display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <Users size={16} />
-              กลุ่มเรียน
-            </button>
-            <button 
-              onClick={() => {
-                fetchTelemetry();
-                setView("telemetry");
-              }}
-              className="tech-button-outline"
-              style={{ borderRadius: "1rem", display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <TrendingUp size={16} />
-              ตรวจสอบข้อมูลการใช้งาน
-            </button>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button 
               onClick={() => {
                 fetchInstructorQuestions();
@@ -775,6 +782,35 @@ export const InstructorConsole: React.FC = () => {
               <ClipboardList size={16} />
               ถามตอบ
             </button>
+            <div style={{ position: "relative" }} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMoreOpen(false); }}>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(open => !open)}
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                className="tech-button-outline"
+                style={{ borderRadius: "1rem", display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <MoreHorizontal size={16} />
+                เพิ่มเติม
+              </button>
+              {moreOpen && (
+                <div role="menu" className="glass-card" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 50, background: "#fff", padding: "6px", minWidth: "220px", display: "grid", gap: "2px" }}>
+                  {([
+                    ["โค้ดส่วนลด", <Ticket size={15} />, () => { fetchVouchers(); setView("vouchers"); }],
+                    ["กลุ่มเรียน", <Users size={15} />, () => { fetchGroups(); setView("groups"); }],
+                    ["จุดที่ผู้เรียนติดขัด", <TrendingUp size={15} />, () => { fetchTelemetry(); setView("telemetry"); }]
+                  ] as [string, React.ReactNode, () => void][]).map(([label, icon, open]) => (
+                    <button key={label} type="button" role="menuitem" onClick={() => { setMoreOpen(false); open(); }}
+                      style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: "none", background: "none", borderRadius: "0.6rem", cursor: "pointer", fontFamily: "inherit", fontSize: "14px", color: "var(--text-primary)", textAlign: "left" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "var(--primary-glow)")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "none")}>
+                      {icon}{label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <AiInstructorTools courses={data?.courses ?? []} onChanged={() => fetchAnalytics()} />
             <button 
               onClick={() => {
@@ -814,7 +850,7 @@ export const InstructorConsole: React.FC = () => {
               <MetricsCard
                 title="คอร์สที่เปิดสอน"
                 value={data.totalCourses}
-                subValue="หลักสูตรที่เปิดใช้งานบน Edge"
+                subValue="คอร์สทั้งหมดของคุณ"
                 icon="BookOpen"
                 color="blue"
               />
@@ -842,8 +878,34 @@ export const InstructorConsole: React.FC = () => {
               <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                 <h3 style={{ fontSize: "18px", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
                   <LayoutGrid size={18} color="var(--primary)" />
-                  รายการคอร์สทั้งหมด
+                  คอร์สของฉัน
                 </h3>
+
+                {data.courses.length > 0 && (
+                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ position: "relative", flex: "1 1 220px" }}>
+                      <Search size={15} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+                      <input className="form-input" type="search" value={courseQuery} onChange={e => setCourseQuery(e.target.value)}
+                        placeholder="ค้นหาชื่อคอร์ส" aria-label="ค้นหาชื่อคอร์ส" style={{ paddingLeft: 34, width: "100%" }} />
+                    </div>
+                    <div role="group" aria-label="กรองตามสถานะ" style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      {(["all", "draft", "review", "published", "archived"] as const)
+                        .filter(key => key === "all" || data.courses.some(c => c.status === key))
+                        .map(key => {
+                          const count = key === "all" ? data.courses.length : data.courses.filter(c => c.status === key).length;
+                          const active = courseFilter === key;
+                          return (
+                            <button key={key} type="button" aria-pressed={active} onClick={() => setCourseFilter(key)}
+                              style={{ padding: "6px 12px", borderRadius: "999px", fontSize: "13px", fontFamily: "inherit", cursor: "pointer",
+                                border: `1px solid ${active ? "var(--primary)" : "var(--border-subtle)"}`,
+                                background: active ? "var(--primary-glow)" : "#fff", color: active ? "var(--color-brand-primary, var(--primary))" : "var(--text-secondary)", fontWeight: active ? 700 : 500 }}>
+                              {key === "all" ? "ทั้งหมด" : COURSE_STATUS[key].label} {count}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
 
                 {data.courses.length === 0 ? (
                   <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
@@ -851,7 +913,10 @@ export const InstructorConsole: React.FC = () => {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {data.courses.map((course) => (
+                    {visibleCourses.length === 0 && (
+                      <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>ไม่พบคอร์สที่ตรงกับการค้นหา</div>
+                    )}
+                    {visibleCourses.map((course) => (
                       <div 
                         key={course.id} 
                         style={{ 
@@ -873,11 +938,14 @@ export const InstructorConsole: React.FC = () => {
                             />
                             <div>
                               <h4 style={{ fontSize: "15px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                {course.title}
+                                <button type="button" onClick={() => handleManageCurriculumClick(course)} title="จัดการเนื้อหาคอร์สนี้"
+                                  style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer", textAlign: "left" }}>
+                                  {course.title}
+                                </button>
                                 {COURSE_STATUS[course.status] && <Chip {...COURSE_STATUS[course.status]} />}
                               </h4>
                               <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                                สร้างเมื่อ: {new Date(course.created_at).toLocaleDateString("th-TH")} • ID: {course.id.substring(0, 8)}
+                                สร้างเมื่อ {new Date(course.created_at).toLocaleDateString("th-TH")}
                                 {course.status === "review" && course.submitted_at && ` • ส่งตรวจเมื่อ ${new Date(course.submitted_at).toLocaleDateString("th-TH")}`}
                               </p>
                             </div>
@@ -1038,7 +1106,7 @@ export const InstructorConsole: React.FC = () => {
             <label className="form-label">ชื่อคอร์ส</label>
             <input
               type="text"
-              placeholder="เช่น TypeScript ขั้นสูงและการออกแบบ Edge API"
+              placeholder="เช่น พื้นฐานระบบเครือข่ายสำหรับผู้เริ่มต้น"
               value={courseTitle}
               onChange={(e) => setCourseTitle(e.target.value)}
               className="form-input"
@@ -1246,30 +1314,13 @@ export const InstructorConsole: React.FC = () => {
               จัดการเนื้อหาหลักสูตร
             </h3>
             <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              จัดการบทเรียน แหล่งวิดีโอ และเอกสารประกอบการเรียนของ: <strong style={{ color: "var(--text-primary)" }}>{selectedCourseForCurriculum.title}</strong>
+              คอร์ส: <strong style={{ color: "var(--text-primary)" }}>{selectedCourseForCurriculum.title}</strong>
             </p>
           </div>
 
           <div style={{ display: "flex", gap: "12px", flexShrink: 0 }}>
           <AiInstructorTools courses={data?.courses ?? []} course={selectedCourseForCurriculum} lessons={curriculumLessons}
             onChanged={() => loadCurriculum(selectedCourseForCurriculum.id)} />
-          <button 
-            type="button" 
-            onClick={() => {
-              setLessonCourseId(selectedCourseForCurriculum.id);
-              setLessonTitle("");
-              setLessonStreamUid("");
-              setLessonSortOrder(curriculumLessons.length + 1);
-              setLessonProvider("cloudflare");
-              setLessonHandoutKey("");
-              setModalError(null);
-              setView("create-lesson");
-            }}
-            className="tech-button-primary"
-            style={{ borderRadius: "1rem", flexShrink: 0 }}
-          >
-            <Plus size={16} /> เพิ่มบทเรียน
-          </button>
           </div>
         </div>
 
@@ -1277,7 +1328,8 @@ export const InstructorConsole: React.FC = () => {
         <CourseBuilder
           courseId={selectedCourseForCurriculum.id}
           refreshToken={curriculumLessons}
-          onAddVideoLesson={() => {
+          onAddVideoLesson={sectionId => {
+            setLessonSectionId(sectionId);
             setLessonCourseId(selectedCourseForCurriculum.id);
             setLessonTitle("");
             setLessonStreamUid("");
@@ -1339,43 +1391,34 @@ export const InstructorConsole: React.FC = () => {
             />
           </div>
 
-          <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div>
-              <label className="form-label">แหล่งวิดีโอ</label>
-              <select
-                value={lessonProvider}
-                onChange={(e) => setLessonProvider(e.target.value)}
-                className="form-input"
-                style={{ cursor: "pointer", borderRadius: "1rem" }}
-                required
-              >
-                <option value="cloudflare">Cloudflare Stream</option>
-                <option value="youtube">YouTube (ฝังวิดีโอ)</option>
-                <option value="vimeo">Vimeo (ฝังวิดีโอ)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="form-label">ลำดับบทเรียน</label>
-              <input
-                type="number"
-                min={1}
-                value={lessonSortOrder}
-                onChange={(e) => setLessonSortOrder(Number(e.target.value))}
-                className="form-input"
-                required
-              />
-            </div>
+          <div className="form-group">
+            <label className="form-label">วิดีโอมาจาก</label>
+            <select
+              value={lessonProvider}
+              onChange={(e) => setLessonProvider(e.target.value)}
+              className="form-input"
+              style={{ cursor: "pointer", borderRadius: "1rem" }}
+              required
+            >
+              <option value="cloudflare">อัปโหลดไฟล์เข้าระบบ</option>
+              <option value="youtube">YouTube</option>
+              <option value="vimeo">Vimeo</option>
+            </select>
           </div>
 
           <div className="form-group">
-            <label className="form-label">รหัสวิดีโอ (Stream UID / Embed ID)</label>
+            <label className="form-label">วิดีโอ</label>
             <div style={{ display: "flex", gap: "10px" }}>
               <input
                 type="text"
-                placeholder="เช่น cf-stream-uid หรือ youtube-video-id"
+                placeholder="วางลิงก์ YouTube / Vimeo หรือกด &quot;อัปโหลดวิดีโอ&quot;"
                 value={lessonStreamUid}
                 onChange={(e) => setLessonStreamUid(e.target.value)}
+                onBlur={(e) => {
+                  const parsed = parseVideoLink(e.target.value);
+                  setLessonStreamUid(parsed.id);
+                  if (parsed.provider) setLessonProvider(parsed.provider);
+                }}
                 className="form-input"
                 style={{ flexGrow: 1 }}
                 required
@@ -1407,18 +1450,18 @@ export const InstructorConsole: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">คีย์ไฟล์เอกสารบน R2 (ไม่บังคับ)</label>
+            <label className="form-label">เอกสารประกอบให้ผู้เรียนดาวน์โหลด (ไม่บังคับ)</label>
             <div style={{ display: "flex", gap: "10px" }}>
               <input
                 type="text"
-                placeholder="เช่น handouts/introduction-sheet.pdf"
+                placeholder="ยังไม่มีไฟล์ กด &quot;อัปโหลดเอกสาร&quot;"
                 value={lessonHandoutKey}
                 onChange={(e) => setLessonHandoutKey(e.target.value)}
                 className="form-input"
                 style={{ flexGrow: 1 }}
               />
               <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลด PDF"}
+                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลดเอกสาร"}
                 <input
                   type="file"
                   accept="application/pdf,.zip,.doc,.docx"
@@ -1441,7 +1484,7 @@ export const InstructorConsole: React.FC = () => {
               </label>
             </div>
             <small style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
-              ผู้เรียนจะดาวน์โหลดไฟล์นี้ได้จาก Cloudflare R2
+              รองรับ PDF, Word และ ZIP ผู้เรียนดาวน์โหลดได้จากหน้าบทเรียน
             </small>
           </div>
 
@@ -1495,42 +1538,34 @@ export const InstructorConsole: React.FC = () => {
             />
           </div>
 
-          <div className="form-group" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div>
-              <label className="form-label">แหล่งวิดีโอ</label>
-              <select
-                value={editLessonProvider}
-                onChange={(e) => setEditLessonProvider(e.target.value)}
-                className="form-input"
-                style={{ cursor: "pointer", borderRadius: "1rem" }}
-                required
-              >
-                <option value="cloudflare">Cloudflare Stream</option>
-                <option value="youtube">YouTube (ฝังวิดีโอ)</option>
-                <option value="vimeo">Vimeo (ฝังวิดีโอ)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="form-label">ลำดับบทเรียน</label>
-              <input
-                type="number"
-                min={1}
-                value={editLessonSortOrder}
-                onChange={(e) => setEditLessonSortOrder(Number(e.target.value))}
-                className="form-input"
-                required
-              />
-            </div>
+          <div className="form-group">
+            <label className="form-label">วิดีโอมาจาก</label>
+            <select
+              value={editLessonProvider}
+              onChange={(e) => setEditLessonProvider(e.target.value)}
+              className="form-input"
+              style={{ cursor: "pointer", borderRadius: "1rem" }}
+              required
+            >
+              <option value="cloudflare">อัปโหลดไฟล์เข้าระบบ</option>
+              <option value="youtube">YouTube</option>
+              <option value="vimeo">Vimeo</option>
+            </select>
           </div>
 
           <div className="form-group">
-            <label className="form-label">รหัสวิดีโอ (Stream UID / Embed ID)</label>
+            <label className="form-label">วิดีโอ</label>
             <div style={{ display: "flex", gap: "10px" }}>
               <input
                 type="text"
+                placeholder="วางลิงก์ YouTube / Vimeo หรือกด &quot;อัปโหลดวิดีโอ&quot;"
                 value={editLessonStreamUid}
                 onChange={(e) => setEditLessonStreamUid(e.target.value)}
+                onBlur={(e) => {
+                  const parsed = parseVideoLink(e.target.value);
+                  setEditLessonStreamUid(parsed.id);
+                  if (parsed.provider) setEditLessonProvider(parsed.provider);
+                }}
                 className="form-input"
                 style={{ flexGrow: 1 }}
                 required
@@ -1562,18 +1597,18 @@ export const InstructorConsole: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">คีย์ไฟล์เอกสารบน R2 (ไม่บังคับ)</label>
+            <label className="form-label">เอกสารประกอบให้ผู้เรียนดาวน์โหลด (ไม่บังคับ)</label>
             <div style={{ display: "flex", gap: "10px" }}>
               <input
                 type="text"
-                placeholder="เช่น handouts/introduction-sheet.pdf"
+                placeholder="ยังไม่มีไฟล์ กด &quot;อัปโหลดเอกสาร&quot;"
                 value={editLessonHandoutKey}
                 onChange={(e) => setEditLessonHandoutKey(e.target.value)}
                 className="form-input"
                 style={{ flexGrow: 1 }}
               />
               <label className="tech-button-outline" style={{ borderRadius: "0.5rem", padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", height: "fit-content", flexShrink: 0 }}>
-                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลด PDF"}
+                {uploadingHandout ? "กำลังอัปโหลด..." : "อัปโหลดเอกสาร"}
                 <input
                   type="file"
                   accept="application/pdf,.zip,.doc,.docx"
