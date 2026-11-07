@@ -26,7 +26,8 @@ function scrollToHash(hash: string, smooth: boolean) {
   target?.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
 }
 
-export function navigate(to: string, options: { replace?: boolean } = {}) {
+/** `state` is stored on the history entry (the console marks entries it may close with history.back()). */
+export function navigate(to: string, options: { replace?: boolean; state?: Record<string, unknown> } = {}) {
   const url = new URL(to, window.location.href);
   if (url.origin !== window.location.origin) {
     window.location.assign(url.href);
@@ -34,8 +35,8 @@ export function navigate(to: string, options: { replace?: boolean } = {}) {
   }
   const samePage = url.pathname === window.location.pathname && url.search === window.location.search;
   const next = url.pathname + url.search + url.hash;
-  if (options.replace) window.history.replaceState({}, "", next);
-  else window.history.pushState({}, "", next);
+  if (options.replace) window.history.replaceState(options.state ?? {}, "", next);
+  else window.history.pushState(options.state ?? {}, "", next);
   window.dispatchEvent(new Event(NAVIGATE_EVENT));
   // Wait for the new page to render before scrolling.
   window.setTimeout(() => {
