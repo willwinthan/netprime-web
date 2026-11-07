@@ -3,6 +3,7 @@ import {
   sitemapEntries, sitemapXml, staticPageMeta, DEFAULT_DESCRIPTION, DEFAULT_IMAGE_PATH, DEFAULT_TITLE
 } from "./meta";
 import { customPageMeta, customPageSitemapEntries, manifestJson, missingCustomPageMeta, PublicCustomPage } from "./meta";
+import { lessonPageMeta, lessonSitemapEntries, missingLessonMeta, PublicLesson } from "./meta";
 
 /**
  * Frontend Worker in front of the static SPA build.
@@ -20,6 +21,7 @@ interface Env {
 const ARTICLE_PATH = /^\/blog\/([^/]+)\/?$/;
 const CUSTOM_PAGE_PATH = /^\/p\/([^/]+)\/?$/;
 const COURSE_PATH = /^\/courses\/([^/]+)\/?$/;
+const LESSON_PATH = /^\/self-learning\/([^/]+)\/?$/;
 // Static defaults in index.html that a page-specific value replaces.
 const MANAGED_TAGS = 'meta[name="description"], meta[property^="og:"], meta[property^="article:"], meta[name^="twitter:"], meta[name="robots"], link[rel="canonical"]';
 const API_CACHE_SECONDS = 300;
@@ -126,6 +128,46 @@ async function customPage(request: Request, url: URL, rawSlug: string, env: Env)
   }
 }
 
+/** Self-learning lessons (/self-learning/:slug): share tags from the lesson's title, summary and cover. */
+async function lessonPage(request: Request, url: URL, rawSlug: string, env: Env): Promise<Response> {
+  let slug: string;
+  try {
+    slug = decodeURIComponent(rawSlug).toLowerCase();
+  } catch {
+    return renderShell(request, url, env, missingLessonMeta(url.pathname, url.origin), 404);
+  }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return renderShell(request, url, env, missingLessonMeta(url.pathname, url.origin), 404);
+  const base = apiBase(env);
+  if (!base) return renderShell(request, url, env, genericMeta(url));
+  try {
+    const res = await fetch(`${base}/public/self-learning/${encodeURIComponent(slug)}`, {
+      headers: { accept: "application/json" },
+      cf: { cacheTtl: 60, cacheEverything: true }
+    });
+    if (res.status === 404) return renderShell(request, url, env, missingLessonMeta(url.pathname, url.origin), 404);
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    const { lesson } = await res.json() as { lesson: PublicLesson };
+    return renderShell(request, url, env, lessonPageMeta(lesson, url.origin));
+  } catch (error) {
+    console.error("Lesson metadata unavailable:", error);
+    return renderShell(request, url, env, genericMeta(url));
+  }
+}
+
+/** Published lessons for the sitemap; null when the API is unreachable (partial sitemap). */
+async function lessonsForSitemap(env: Env): Promise<PublicLesson[] | null> {
+  const base = apiBase(env);
+  if (!base) return [];
+  try {
+    const res = await fetch(`${base}/public/self-learning`, { headers: { accept: "application/json" } });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    return (await res.json() as { lessons: PublicLesson[] }).lessons;
+  } catch (error) {
+    console.error("Sitemap lesson listing failed:", error);
+    return null;
+  }
+}
+
 /** Published custom pages for the sitemap; null when the API is unreachable (partial sitemap). */
 async function customPagesForSitemap(env: Env): Promise<PublicCustomPage[] | null> {
   const base = apiBase(env);
@@ -189,9 +231,10 @@ async function sitemap(url: URL, env: Env, ctx: ExecutionContext): Promise<Respo
       console.error("Sitemap course listing failed:", error);
     }
   }
-  const pages = await customPagesForSitemap(env);
-  if (pages === null) complete = false;
-  const response = plain(sitemapXml([...sitemapEntries(url.origin, articles, courses), ...customPageSitemapEntries(url.origin, pages ?? [])]),
+  const [pages, lessons] = await Promise.all([customPagesForSitemap(env), lessonsForSitemap(env)]);
+  if (pages === null || lessons === null) complete = false;
+  const response = plain(sitemapXml([...sitemapEntries(url.origin, articles, courses), ...customPageSitemapEntries(url.origin, pages ?? []),
+    ...lessonSitemapEntries(url.origin, lessons ?? [])]),
     "application/xml; charset=utf-8", complete ? 3600 : 60);
   if (complete) ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return response;
@@ -206,6 +249,8 @@ export default {
     if (url.pathname === "/manifest.webmanifest") return manifest(request, env);
     const pageSlug = CUSTOM_PAGE_PATH.exec(url.pathname)?.[1];
     if (pageSlug) return customPage(request, url, pageSlug, env);
+    const lessonSlug = LESSON_PATH.exec(url.pathname)?.[1];
+    if (lessonSlug) return lessonPage(request, url, lessonSlug, env);
     const slug = ARTICLE_PATH.exec(url.pathname)?.[1];
     if (slug) return articlePage(request, url, slug, env);
     const courseId = COURSE_PATH.exec(url.pathname)?.[1];

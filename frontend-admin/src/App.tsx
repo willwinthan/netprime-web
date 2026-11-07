@@ -13,7 +13,8 @@ import { InstallAppButton } from "./pwa/pwa";
 import logo from "../logo/NetPrimeLogo.png";
 import { FEATURES } from "./features";
 // Console pages load on first visit so learners and visitors don't download every staff screen.
-const LessonFrame = lazy(() => import("./site/SelfLearningPage").then(m => ({ default: m.LessonFrame })));
+const SelfLearningLibrary = lazy(() => import("./site/SelfLearningPage").then(m => ({ default: m.SelfLearningLibrary })));
+const SelfLearningAdminPage = lazy(() => import("./pages/SelfLearningAdminPage").then(m => ({ default: m.SelfLearningAdminPage })));
 const InstructorRoundsPage = lazy(() => import("./pages/InstructorRoundsPage").then(m => ({ default: m.InstructorRoundsPage })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
 const HRConsole = lazy(() => import("./pages/HRConsole").then(m => ({ default: m.HRConsole })));
@@ -77,7 +78,7 @@ import {
   X
 } from "lucide-react";
 
-type ConsoleTab = "dashboard" | "selflearning" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
+type ConsoleTab = "dashboard" | "selflearning" | "selflearningadmin" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
   | "settings" | "ai" | "affiliate" | "commerce" | "audit";
@@ -129,7 +130,8 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "communication", label: "การสื่อสารและชุมชน", icon: <MessagesSquare size={16} />, show: perm("communication.manage") },
     { tab: "marketing", label: "การตลาด", icon: <Megaphone size={16} />, show: perm("marketing.manage") },
     { tab: "articles", label: "บทความ", icon: <Newspaper size={16} />, show: perm("articles.publish", "articles.manage") },
-    { tab: "website", label: "เว็บไซต์", icon: <Globe size={16} />, show: perm(...WEBSITE_PERMISSIONS) }
+    { tab: "website", label: "เว็บไซต์", icon: <Globe size={16} />, show: perm(...WEBSITE_PERMISSIONS) },
+    { tab: "selflearningadmin", label: "บทเรียน Self-learning", icon: <GraduationCap size={16} />, show: perm("site.self_learning") }
   ] },
   { id: "system", title: "ระบบและผู้ดูแล", hint: "ผู้ใช้ สิทธิ์ องค์กรลูกค้า PDPA AI และการเชื่อมต่อระบบ", items: [
     { tab: "admin", label: "ภาพรวมผู้ดูแลระบบ", icon: <ShieldCheck size={16} />, show: role("admin") },
@@ -466,7 +468,8 @@ export const App: React.FC = () => {
                     <InstructorConsole />
                   </m.div>
                 )}
-                {currentTab === "selflearning" && <m.div key="selflearning" {...pageTransition}><LessonFrame /></m.div>}
+                {currentTab === "selflearning" && <m.div key="selflearning" {...pageTransition}><SelfLearningLibrary /></m.div>}
+                {currentTab === "selflearningadmin" && <m.div key="selflearningadmin" {...pageTransition}><SelfLearningAdminPage /></m.div>}
                 {currentTab === "rounds" && (
                   <m.div key="rounds" {...pageTransition}>
                     <InstructorRoundsPage />
