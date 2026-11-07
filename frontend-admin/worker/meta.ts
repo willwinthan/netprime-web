@@ -11,7 +11,7 @@ export const STATIC_PAGES: Record<string, { title: string | null; description: s
   "/": { title: null, description: DEFAULT_DESCRIPTION },
   "/courses": { title: "คอร์สออนไลน์", description: "คอร์สออนไลน์ด้าน Network, Cloud และ Security จาก Cisco, AWS, Aruba, Juniper และอื่น ๆ" },
   "/schedule": { title: "ตารางอบรม", description: "รอบอบรมในห้องเรียนและออนไลน์สด พร้อมจำนวนที่นั่งคงเหลือ ลงทะเบียนได้ทันที" },
-  "/self-learning": { title: "Self-learning", description: "บทเรียนโต้ตอบ Basic Network 16 บท ดูแพ็กเก็ตวิ่งบนเครือข่ายทีละขั้น เรียนเองได้ทันทีไม่ต้องสมัครสมาชิก" },
+  "/self-learning": { title: "Self-learning", description: "ลงมือดูการทำงานของเครือข่ายทีละขั้น ไม่ต้องสมัครสมาชิก ระบบจำความคืบหน้าไว้ในเบราว์เซอร์นี้" },
   "/blog": { title: "บทความ", description: "บทความด้าน Network, Cloud และ Security เทคนิคเตรียมสอบ และข่าวรอบอบรมจาก NetPrime" },
   "/about": { title: "เกี่ยวกับเรา", description: "NetPrime ศูนย์ฝึกอบรมด้าน Network, Cloud และ Security" }
 };
@@ -208,6 +208,37 @@ export function customPageSitemapEntries(origin: string, pages: Array<Pick<Publi
   return pages.map(p => {
     const stamp = p.updated_at || p.published_at;
     return { loc: `${origin}/p/${encodeURIComponent(p.slug)}`, ...(stamp ? { lastmod: toIso(stamp).slice(0, 10) } : {}) };
+  });
+}
+
+export interface PublicLesson {
+  slug: string;
+  title: string;
+  summary: string | null;
+  cover_url: string | null;
+  published_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** Self-learning lessons (/self-learning/:slug). */
+export function lessonPageMeta(lesson: PublicLesson, origin: string): PageMeta {
+  return {
+    title: `${lesson.title} | Self-learning | ${SITE_NAME}`,
+    description: lesson.summary?.trim() ? summarize(lesson.summary) : STATIC_PAGES["/self-learning"].description,
+    url: `${origin}/self-learning/${encodeURIComponent(lesson.slug)}`,
+    image: absoluteUrl(lesson.cover_url, origin) || origin + DEFAULT_IMAGE_PATH,
+    type: "website"
+  };
+}
+
+export function missingLessonMeta(pathname: string, origin: string): PageMeta {
+  return { title: `ไม่พบบทเรียน | ${SITE_NAME}`, description: DEFAULT_DESCRIPTION, url: origin + pathname, image: origin + DEFAULT_IMAGE_PATH, type: "website", noindex: true };
+}
+
+export function lessonSitemapEntries(origin: string, lessons: Array<Pick<PublicLesson, "slug" | "updated_at" | "published_at">>): SitemapEntry[] {
+  return lessons.map(l => {
+    const stamp = l.updated_at || l.published_at;
+    return { loc: `${origin}/self-learning/${encodeURIComponent(l.slug)}`, ...(stamp ? { lastmod: toIso(stamp).slice(0, 10) } : {}) };
   });
 }
 

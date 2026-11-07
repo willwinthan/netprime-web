@@ -12,7 +12,7 @@ import { ErrorBox, Modal } from "../site-admin/ui";
 
 export type DangerAction =
   | "course.delete" | "lesson.delete" | "section.delete" | "exam.delete" | "assignment.delete"
-  | "session.delete" | "article.delete" | "product.delete" | "page.delete"
+  | "session.delete" | "article.delete" | "product.delete" | "page.delete" | "self_learning.delete"
   | "webhook.delete" | "api_key.revoke" | "sso.delete" | "privacy.approve";
 
 export interface DeletePreview {

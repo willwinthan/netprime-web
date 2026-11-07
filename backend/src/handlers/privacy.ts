@@ -31,6 +31,7 @@ async function audit(c: Context<Env>, action: string, entityId: string, detail?:
 const OWN_TABLES: Array<[string, string, string]> = [
   ["enrollments", "enrollments", "user_id"],
   ["lesson_progress", "lesson_progress", "user_id"],
+  ["self_learning_progress", "self_learning_progress", "user_id"],
   ["quiz_attempts", "quiz_attempts", "user_id"],
   ["quiz_answers", "quiz_answers", "user_id"],
   ["notes", "student_notes", "user_id"],

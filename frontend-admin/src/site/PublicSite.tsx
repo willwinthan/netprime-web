@@ -12,7 +12,7 @@ import { ScheduleCalendarView } from "./ScheduleCalendar";
 import { AiSalesChatWidget } from "../components/ai/AiSalesChatWidget";
 import "./site.css";
 import { CustomPage } from "./CustomPage";
-import { SelfLearningPage } from "./SelfLearningPage";
+import { SelfLearningLessonPage, SelfLearningPage } from "./SelfLearningPage";
 import { CoursePage, consumeReturnTo } from "./CoursePage";
 import { useI18n } from "../i18n";
 import { PublicCategoryChips } from "../components/course/CategoryFilter";
@@ -21,7 +21,7 @@ import { PublicCategoryChips } from "../components/course/CategoryFilter";
 export function isPublicPath(pathname: string): boolean {
   // Emailed account links (reset / invitation / verification) also open while signed in.
   return ["/", "/courses", "/schedule", "/self-learning", "/about", "/blog", "/reset-password", "/verify-email", ...Object.keys(LEGAL_PATHS)].includes(pathname.replace(/\/+$/, "") || "/") ||
-    pathname.startsWith("/blog/") || pathname.startsWith("/p/") || /^\/courses\/[^/]+\/?$/.test(pathname);
+    pathname.startsWith("/blog/") || pathname.startsWith("/p/") || pathname.startsWith("/self-learning/") || /^\/courses\/[^/]+\/?$/.test(pathname);
 }
 
 const PageHead: React.FC<{ kicker: string; title: string; lead?: string; children?: React.ReactNode }> = ({ kicker, title, lead, children }) => (
@@ -170,6 +170,7 @@ export const PublicSite: React.FC<{ loggedIn: boolean; onLogin: (token: string, 
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const postSlug = /^\/blog\/([^/]+)$/.exec(path)?.[1];
   const pageSlug = /^\/p\/([^/]+)$/.exec(path)?.[1];
+  const lessonSlug = /^\/self-learning\/([^/]+)$/.exec(path)?.[1];
   const courseSlug = /^\/courses\/([^/]+)$/.exec(path)?.[1];
   // Re-render every page when the visitor switches TH/EN (page components read t() while rendering).
   useI18n();
@@ -190,6 +191,7 @@ export const PublicSite: React.FC<{ loggedIn: boolean; onLogin: (token: string, 
   else if (path === "/verify-email") page = <VerifyEmailPage />;
   else if (LEGAL_PATHS[path]) page = <LegalPage pageKey={LEGAL_PATHS[path]} />;
   else if (postSlug) page = <BlogPostPage key={postSlug} slug={decodeURIComponent(postSlug)} />;
+  else if (lessonSlug) page = <SelfLearningLessonPage key={lessonSlug} slug={decodeURIComponent(lessonSlug)} />;
   else if (pageSlug) page = <CustomPage key={pageSlug} slug={decodeURIComponent(pageSlug)} />;
   else if (courseSlug) page = <CoursePage key={courseSlug} courseId={decodeURIComponent(courseSlug)} />;
   else page = <NotFoundPage />;

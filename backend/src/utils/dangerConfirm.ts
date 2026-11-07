@@ -18,7 +18,7 @@ import { escapeHtml, sendEmail } from "./email";
 
 export type DangerAction =
   | "course.delete" | "lesson.delete" | "section.delete" | "exam.delete" | "assignment.delete"
-  | "session.delete" | "article.delete" | "product.delete" | "page.delete"
+  | "session.delete" | "article.delete" | "product.delete" | "page.delete" | "self_learning.delete"
   | "webhook.delete" | "api_key.revoke" | "sso.delete" | "privacy.approve";
 
 export type Approver = "owner" | "admin";
@@ -215,6 +215,21 @@ const ACTIONS: Record<DangerAction, ActionSpec> = {
       };
     },
     allowed: hasPermission("website.design")
+  },
+  "self_learning.delete": {
+    label: "ลบบทเรียน Self-learning", kind: "บทเรียน Self-learning",
+    async load(db, id) {
+      const row = await db.prepare(`SELECT title, slug, status, created_by, (SELECT COUNT(*) FROM self_learning_files WHERE lesson_id = l.id) AS files,
+          (SELECT COUNT(*) FROM self_learning_progress WHERE lesson_id = l.id) AS learners
+        FROM self_learning_lessons l WHERE id = ?`).bind(id).first<Record<string, any>>();
+      if (!row) return null;
+      return {
+        title: `${row.title} (/self-learning/${row.slug})`, ownerId: row.created_by, required: row.status === "published" || n(row.learners) > 0,
+        counts: nonZero([{ label: "ไฟล์ทุกเวอร์ชัน", value: n(row.files) }, { label: "ผู้เรียนที่มีความคืบหน้า", value: n(row.learners) }]),
+        consequences: ["บทเรียนจะหายจากเว็บไซต์ทันที ไฟล์ทุกเวอร์ชันและความคืบหน้าของผู้เรียนจะถูกลบ ลิงก์ที่แชร์ไว้จะใช้ไม่ได้"]
+      };
+    },
+    allowed: hasPermission("site.self_learning")
   },
   "webhook.delete": {
     label: "ลบปลายทาง webhook", kind: "webhook", adminOnly: true,

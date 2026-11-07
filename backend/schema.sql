@@ -83,6 +83,9 @@ DROP TABLE IF EXISTS admin_audit_log;
 DROP TABLE IF EXISTS site_settings;
 DROP TABLE IF EXISTS promotions;
 DROP TABLE IF EXISTS inquiries;
+DROP TABLE IF EXISTS self_learning_progress;
+DROP TABLE IF EXISTS self_learning_files;
+DROP TABLE IF EXISTS self_learning_lessons;
 DROP TABLE IF EXISTS articles;
 DROP TABLE IF EXISTS session_registrations;
 DROP TABLE IF EXISTS training_sessions;
@@ -1020,6 +1023,52 @@ CREATE TABLE articles (
 CREATE INDEX IF NOT EXISTS idx_articles_status_published ON articles (status, published_at);
 CREATE INDEX IF NOT EXISTS idx_articles_author ON articles (author_id, status);
 
+-- Self-learning lessons: uploaded HTML files embedded under /self-learning (migration 0032).
+CREATE TABLE IF NOT EXISTS self_learning_lessons (
+    id TEXT PRIMARY KEY,
+    slug TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    title_en TEXT,
+    summary TEXT,
+    summary_en TEXT,
+    cover_url TEXT,
+    level TEXT CHECK(level IS NULL OR level IN ('beginner', 'intermediate', 'advanced')),
+    status TEXT NOT NULL CHECK(status IN ('draft', 'published')) DEFAULT 'draft',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    current_file_id TEXT,          -- self_learning_files row shown to learners; NULL until a file is uploaded
+    published_at TEXT,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_self_learning_lessons_status ON self_learning_lessons (status, sort_order);
+
+-- Every uploaded version is kept (private R2 under self-learning/), so staff can roll back.
+CREATE TABLE IF NOT EXISTS self_learning_files (
+    id TEXT PRIMARY KEY,
+    lesson_id TEXT NOT NULL REFERENCES self_learning_lessons(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    r2_key TEXT NOT NULL,
+    filename TEXT,
+    size_bytes INTEGER NOT NULL,
+    uses_kit INTEGER NOT NULL DEFAULT 0,   -- The file speaks the lesson postMessage protocol (height, location)
+    external_hosts TEXT,                   -- JSON array of other hosts the file loads from or links to
+    uploaded_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (lesson_id, version)
+);
+-- Signed-in learners' self-learning progress (migration 0033).
+CREATE TABLE IF NOT EXISTS self_learning_progress (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lesson_id TEXT NOT NULL REFERENCES self_learning_lessons(id) ON DELETE CASCADE,
+    percent INTEGER NOT NULL DEFAULT 0 CHECK(percent BETWEEN 0 AND 100),
+    state TEXT,                    -- JSON from the lesson, at most 64 KB
+    completed_at TEXT,             -- First time the lesson reported itself complete; never cleared
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, lesson_id)
+);
+CREATE INDEX IF NOT EXISTS idx_self_learning_progress_lesson ON self_learning_progress (lesson_id);
+
 -- Contact form submissions.
 CREATE TABLE IF NOT EXISTS inquiries (
     id TEXT PRIMARY KEY,
@@ -1157,7 +1206,8 @@ INSERT INTO role_permissions (role, permission) VALUES
 ('coordinator', 'articles.import_notion'),
 ('instructor', 'articles.write'),
 ('instructor', 'articles.import_notion'),
-('instructor', 'site.media');
+('instructor', 'site.media'),
+('coordinator', 'site.self_learning');
 
 -- Enable foreign key checking again
 PRAGMA foreign_keys = ON;

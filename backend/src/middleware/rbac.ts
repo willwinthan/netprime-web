@@ -37,6 +37,11 @@ export type Env = {
     NOTION_TOKEN?: string;
     /** Public site origin used in email links, e.g. https://www.netprime.co.th (no trailing slash). */
     APP_URL?: string;
+    /**
+     * Origin that serves uploaded self-learning HTML, e.g. https://lessons.netprime.co.th (no trailing slash),
+     * routed to this Worker. Must differ from the site's origin. Unset: this Worker's own origin.
+     */
+    SELF_LEARNING_ORIGIN?: string;
     /** Email From header; the domain must be verified in Resend (SPF/DKIM). */
     EMAIL_FROM?: string;
     /** Cloudflare account and API token for Stream direct creator uploads (optional). */

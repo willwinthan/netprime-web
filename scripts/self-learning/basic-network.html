@@ -2914,6 +2914,66 @@ LESSONS.forEach(l => { const m = SKIPS[l.id] || {}; Object.keys(m).forEach(k => 
     go(i, h[2] ? Math.min(Math.max(0, +h[2] - 1), LESSONS[i].steps.length - 1) : 0, false, !h[2]);
     postHeight();
   });
+  /* NetPrime Lesson Kit (docs/SELF-LEARNING-LESSON-KIT.md): สีหลักตามธีมของเว็บ และเก็บความคืบหน้าของผู้เรียนที่ login
+     ไว้ในระบบ เพื่อเรียนต่อจากเครื่องอื่นได้ ความคืบหน้าในเครื่องยังเก็บแบบเดิม (pe-prog, pe-seen, pe-quiz) */
+  (function lessonKit() {
+    if (window.parent === window) return;
+    const P = 'netprime-lesson:';
+    const send = (type, data = {}) => { try { window.parent.postMessage({ ...data, type: P + type }, '*'); } catch (e) { /* ไม่มีหน้าแม่ */ } };
+    const percent = () => {
+      const total = LESSONS.reduce((n, l) => n + l.steps.length, 0);
+      return Math.round(LESSONS.reduce((n, l) => n + seenSet(l).size, 0) / total * 100);
+    };
+    const report = () => send('progress', {
+      percent: percent(), completed: LESSONS.every(l => lessonState(l) === 'pass'), state: { prog, seen, quiz: passed }
+    });
+    let timer = 0;
+    const write = store.set;
+    store.set = (k, v) => {
+      write(k, v);
+      if (k === 'pe-prog' || k === 'pe-seen' || k === 'pe-quiz') { clearTimeout(timer); timer = setTimeout(report, 1000); }
+    };
+    const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    /* รวมค่าที่บันทึกไว้เข้ากับในเครื่อง: เลือกค่าที่ไปไกลกว่า เรียกซ้ำได้ผลเท่าเดิม */
+    const merge = saved => {
+      let changed = false;
+      for (const [id, n] of Object.entries(obj(saved.prog))) {
+        if (Number.isInteger(n) && !(prog[id] >= n)) { prog[id] = n; changed = true; }
+      }
+      for (const [id, list] of Object.entries(obj(saved.seen))) {
+        if (!Array.isArray(list)) continue;
+        const set = new Set(Array.isArray(seen[id]) ? seen[id] : []);
+        const before = set.size;
+        list.forEach(n => { if (Number.isInteger(n)) set.add(n); });
+        if (set.size !== before) { seen[id] = [...set]; changed = true; }
+      }
+      for (const [id, ok] of Object.entries(obj(saved.quiz))) {
+        if (ok === true && passed[id] !== true) { passed[id] = true; changed = true; }
+      }
+      return changed;
+    };
+    let accentStyle = null;
+    window.addEventListener('message', e => {
+      if (e.source !== window.parent || !e.data || typeof e.data.type !== 'string') return;
+      if (e.data.type === P + 'theme' && !cfg.accent) {
+        const color = obj(obj(e.data.theme).vars)['--np-primary'];
+        if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) return;
+        accentStyle = accentStyle || document.head.appendChild(document.createElement('style'));
+        /* ใช้กับโหมดสว่างเท่านั้น โหมดมืดคงสีเดิมเพื่อให้อ่านง่าย */
+        accentStyle.textContent = `:root[data-theme="light"] { --accent: ${color}; --accent-ink: #ffffff; }`;
+      }
+      if (e.data.type === P + 'restore' && e.data.signedIn) {
+        const before = percent();
+        if (merge(obj(e.data.state))) {
+          write('pe-prog', JSON.stringify(prog)); write('pe-seen', JSON.stringify(seen)); write('pe-quiz', JSON.stringify(passed));
+          try { drawRail(); drawProgress(); } catch (err) { /* ยังไม่ boot ก็จะวาดตอน boot */ }
+        }
+        /* ความคืบหน้าในเครื่องนี้ไปไกลกว่าที่บันทึกไว้ ส่งขึ้นระบบ */
+        if (before > (Number(e.data.percent) || 0) || (before > 0 && !e.data.state)) report();
+      }
+    });
+    send('ready');
+  })();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(boot); else boot();
 })();
 

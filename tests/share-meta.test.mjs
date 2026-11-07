@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  absoluteUrl, articlePageMeta, headTags, missingArticleMeta, robotsTxt, sitemapEntries, sitemapXml, staticPageMeta, summarize
+  absoluteUrl, articlePageMeta, headTags, lessonPageMeta, lessonSitemapEntries, missingArticleMeta, missingLessonMeta, robotsTxt,
+  sitemapEntries, sitemapXml, staticPageMeta, summarize
 } from '../frontend-admin/worker/meta.ts';
 
 const origin = 'https://www.netprime.example';
@@ -55,4 +56,16 @@ test('sitemap lists public pages and articles; robots points to it', () => {
   assert.ok(!xml.includes('/dashboard'));
   assert.match(robotsTxt(origin), /Sitemap: https:\/\/www\.netprime\.example\/sitemap\.xml/);
   assert.match(robotsTxt(origin), /Disallow: \/dashboard/);
+});
+
+test('self-learning lessons get their own share tags and sitemap entries', () => {
+  const lesson = { slug: 'basic-network', title: 'Basic Network', summary: 'ดูแพ็กเก็ตวิ่งทีละขั้น', cover_url: '/api/public/images/x.png', updated_at: '2026-11-07 10:00:00' };
+  const meta = lessonPageMeta(lesson, origin);
+  assert.equal(meta.url, `${origin}/self-learning/basic-network`);
+  assert.match(meta.title, /^Basic Network \| Self-learning/);
+  assert.equal(meta.description, 'ดูแพ็กเก็ตวิ่งทีละขั้น');
+  assert.equal(meta.image, `${origin}/api/public/images/x.png`);
+  assert.equal(lessonPageMeta({ ...lesson, summary: null, cover_url: null }, origin).description, staticPageMeta('/self-learning', origin).description);
+  assert.equal(missingLessonMeta('/self-learning/nope', origin).noindex, true);
+  assert.deepEqual(lessonSitemapEntries(origin, [lesson]), [{ loc: `${origin}/self-learning/basic-network`, lastmod: '2026-11-07' }]);
 });
