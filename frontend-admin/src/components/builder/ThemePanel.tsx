@@ -7,6 +7,7 @@ import { Background, ButtonStyle, DEFAULT_THEME, FONTS, FontName, FooterStyle, H
 import fullLogo from "../../../logo/NetPrimeFullLogo.png";
 import "../../site/site.css";
 import { useBuilderPreview, usePreviewSync } from "./SitePreview";
+import { DraftBar } from "./DraftBar";
 
 /**
  * Tab "ธีมและแบรนด์": school name, logo, favicon, colors (contrast-checked like the server), font and corner radius,
@@ -43,12 +44,13 @@ function Choice<T extends string>({ label, value, options, onChange }: { label: 
 export const ThemePanel: React.FC = () => {
   const api = useApi();
   const [theme, setTheme] = useState<Theme | null>(null);
+  const [published, setPublished] = useState<Theme | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get<{ theme: Theme }>("/website/theme").then(d => setTheme(d.theme)).catch(err => setError(err.message));
+    api.get<{ theme: Theme }>("/website/theme").then(d => { setTheme(d.theme); setPublished(d.theme); }).catch(err => setError(err.message));
   }, [api.token]);
   useEffect(() => { if (theme) loadFont(theme.font); }, [theme?.font]);
   const preview = useBuilderPreview();
@@ -72,8 +74,9 @@ export const ThemePanel: React.FC = () => {
     try {
       const d = await api.request<{ theme: Theme }>("/website/theme", { method: "PUT", body: JSON.stringify(theme) });
       setTheme(d.theme);
+      setPublished(d.theme);
       publishTheme(d.theme);
-      setNotice("บันทึกธีมแล้ว หน้าเว็บและคอนโซลใช้สีใหม่ทันที (ผู้เข้าชมคนอื่นเห็นภายใน 5 นาที)");
+      setNotice("เผยแพร่ธีมแล้ว หน้าเว็บและคอนโซลใช้สีใหม่ทันที (ผู้เข้าชมคนอื่นเห็นภายใน 5 นาที)");
     } catch (err: any) { setError(err.message); } finally { setSaving(false); }
   };
 
@@ -83,6 +86,7 @@ export const ThemePanel: React.FC = () => {
       <div className="glass-card" style={{ padding: 20, display: "grid", gap: 14 }}>
         <ErrorBox message={error} />
         {notice && <Notice>{notice}</Notice>}
+        <DraftBar draftKey="theme" value={theme} published={published} onLoad={t => { setTheme(t); setNotice(null); }} />
         <div style={{ display: "grid", gap: 8 }}>
           <span className="form-label">ธีมสำเร็จรูป</span>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
@@ -157,7 +161,7 @@ export const ThemePanel: React.FC = () => {
           ))}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="tech-button-primary" disabled={saving || !valid} onClick={save}><Save size={16} />{saving ? "กำลังบันทึก…" : "บันทึกธีม"}</button>
+          <button type="button" className="tech-button-primary" disabled={saving || !valid} onClick={save}><Save size={16} />{saving ? "กำลังเผยแพร่…" : "เผยแพร่ธีม"}</button>
           <button type="button" className="tech-button-outline" onClick={() => set(DEFAULT_THEME)}><RotateCcw size={16} />ค่าเริ่มต้น</button>
         </div>
       </div>

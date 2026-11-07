@@ -366,3 +366,44 @@ test('image upload: website.design only, images only', async () => {
   const { url } = await res.json();
   assert.match(url, /\/api\/public\/images\/[a-f0-9]{32}\.png$/);
 });
+
+test('drafts: saved without touching the public site, published through the normal save, kept in history', async () => {
+  for (const key of ['theme', 'home', 'nav']) await expectStatus(`/api/site-drafts/${key}`, 403, { token: student });
+  await expectStatus('/api/site-drafts/legal', 404, { token: admin });
+  await expectStatus('/api/site-drafts/theme', 401);
+
+  const { theme: published } = await expectStatus('/api/website/theme', 200, { token: coord });
+  assert.equal((await expectStatus('/api/site-drafts/theme', 200, { token: coord })).draft, null);
+
+  // A draft is checked like a publish, and the public theme stays as it was.
+  const bad = await request('/api/site-drafts/theme', { token: coord, method: 'PUT', body: { ...published, primary_color: '#ffd166' } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /คอนทราสต์/);
+  const draft = { ...published, primary_color: '#1d6f5f', header_style: 'dark' };
+  await expectStatus('/api/site-drafts/theme', 200, { token: coord, method: 'PUT', body: draft });
+  const saved = await expectStatus('/api/site-drafts/theme', 200, { token: coord });
+  assert.equal(saved.draft.primary_color, '#1d6f5f');
+  assert.ok(saved.updated_at);
+  const pub = await expectStatus('/api/public/website/theme', 200);
+  assert.equal(pub.theme.primary_color, published.primary_color, 'a draft is not public');
+
+  // Publishing records a version and clears the draft.
+  const before = (await expectStatus('/api/site-drafts/theme/versions', 200, { token: coord })).versions.length;
+  await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: draft });
+  assert.equal((await expectStatus('/api/site-drafts/theme', 200, { token: coord })).draft, null);
+  const { versions } = await expectStatus('/api/site-drafts/theme/versions', 200, { token: coord });
+  // The first publish with history also keeps the version that was live before it.
+  assert.equal(versions.length, before === 0 ? 2 : before + 1);
+  assert.ok(versions[0].published_by_name);
+  const version = await expectStatus(`/api/site-drafts/theme/versions/${versions[0].id}`, 200, { token: coord });
+  assert.equal(version.value.primary_color, '#1d6f5f');
+  await expectStatus('/api/site-drafts/nav/versions/' + versions[0].id, 404, { token: coord });
+
+  // Discarding a draft keeps the published value.
+  await expectStatus('/api/site-drafts/home', 200, { token: coord, method: 'PUT', body: { hero: { eyebrow: '', title: 'ร่างหน้าแรก', lead: 'ทดสอบ' }, brands: [], services: [], faq: [] } });
+  assert.equal((await expectStatus('/api/site-drafts/home', 200, { token: coord })).draft.hero.title, 'ร่างหน้าแรก');
+  await expectStatus('/api/site-drafts/home', 200, { token: coord, method: 'DELETE' });
+  assert.equal((await expectStatus('/api/site-drafts/home', 200, { token: coord })).draft, null);
+
+  await expectStatus('/api/website/theme', 200, { token: coord, method: 'PUT', body: published });
+});

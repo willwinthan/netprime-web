@@ -3,6 +3,7 @@ import { Env, rbac } from "../middleware/rbac";
 import { permit } from "../utils/permissions";
 import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { saveSiteImage, siteImageUrl } from "../utils/images";
+import { recordPublished } from "../utils/siteVersions";
 
 /**
  * Website builder (website.design): custom pages (/p/:slug), header/footer menus, theme & branding,
@@ -18,7 +19,8 @@ export const websiteRouter = new Hono<Env>();
 // Small validation toolkit
 // ==========================================
 
-class Invalid extends Error {}
+/** Validation failure with a message for the user (becomes a 400). */
+export class Invalid extends Error {}
 const fail = (message: string): never => { throw new Invalid(message); };
 
 type Obj = Record<string, unknown>;
@@ -679,7 +681,9 @@ websiteRouter.put("/website/theme", async (c) => {
   const body = sanitizeKeys(Object.keys(DEFAULT_THEME), await readBody(c));
   const { value: theme, error } = validate(() => parseTheme(body));
   if (error || !theme) return c.json({ error: error || "ข้อมูลไม่ถูกต้อง" }, 400);
+  const before = await loadTheme(c.env.DB);
   await saveSetting(c, "theme", theme);
+  await recordPublished(c, "theme", theme, { value: before.theme, updated_at: before.updated_at });
   await audit(c, "update", "settings", "theme");
   return c.json({ theme });
 });
@@ -695,7 +699,9 @@ websiteRouter.put("/website/nav", async (c) => {
   const body = await readBody(c);
   const { value: nav, error } = validate(() => parseNav(body));
   if (error || !nav) return c.json({ error: error || "ข้อมูลไม่ถูกต้อง" }, 400);
+  const before = await loadNav(c.env.DB);
   await saveSetting(c, "nav", nav);
+  await recordPublished(c, "nav", nav, { value: before.nav, updated_at: before.updated_at });
   await audit(c, "update", "settings", "nav");
   return c.json({ nav });
 });
@@ -944,6 +950,6 @@ websiteRouter.delete("/website/certificate-templates/:id", async (c) => {
 // Body helpers
 // ==========================================
 
-function sanitizeKeys(keys: string[], body: Obj): Obj {
+export function sanitizeKeys(keys: string[], body: Obj): Obj {
   return Object.fromEntries(keys.filter(k => body[k] !== undefined).map(k => [k, body[k]]));
 }
