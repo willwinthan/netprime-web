@@ -8,8 +8,8 @@ export function appUrl(env: { APP_URL?: string; FRONTEND_ORIGINS?: string }, pat
 }
 
 /**
- * Mock Email Notification Service for Netprime LMS
- * Logs formatted, clean emails to the console simulating a transaction service (e.g. Resend, SendGrid)
+ * Email for Netprime LMS: sends through Resend when RESEND_API_KEY is set (a key containing "mock" only
+ * logs), and records every message in email_log (ตั้งค่าระบบ › อีเมล). See deliver().
  */
 
 export async function sendWelcomeEmail(email: string, name: string, apiKey?: string, baseUrl = appUrl({}, ""), db?: D1Database): Promise<void> {
@@ -29,11 +29,7 @@ export async function sendWelcomeEmail(email: string, name: string, apiKey?: str
   `;
   
   ({ subject, html } = await renderTemplate(db, "welcome", { name, email, link: baseUrl + "/dashboard" }, { subject, html }));
-  if (apiKey && !apiKey.includes("mock")) {
-    await sendViaResend(email, subject, html, apiKey);
-  } else {
-    logEmail(email, subject, html);
-  }
+  await deliver(email, subject, html, apiKey, "welcome");
 }
 
 export async function sendPaymentConfirmationEmail(
@@ -77,11 +73,7 @@ export async function sendPaymentConfirmationEmail(
   `;
   
   ({ subject, html } = await renderTemplate(db, "receipt", { name, email, course: courseTitle, amount: amount.toLocaleString("th-TH", { minimumFractionDigits: 2 }), payment_id: paymentId, link: baseUrl + "/dashboard" }, { subject, html }));
-  if (apiKey && !apiKey.includes("mock")) {
-    await sendViaResend(email, subject, html, apiKey);
-  } else {
-    logEmail(email, subject, html);
-  }
+  await deliver(email, subject, html, apiKey, "receipt");
 }
 
 export async function sendCertificateClaimedEmail(
@@ -114,11 +106,7 @@ export async function sendCertificateClaimedEmail(
   `;
   
   ({ subject, html } = await renderTemplate(db, "certificate", { name, email, course: courseTitle, code: certificateCode, link: baseUrl + "/dashboard" }, { subject, html }));
-  if (apiKey && !apiKey.includes("mock")) {
-    await sendViaResend(email, subject, html, apiKey);
-  } else {
-    logEmail(email, subject, html);
-  }
+  await deliver(email, subject, html, apiKey, "certificate");
 }
 
 const DEFAULT_SENDER = "Netprime LMS <noreply@netprime-lms.com>";
@@ -132,30 +120,125 @@ export function configureEmailSender(from?: string) {
   sender = from && /<[^\s@<>]+@[^\s@<>]+>|^[^\s@<>]+@[^\s@<>]+$/.test(from.trim()) ? from.trim() : DEFAULT_SENDER;
 }
 
-async function sendViaResend(to: string | string[], subject: string, html: string, apiKey: string) {
+/** Database for email_log; set per request / cron run by configureEmail (one D1 binding per deployment). */
+let logDb: D1Database | null = null;
+
+/** Sender and delivery log for this request or cron run. */
+export function configureEmail(env: { EMAIL_FROM?: string; DB?: D1Database }) {
+  configureEmailSender(env.EMAIL_FROM);
+  logDb = env.DB ?? null;
+}
+
+/** Current sender, for the admin status page. */
+export const currentSender = () => sender;
+
+/** Whether this API key really sends (local and test configs use a key containing "mock"). */
+export const isLiveEmailKey = (apiKey?: string): apiKey is string => !!apiKey && !apiKey.includes("mock");
+
+export interface SendOutcome {
+  status: "sent" | "failed" | "logged";
+  providerId?: string;
+  error?: string;
+  /** Rate limit, server error or network failure: worth sending again later. */
+  retryable?: boolean;
+}
+
+/** One Resend request. Never throws. */
+async function resendSend(to: string[], subject: string, html: string, apiKey: string): Promise<SendOutcome> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: sender,
-        to: Array.isArray(to) ? to : [to],
-        subject: subject,
-        html: html
-      })
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: sender, to, subject, html })
     });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("Resend API error:", err);
-    } else {
-      console.log(`[RESEND] Successfully sent email to ${to}`);
-    }
+    const data = await res.json().catch(() => ({})) as { id?: string; message?: string; name?: string };
+    if (res.ok) return { status: "sent", providerId: data.id };
+    const error = `Resend ${res.status}: ${data.message || data.name || "ส่งไม่สำเร็จ"}`.slice(0, 500);
+    console.error("Resend API error:", error);
+    return { status: "failed", error, retryable: res.status === 429 || res.status >= 500 };
   } catch (error) {
     console.error("Failed to send email via Resend:", error);
+    return { status: "failed", error: `เชื่อมต่อ Resend ไม่ได้: ${error instanceof Error ? error.message : String(error)}`.slice(0, 500), retryable: true };
   }
+}
+
+/**
+ * Sends one email (several recipients share it) and records it in email_log. A temporary failure
+ * (rate limit, Resend down) is tried once more right away; if it still fails, the body is kept so the
+ * daily job can try again. Never throws: email must not break the request that triggered it.
+ */
+export async function deliver(to: string | string[], subject: string, html: string, apiKey: string | undefined, kind = "general"): Promise<SendOutcome> {
+  const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
+  if (!recipients.length) return { status: "failed", error: "ไม่มีผู้รับ" };
+  let outcome: SendOutcome;
+  let attempts = 1;
+  if (!isLiveEmailKey(apiKey)) {
+    logEmail(recipients, subject, html);
+    outcome = { status: "logged" };
+  } else {
+    outcome = await resendSend(recipients, subject, html, apiKey);
+    if (outcome.status === "failed" && outcome.retryable) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      outcome = await resendSend(recipients, subject, html, apiKey);
+      attempts = 2;
+    }
+  }
+  await recordEmail(recipients.join(", "), subject, kind, outcome, attempts, outcome.status === "failed" && outcome.retryable ? html : null);
+  return outcome;
+}
+
+async function recordEmail(to: string, subject: string, kind: string, outcome: SendOutcome, attempts: number, retryHtml: string | null) {
+  if (!logDb) return;
+  try {
+    await logDb.prepare(`INSERT INTO email_log (id, to_email, subject, kind, status, provider_id, error, attempts, retry_html)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), to.slice(0, 1000), subject.slice(0, 300), kind, outcome.status, outcome.providerId ?? null, outcome.error ?? null, attempts, retryHtml)
+      .run();
+  } catch (error) {
+    console.error("Email log write failed:", error);
+  }
+}
+
+/** Retry budget for the daily job: emails failed temporarily in the last day, at most 4 tries in all. */
+const MAX_ATTEMPTS = 4;
+
+/**
+ * Sends one logged email again (retry button or daily job). Only failed emails that kept their body can be
+ * retried. Returns the new outcome, or null when the row cannot be retried.
+ */
+export async function retryLoggedEmail(db: D1Database, id: string, apiKey: string | undefined): Promise<SendOutcome | null> {
+  const row = await db.prepare("SELECT to_email, subject, attempts, retry_html FROM email_log WHERE id = ? AND status = 'failed' AND retry_html IS NOT NULL")
+    .bind(id).first<{ to_email: string; subject: string; attempts: number; retry_html: string }>();
+  if (!row) return null;
+  if (!isLiveEmailKey(apiKey)) return { status: "failed", error: "ยังไม่ได้ตั้งค่า RESEND_API_KEY", retryable: true };
+  const outcome = await resendSend(row.to_email.split(", "), row.subject, row.retry_html, apiKey);
+  const keep = outcome.status === "failed" && outcome.retryable && row.attempts + 1 < MAX_ATTEMPTS;
+  await db.prepare(`UPDATE email_log SET status = ?, provider_id = COALESCE(?, provider_id), error = ?, attempts = attempts + 1,
+      retry_html = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(outcome.status, outcome.providerId ?? null, outcome.status === "sent" ? null : outcome.error ?? null, keep ? row.retry_html : null, id).run();
+  return outcome;
+}
+
+/**
+ * Daily job: retries emails that failed temporarily in the last 24 hours, drops kept bodies older than
+ * that (links inside may have expired), and deletes log rows older than 90 days.
+ */
+export async function runEmailLogJobs(env: { DB: D1Database; RESEND_API_KEY?: string }): Promise<{ retried: number; sent: number }> {
+  let retried = 0, sent = 0;
+  if (isLiveEmailKey(env.RESEND_API_KEY)) {
+    const due = await env.DB.prepare(`SELECT id FROM email_log WHERE status = 'failed' AND retry_html IS NOT NULL
+        AND attempts < ? AND created_at >= datetime('now', '-1 day') ORDER BY created_at LIMIT 50`).bind(MAX_ATTEMPTS).all<{ id: string }>();
+    for (const { id } of due.results) {
+      const outcome = await retryLoggedEmail(env.DB, id, env.RESEND_API_KEY);
+      retried++;
+      if (outcome?.status === "sent") sent++;
+    }
+  }
+  await env.DB.batch([
+    env.DB.prepare("UPDATE email_log SET retry_html = NULL WHERE retry_html IS NOT NULL AND created_at < datetime('now', '-1 day')"),
+    env.DB.prepare("DELETE FROM email_log WHERE created_at < datetime('now', '-90 days')")
+  ]);
+  return { retried, sent };
 }
 
 function logEmail(to: string | string[], subject: string, html: string) {
@@ -182,14 +265,9 @@ export function escapeHtml(value: unknown): string {
 /**
  * Generic transactional email used by website workflows. Callers must escape user input with escapeHtml.
  */
-export async function sendEmail(to: string | string[], subject: string, html: string, apiKey?: string): Promise<void> {
-  const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
-  if (recipients.length === 0) return;
-  if (apiKey && !apiKey.includes("mock")) {
-    await sendViaResend(recipients, subject, html, apiKey);
-  } else {
-    logEmail(recipients, subject, html);
-  }
+export async function sendEmail(to: string | string[], subject: string, html: string, apiKey?: string, kind = "general"): Promise<void> {
+  if (!(Array.isArray(to) ? to : [to]).some(Boolean)) return;
+  await deliver(to, subject, html, apiKey, kind);
 }
 
 // ---------- Account links (reset / invitation / verification) ----------
@@ -352,7 +430,7 @@ export function renderTemplateText(subject: string, body: string, vars: Record<s
 
 async function sendTemplated(db: D1Database | undefined, key: EmailTemplateKey, vars: Record<string, unknown>, to: string, subject: string, html: string, apiKey?: string): Promise<void> {
   const rendered = await renderTemplate(db, key, vars, { subject, html });
-  await sendEmail(to, rendered.subject, rendered.html, apiKey);
+  await sendEmail(to, rendered.subject, rendered.html, apiKey, key);
 }
 
 export interface BatchEmail { to: string; subject: string; html: string; headers?: Record<string, string> }
@@ -364,9 +442,24 @@ export interface BatchEmail { to: string; subject: string; html: string; headers
 export async function sendEmailBatch(messages: BatchEmail[], apiKey?: string): Promise<{ sent: number; failed: number }> {
   const list = messages.filter(m => m.to).slice(0, 100);
   if (!list.length) return { sent: 0, failed: 0 };
-  if (!apiKey || apiKey.includes("mock")) {
+  const outcome = await resendBatch(list, apiKey);
+  // Broadcast retries are handled by the broadcast queue, so no body is kept here.
+  if (logDb) {
+    try {
+      await logDb.batch(list.map((m, i) => logDb!.prepare(`INSERT INTO email_log (id, to_email, subject, kind, status, provider_id, error, attempts)
+          VALUES (?, ?, ?, 'broadcast', ?, ?, ?, 1)`)
+        .bind(crypto.randomUUID(), m.to.slice(0, 1000), m.subject.slice(0, 300), outcome.status, outcome.ids?.[i] ?? null, outcome.error ?? null)));
+    } catch (error) {
+      console.error("Email log write failed:", error);
+    }
+  }
+  return outcome.status === "failed" ? { sent: 0, failed: list.length } : { sent: list.length, failed: 0 };
+}
+
+async function resendBatch(list: BatchEmail[], apiKey?: string): Promise<{ status: SendOutcome["status"]; ids?: string[]; error?: string }> {
+  if (!isLiveEmailKey(apiKey)) {
     for (const m of list) console.log(`✉️  [MOCK EMAIL BATCH] ${m.to}: ${m.subject}`);
-    return { sent: list.length, failed: 0 };
+    return { status: "logged" };
   }
   try {
     const res = await fetch("https://api.resend.com/emails/batch", {
@@ -374,13 +467,15 @@ export async function sendEmailBatch(messages: BatchEmail[], apiKey?: string): P
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(list.map(m => ({ from: sender, to: [m.to], subject: m.subject, html: m.html, headers: m.headers })))
     });
+    const data = await res.json().catch(() => ({})) as { data?: { id: string }[]; message?: string };
     if (!res.ok) {
-      console.error("Resend batch error:", res.status, (await res.text()).slice(0, 500));
-      return { sent: 0, failed: list.length };
+      const error = `Resend ${res.status}: ${data.message || "ส่งไม่สำเร็จ"}`.slice(0, 500);
+      console.error("Resend batch error:", error);
+      return { status: "failed", error };
     }
-    return { sent: list.length, failed: 0 };
+    return { status: "sent", ids: data.data?.map(d => d.id) };
   } catch (error) {
     console.error("Resend batch request failed:", error);
-    return { sent: 0, failed: list.length };
+    return { status: "failed", error: `เชื่อมต่อ Resend ไม่ได้: ${error instanceof Error ? error.message : String(error)}`.slice(0, 500) };
   }
 }

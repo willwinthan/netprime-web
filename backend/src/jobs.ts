@@ -5,6 +5,7 @@ import { processBroadcastQueue } from "./handlers/communication";
 import { runWebhookRetries } from "./handlers/platform";
 import { syncAffiliateConversions } from "./handlers/marketing";
 import { runCommerceJobs } from "./handlers/commerce";
+import { runEmailLogJobs } from "./utils/email";
 
 export interface DailyJobResult {
   reminders: { sent: number; registration_ids: string[] };
@@ -21,6 +22,7 @@ export async function runDailyJobs(env: Env["Bindings"]): Promise<DailyJobResult
   try { await syncAffiliateConversions(env.DB); } catch (error) { console.error("Affiliate conversion sync failed:", error); }
   try { await runWebhookRetries(env); } catch (error) { console.error("Webhook retries failed:", error); }
   try { await runCommerceJobs(env); } catch (error) { console.error("Commerce jobs failed:", error); }
+  try { await runEmailLogJobs(env); } catch (error) { console.error("Email retries failed:", error); }
   return result;
 }
 

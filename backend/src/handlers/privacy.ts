@@ -212,6 +212,7 @@ privacyRouter.post("/admin/privacy/requests/:id/approve", async (c) => {
   }
   if (tables.has("leads")) statements.push(db.prepare("DELETE FROM leads WHERE user_id = ? OR (? <> '' AND email = ?)").bind(userId, oldEmail, oldEmail));
   if (tables.has("inquiries") && oldEmail) statements.push(db.prepare("DELETE FROM inquiries WHERE email = ?").bind(oldEmail));
+  if (tables.has("email_log") && oldEmail) statements.push(db.prepare("DELETE FROM email_log WHERE to_email = ?").bind(oldEmail));
   if (tables.has("user_import_rows")) statements.push(db.prepare("UPDATE user_import_rows SET email = NULL WHERE user_id = ?").bind(userId));
   if (tables.has("dm_messages")) {
     statements.push(db.prepare("UPDATE dm_messages SET body = ?, attachment_key = NULL, attachment_type = NULL WHERE sender_id = ?").bind(DELETED_MESSAGE, userId));
