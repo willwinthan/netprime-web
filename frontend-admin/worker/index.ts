@@ -16,6 +16,11 @@ interface Env {
   ASSETS: Fetcher;
   /** Same value as VITE_API_BASE_URL, e.g. https://api.example.com/api. Empty = default tags only. */
   API_BASE_URL?: string;
+  /**
+   * Service binding to the backend Worker. A Worker cannot fetch another Worker of the same account
+   * through *.workers.dev (Cloudflare answers 404), so API calls go through this binding when it exists.
+   */
+  API?: Fetcher;
 }
 
 const ARTICLE_PATH = /^\/blog\/([^/]+)\/?$/;
@@ -27,6 +32,8 @@ const MANAGED_TAGS = 'meta[name="description"], meta[property^="og:"], meta[prop
 const API_CACHE_SECONDS = 300;
 
 const apiBase = (env: Env) => env.API_BASE_URL?.trim().replace(/\/+$/, "") || null;
+/** Calls the backend: through the service binding when bound (the URL still sets the path and origin), else over HTTP. */
+const apiFetch = (env: Env, url: string, init?: RequestInit<RequestInitCfProperties>) => env.API ? env.API.fetch(url, init) : fetch(url, init);
 
 function plain(body: string, contentType: string, maxAge: number): Response {
   return new Response(body, { headers: { "content-type": contentType, "cache-control": `public, max-age=${maxAge}` } });
@@ -62,7 +69,7 @@ async function articlePage(request: Request, url: URL, rawSlug: string, env: Env
   const base = apiBase(env);
   if (!base) return renderShell(request, url, env, genericMeta(url));
   try {
-    const res = await fetch(`${base}/public/articles/${encodeURIComponent(slug)}`, {
+    const res = await apiFetch(env, `${base}/public/articles/${encodeURIComponent(slug)}`, {
       headers: { accept: "application/json" },
       cf: { cacheTtl: API_CACHE_SECONDS, cacheEverything: true }
     });
@@ -88,7 +95,7 @@ async function coursePage(request: Request, url: URL, rawId: string, env: Env): 
   const base = apiBase(env);
   if (!base) return renderShell(request, url, env, genericMeta(url));
   try {
-    const res = await fetch(`${base}/public/marketing/courses/${encodeURIComponent(id)}`, {
+    const res = await apiFetch(env, `${base}/public/marketing/courses/${encodeURIComponent(id)}`, {
       headers: { accept: "application/json" },
       cf: { cacheTtl: API_CACHE_SECONDS, cacheEverything: true }
     });
@@ -114,7 +121,7 @@ async function customPage(request: Request, url: URL, rawSlug: string, env: Env)
   const base = apiBase(env);
   if (!base) return renderShell(request, url, env, genericMeta(url));
   try {
-    const res = await fetch(`${base}/public/website/pages/${encodeURIComponent(slug)}`, {
+    const res = await apiFetch(env, `${base}/public/website/pages/${encodeURIComponent(slug)}`, {
       headers: { accept: "application/json" },
       cf: { cacheTtl: 60, cacheEverything: true }
     });
@@ -140,7 +147,7 @@ async function lessonPage(request: Request, url: URL, rawSlug: string, env: Env)
   const base = apiBase(env);
   if (!base) return renderShell(request, url, env, genericMeta(url));
   try {
-    const res = await fetch(`${base}/public/self-learning/${encodeURIComponent(slug)}`, {
+    const res = await apiFetch(env, `${base}/public/self-learning/${encodeURIComponent(slug)}`, {
       headers: { accept: "application/json" },
       cf: { cacheTtl: 60, cacheEverything: true }
     });
@@ -159,7 +166,7 @@ async function lessonsForSitemap(env: Env): Promise<PublicLesson[] | null> {
   const base = apiBase(env);
   if (!base) return [];
   try {
-    const res = await fetch(`${base}/public/self-learning`, { headers: { accept: "application/json" } });
+    const res = await apiFetch(env, `${base}/public/self-learning`, { headers: { accept: "application/json" } });
     if (!res.ok) throw new Error(`API ${res.status}`);
     return (await res.json() as { lessons: PublicLesson[] }).lessons;
   } catch (error) {
@@ -173,7 +180,7 @@ async function customPagesForSitemap(env: Env): Promise<PublicCustomPage[] | nul
   const base = apiBase(env);
   if (!base) return [];
   try {
-    const res = await fetch(`${base}/public/website/pages`, { headers: { accept: "application/json" } });
+    const res = await apiFetch(env, `${base}/public/website/pages`, { headers: { accept: "application/json" } });
     if (!res.ok) throw new Error(`API ${res.status}`);
     return (await res.json() as { pages: PublicCustomPage[] }).pages;
   } catch (error) {
@@ -187,7 +194,7 @@ async function manifest(request: Request, env: Env): Promise<Response> {
   const base = apiBase(env);
   if (!base) return env.ASSETS.fetch(request);
   try {
-    const res = await fetch(`${base}/public/website/theme`, { headers: { accept: "application/json" }, cf: { cacheTtl: API_CACHE_SECONDS, cacheEverything: true } });
+    const res = await apiFetch(env, `${base}/public/website/theme`, { headers: { accept: "application/json" }, cf: { cacheTtl: API_CACHE_SECONDS, cacheEverything: true } });
     if (!res.ok) throw new Error(`API ${res.status}`);
     const { theme } = await res.json() as { theme: { school_name?: string; primary_color?: string } };
     return plain(manifestJson(theme), "application/manifest+json; charset=utf-8", 3600);
@@ -208,7 +215,7 @@ async function sitemap(url: URL, env: Env, ctx: ExecutionContext): Promise<Respo
   if (base) {
     try {
       for (let offset = 0; offset < 10_000; offset += 48) {
-        const res = await fetch(`${base}/public/articles?limit=48&offset=${offset}`, { headers: { accept: "application/json" } });
+        const res = await apiFetch(env, `${base}/public/articles?limit=48&offset=${offset}`, { headers: { accept: "application/json" } });
         if (!res.ok) throw new Error(`API ${res.status}`);
         const page = await res.json() as { articles: PublicArticle[]; total: number };
         articles.push(...page.articles);
@@ -223,7 +230,7 @@ async function sitemap(url: URL, env: Env, ctx: ExecutionContext): Promise<Respo
   let courses: Array<{ id: string; slug?: string | null }> = [];
   if (base) {
     try {
-      const res = await fetch(`${base}/courses`, { headers: { accept: "application/json" } });
+      const res = await apiFetch(env, `${base}/courses`, { headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`API ${res.status}`);
       courses = await res.json() as Array<{ id: string; slug?: string | null }>;
     } catch (error) {
