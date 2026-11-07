@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ITERATIONS = 100_000; // ต้องตรงกับ ITERATIONS ใน backend/src/utils/crypto.ts
-const MIN_LENGTH = 12;
+export const MIN_LENGTH = 12;
 const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 
 export async function hashPassword(password) {
@@ -26,15 +26,16 @@ function arg(name) {
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
-async function readHidden(prompt) {
+export async function readHidden(prompt) {
   const { stdin, stderr } = process;
   if (!stdin.isTTY) { // piped input: first line
     let data = '';
     for await (const chunk of stdin) data += chunk;
     return data.split(/\r?\n/)[0];
   }
-  stderr.write(prompt);
+  // Raw mode first, so a password typed (or pasted) the moment the prompt appears is never echoed.
   stdin.setRawMode(true);
+  stderr.write(prompt);
   stdin.resume();
   stdin.setEncoding('utf8');
   let value = '';

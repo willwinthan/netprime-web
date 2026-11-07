@@ -73,6 +73,22 @@ Local config ไม่มี Workers AI binding และมีเฉพาะ m
 
 บัญชีและรหัสเหล่านี้มาจาก seed เดโม ห้ามใช้เป็นบัญชี production หน้า login/signup ปัจจุบันใช้รหัสผ่านจริง; OAuth จะเปิดปุ่มเมื่อมี provider config
 
+CI บน GitHub สร้างบัญชีชุดนี้ให้เองในฐานข้อมูลชั่วคราวทุกครั้งที่รัน ไม่ต้องตั้งอะไรเพิ่ม
+
+### บัญชีทดสอบบน staging
+
+staging ไม่มีบัญชีเดโม และห้ามใช้รหัสผ่านข้างบนเพราะอยู่ใน repo ให้สร้างไฟล์ SQL ที่มีแค่ password hash ด้วย `scripts/test-accounts-sql.mjs` (ถามรหัสผ่านแบบซ่อนตัวอักษร อย่างน้อย 12 ตัว) แล้วรันกับ D1 ของ staging เก็บรหัสผ่านไว้ใน password manager ของทีม ไม่ส่งในแชท
+
+```bash
+node scripts/test-accounts-sql.mjs --same-password \
+  --account "instructor:teacher@example.com:ผู้สอนทดสอบ" \
+  --account "coordinator:coord@example.com:เจ้าหน้าที่ทดสอบ" \
+  --account "student:learner@example.com:ผู้เรียนทดสอบ"
+cd backend && npx wrangler d1 execute netprime-db-staging --remote --env staging --file ../staging-test-accounts.sql.local
+```
+
+บทบาทที่ใช้ได้: `admin`, `coordinator`, `instructor`, `student` ส่วนบัญชีพาร์ตเนอร์ต้องผูกกับองค์กร ให้สร้างในหลังบ้าน รันไฟล์ซ้ำได้: อีเมลที่มีอยู่แล้วจะถูกตั้งรหัสผ่านและบทบาทใหม่ และ session เดิมของบัญชีนั้นถูกยกเลิก ไฟล์ `*.local` ถูก git ละเว้น ลบทิ้งได้หลังรัน
+
 ## 4. UAT checklist หลังแก้ phase B
 
 สถานะเริ่มต้นของทุกข้อด้านล่างคือ **ยังไม่ได้ตรวจผ่านหน้าเว็บ** ให้ใช้ข้อมูลสังเคราะห์และบันทึก Actual/Pass/Fail พร้อมหลักฐาน
