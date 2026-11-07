@@ -173,6 +173,7 @@ export const CourseBuilder: React.FC<Props> = ({ courseId, refreshToken, onAddVi
             {lesson.type === "embed" && lesson.embed_url && <span>{hostOf(lesson.embed_url)}</span>}
             {lesson.type === "scorm" && <span>{lesson.scorm_launch ? `เริ่มที่ ${lesson.scorm_launch}` : "ยังไม่ได้อัปโหลดแพ็กเกจ"}</span>}
             {lesson.type === "text" && !lesson.has_text && <span>ยังไม่มีเนื้อหา</span>}
+            {lesson.type === "self_learning" && !lesson.self_learning_id && <span>ยังไม่ได้เลือกบทเรียน (บทที่เลือกไว้อาจถูกลบ)</span>}
             {lesson.handout_r2_key && <span>มีเอกสารประกอบ</span>}
             {lesson.available_after_days ? <span>เปิดหลังลงทะเบียน {lesson.available_after_days} วัน</span> : null}
             {lesson.available_on && <span>เปิดวันที่ {new Date(lesson.available_on + "T00:00:00+07:00").toLocaleDateString("th-TH", { dateStyle: "medium" })}</span>}

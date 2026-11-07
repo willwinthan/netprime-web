@@ -27,7 +27,9 @@ interface Props {
   onSaved: () => void;
 }
 
-/** Create or edit a text / PDF / embed / SCORM lesson, its chapter and drip settings. */
+interface SelfLearningOption { id: string; slug: string; title: string; visibility: "public" | "course" }
+
+/** Create or edit a text / PDF / embed / SCORM / self-learning lesson, its chapter and drip settings. */
 export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections, embedProviders, defaultSectionId, onClose, onSaved }) => {
   const api = useApi();
   const [title, setTitle] = useState(lesson?.title ?? "");
@@ -35,6 +37,8 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
   const [sectionId, setSectionId] = useState<string>(lesson ? lesson.section_id ?? "" : defaultSectionId ?? "");
   const [embedUrl, setEmbedUrl] = useState(lesson?.embed_url ?? "");
   const [pdfKey, setPdfKey] = useState(lesson?.pdf_r2_key ?? "");
+  const [selfLearningId, setSelfLearningId] = useState(lesson?.self_learning_id ?? "");
+  const [selfLearningOptions, setSelfLearningOptions] = useState<SelfLearningOption[] | null>(null);
   const [dripDays, setDripDays] = useState(lesson?.available_after_days ? String(lesson.available_after_days) : "");
   const [availableOn, setAvailableOn] = useState(lesson?.available_on ?? "");
   const [scormFile, setScormFile] = useState<File | null>(null);
@@ -52,6 +56,13 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
       .then(res => setText({ json: res.lesson.content_json, md: res.lesson.content_md }))
       .catch(err => { setText({ json: null, md: null }); setError(err.message); });
   }, [lesson?.id]);
+
+  // Self-learning lessons come from the library staff manage (menu "บทเรียน Self-learning").
+  useEffect(() => {
+    if (type !== "self_learning" || selfLearningOptions) return;
+    api.get<{ lessons: SelfLearningOption[] }>("/instructor/self-learning-options")
+      .then(res => setSelfLearningOptions(res.lessons)).catch(err => { setSelfLearningOptions([]); setError(err.message); });
+  }, [type]);
 
   const uploadPdf = async (file: File | undefined) => {
     if (!file) return;
@@ -94,6 +105,10 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     };
     if (type === "embed") body.embed_url = embedUrl;
     if (type === "pdf") body.pdf_r2_key = pdfKey;
+    if (type === "self_learning") {
+      if (!selfLearningId) return setError("เลือกบทเรียน Self-learning ที่จะใช้");
+      body.self_learning_id = selfLearningId;
+    }
     setBusy("กำลังบันทึก...");
     try {
       if (type === "text" && editorRef.current) Object.assign(body, await editorRef.current.getContent());
@@ -147,6 +162,17 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
         {type === "embed" && (
           <Field label="ลิงก์เนื้อหาที่จะฝัง" hint={`รองรับ ${embedProviders} (ลิงก์ https เท่านั้น)`}>
             <input className="form-input" type="url" value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} placeholder="https://docs.google.com/presentation/d/..." required />
+          </Field>
+        )}
+
+        {type === "self_learning" && (
+          <Field label="บทเรียน Self-learning" hint="เลือกจากคลังบทเรียนที่เจ้าหน้าที่อัปโหลดไว้ ผู้เรียนเรียนจบเมื่อบทเรียนรายงานว่าเรียนครบ หรือกดทำเครื่องหมายว่าเรียนแล้ว ถ้าต้องการบทเรียนใหม่ ให้ส่งไฟล์ให้เจ้าหน้าที่อัปโหลด">
+            <select className="form-input" value={selfLearningId} onChange={e => setSelfLearningId(e.target.value)} required>
+              <option value="">{selfLearningOptions ? (selfLearningOptions.length ? "เลือกบทเรียน" : "ยังไม่มีบทเรียนที่เผยแพร่") : "กำลังโหลด..."}</option>
+              {selfLearningOptions?.map(o => (
+                <option key={o.id} value={o.id}>{o.title}{o.visibility === "course" ? " (ใช้ในคอร์สเท่านั้น)" : " (เปิดบนหน้าเว็บด้วย)"}</option>
+              ))}
+            </select>
           </Field>
         )}
 

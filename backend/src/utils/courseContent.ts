@@ -14,6 +14,9 @@ export type LessonType = typeof LESSON_TYPES[number];
 export const isLessonType = (value: unknown): value is LessonType =>
   typeof value === "string" && (LESSON_TYPES as readonly string[]).includes(value);
 
+/** Lesson type as the API reports it: self-learning lessons are stored as 'embed' (migrations/0034). Alias `l`. */
+export const LESSON_TYPE_SQL = "CASE WHEN l.self_learning_id IS NOT NULL THEN 'self_learning' ELSE l.type END";
+
 /**
  * Learner order of a course's lessons: lessons outside any chapter first, then chapters by their
  * sort order, lessons by sort order inside each. Use as `ORDER BY ${LESSON_ORDER}` with

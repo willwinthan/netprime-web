@@ -12,6 +12,7 @@ import { CourseAnnouncements, MyAnnouncements } from "../components/communicatio
 import { CertificatePrint } from "../components/learner/PrintView";
 import { runInSandbox } from "../components/learner/codeSandbox";
 import { LessonContentView } from "../components/course/LessonContentView";
+import { SelfLearningResume } from "../components/course/SelfLearningResume";
 import { CurriculumOutline } from "../components/course/CurriculumOutline";
 import { MyLiveClasses } from "../components/settings/MyLiveClasses";
 import { CourseReviewForm } from "../components/marketing/CourseReviewForm";
@@ -2022,6 +2023,8 @@ export const Dashboard: React.FC = () => {
           </AnimatePresence>
         </div>
       </div>
+
+      <SelfLearningResume />
 
       {/* EXP Progress Bar Widget */}
       {gamificationProfile && (

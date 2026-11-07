@@ -8,7 +8,7 @@ import { createNotification } from "./notifications";
 import { appUrl, escapeHtml, sendEmail } from "../utils/email";
 import { clientIp, rateLimited, tooManyRequests } from "../utils/ratelimit";
 import { trackEvent } from "../utils/events";
-import { checkCoursePrerequisites, courseLessonGates, isCourseStaff, LESSON_ORDER, lessonLockResponse, OPEN_GATE, prerequisiteMessage } from "../utils/courseContent";
+import { checkCoursePrerequisites, courseLessonGates, isCourseStaff, LESSON_ORDER, LESSON_TYPE_SQL, lessonLockResponse, OPEN_GATE, prerequisiteMessage } from "../utils/courseContent";
 
 export const coursesRouter = new Hono<Env>();
 
@@ -129,7 +129,7 @@ coursesRouter.get("/courses/:id", rbac(), async (c) => {
     // Lessons in learner order (outside chapters first, then by chapter) with chapter and type
     const [lessons, sections, prerequisites] = await db.batch([
       db.prepare(`SELECT l.id, l.title, l.video_stream_uid, l.video_provider, l.sort_order, l.handout_r2_key,
-          l.type, l.section_id, l.available_after_days, l.available_on
+          ${LESSON_TYPE_SQL} AS type, l.section_id, l.available_after_days, l.available_on
         FROM lessons l LEFT JOIN course_sections s ON s.id = l.section_id
         WHERE l.course_id = ? ORDER BY ${LESSON_ORDER}`).bind(courseId),
       db.prepare("SELECT id, title, sort_order FROM course_sections WHERE course_id = ? ORDER BY sort_order, id").bind(courseId),

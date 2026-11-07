@@ -15,15 +15,22 @@ type Level = "" | "beginner" | "intermediate" | "advanced";
 
 interface AdminLesson {
   id: string; slug: string; title: string; title_en: string | null; summary: string | null; summary_en: string | null;
-  cover_url: string | null; level: Exclude<Level, ""> | null; status: "draft" | "published"; sort_order: number;
+  cover_url: string | null; level: Exclude<Level, ""> | null; status: "draft" | "published"; visibility: "public" | "course"; sort_order: number;
   current_file_id: string | null; published_at: string | null; updated_at: string;
   file_version: number | null; file_size: number | null; uses_kit: number | null; file_uploaded_at: string | null;
   /** Signed-in learners who opened it / reported it complete (Lesson Kit progress). */
   learners: number; completed: number;
+  /** Courses with a lesson that shows this one. */
+  course_count: number;
 }
 interface LessonFile {
   id: string; version: number; filename: string | null; size_bytes: number; uses_kit: boolean; external_hosts: string[]; created_at: string;
 }
+
+const COURSE_ONLY = { label: "ใช้ในคอร์สเท่านั้น", color: "#5b2aa6", bg: "#f1e9ff" };
+/** Status chip: a published lesson kept off the public site shows as course-only. */
+const statusChip = (l: Pick<AdminLesson, "status" | "visibility">) => l.status === "published" && l.visibility === "course" ? COURSE_ONLY : STATUS[l.status];
+const VISIBILITY: Array<[AdminLesson["visibility"], string]> = [["public", "แสดงบนหน้าเว็บ /self-learning"], ["course", "ใช้ในคอร์สเท่านั้น (ไม่แสดงบนหน้าเว็บ)"]];
 
 const STATUS = {
   draft: { label: "ฉบับร่าง", color: "#3a4660", bg: "#eceff4" },
@@ -100,7 +107,10 @@ export const SelfLearningAdminPage: React.FC = () => {
                         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>/self-learning/{l.slug}</div>
                       </button>
                     </td>
-                    <td style={tdStyle}><Chip {...STATUS[l.status]} /></td>
+                    <td style={tdStyle}>
+                      <Chip {...statusChip(l)} />
+                      {l.course_count > 0 && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>ใช้ใน {l.course_count} คอร์ส</div>}
+                    </td>
                     <td style={{ ...tdStyle, fontSize: 13 }}>
                       {l.file_version ? <>เวอร์ชัน {l.file_version} · {fileSize(l.file_size)}{!l.uses_kit && <div style={{ color: "#92400e" }}>ไม่ได้ใช้ Lesson Kit</div>}</> : <span style={{ color: "#92400e" }}>ยังไม่มีไฟล์</span>}
                     </td>
@@ -109,7 +119,7 @@ export const SelfLearningAdminPage: React.FC = () => {
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                       <span style={{ display: "inline-flex", gap: 4 }}>
                         <IconBtn label="แก้ไข" onClick={() => setEditing(l.id)}><Pencil size={14} /></IconBtn>
-                        {l.status === "published" && <IconBtn label="เปิดหน้าเว็บ" onClick={() => window.open(`/self-learning/${l.slug}`, "_blank", "noopener")}><ExternalLink size={14} /></IconBtn>}
+                        {l.status === "published" && l.visibility === "public" && <IconBtn label="เปิดหน้าเว็บ" onClick={() => window.open(`/self-learning/${l.slug}`, "_blank", "noopener")}><ExternalLink size={14} /></IconBtn>}
                         <IconBtn label="ลบ" danger onClick={() => remove(l)}><Trash2 size={14} /></IconBtn>
                       </span>
                     </td>
@@ -186,7 +196,7 @@ const LessonEditor: React.FC<{ api: Api; lessonId: string; onClose: () => void }
 
   const save = () => run("save", () => api.patch(`/self-learning/lessons/${lessonId}`, {
     title: form.title, title_en: form.title_en, slug: form.slug, summary: form.summary, summary_en: form.summary_en,
-    cover_url: form.cover_url, level: form.level || null
+    cover_url: form.cover_url, level: form.level || null, visibility: form.visibility
   }), "บันทึกข้อมูลบทเรียนแล้ว");
 
   const upload = (file: File | undefined) => {
@@ -219,7 +229,7 @@ const LessonEditor: React.FC<{ api: Api; lessonId: string; onClose: () => void }
           <>
             <section style={{ display: "grid", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <Chip {...STATUS[lesson.status]} />
+                <Chip {...statusChip(lesson)} />
                 {lesson.status === "published"
                   ? <button type="button" className="tech-button-outline" disabled={!!busy} onClick={() => run("publish", () => api.post(`/self-learning/lessons/${lessonId}/unpublish`, {}), "ซ่อนบทเรียนจากหน้าเว็บแล้ว")}>ซ่อนจากหน้าเว็บ</button>
                   : <button type="button" className="tech-button-primary" disabled={!!busy || !lesson.current_file_id} onClick={() => run("publish", () => api.post(`/self-learning/lessons/${lessonId}/publish`, {}), "เผยแพร่บทเรียนแล้ว")}>เผยแพร่</button>}
@@ -276,6 +286,7 @@ const LessonEditor: React.FC<{ api: Api; lessonId: string; onClose: () => void }
                   <input className="form-input" maxLength={80} value={form.slug || ""} onChange={e => set("slug")(e.target.value.toLowerCase())} />
                 </Field>
                 <SelectInput label="ระดับ" value={(form.level || "") as Level} options={LEVELS} onChange={v => set("level")((v || null) as AdminLesson["level"])} />
+                <SelectInput label="การแสดงผล" value={form.visibility ?? "public"} options={VISIBILITY} onChange={set("visibility")} span />
                 <TextInput label="คำอธิบายสั้น" multiline value={form.summary} max={500} onChange={set("summary")} span />
                 <TextInput label="คำอธิบายภาษาอังกฤษ" multiline value={form.summary_en} max={500} onChange={set("summary_en")} span />
                 <ImageInput label="รูปปก" value={form.cover_url} onChange={set("cover_url")} token={api.token} span hint="แนะนำ 1200×630 px" />

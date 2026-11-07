@@ -13,7 +13,6 @@ import { InstallAppButton } from "./pwa/pwa";
 import logo from "../logo/NetPrimeLogo.png";
 import { FEATURES } from "./features";
 // Console pages load on first visit so learners and visitors don't download every staff screen.
-const SelfLearningLibrary = lazy(() => import("./site/SelfLearningPage").then(m => ({ default: m.SelfLearningLibrary })));
 const SelfLearningAdminPage = lazy(() => import("./pages/SelfLearningAdminPage").then(m => ({ default: m.SelfLearningAdminPage })));
 const InstructorRoundsPage = lazy(() => import("./pages/InstructorRoundsPage").then(m => ({ default: m.InstructorRoundsPage })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
@@ -78,7 +77,7 @@ import {
   X
 } from "lucide-react";
 
-type ConsoleTab = "dashboard" | "selflearning" | "selflearningadmin" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
+type ConsoleTab = "dashboard" | "selflearningadmin" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
   | "settings" | "ai" | "affiliate" | "commerce" | "audit";
@@ -98,7 +97,6 @@ const role = (...roles: User["role"][]) => (user: User | null) => hasRole(user, 
 const NAV_GROUPS: NavGroup[] = [
   { id: "learn", title: "การเรียนของฉัน", hint: "คอร์ส บทเรียน ข้อสอบ ใบประกาศ ชุมชน และการชำระเงินของคุณ", items: [
     { tab: "dashboard", label: "ห้องเรียนของฉัน", icon: <BookOpen size={16} />, show: role("student", "admin") },
-    { tab: "selflearning", label: "Self-learning", icon: <GraduationCap size={16} />, show: role("student", "admin") },
     { tab: "affiliate", label: "แนะนำเพื่อน", icon: <Gift size={16} />, show: u => FEATURES.affiliate && hasRole(u, "student") }
   ] },
   { id: "teach", title: "การสอน", hint: "คอร์สที่คุณสอน ข้อสอบ งานที่ต้องตรวจ และผู้เรียนของคุณ", items: [
@@ -468,7 +466,6 @@ export const App: React.FC = () => {
                     <InstructorConsole />
                   </m.div>
                 )}
-                {currentTab === "selflearning" && <m.div key="selflearning" {...pageTransition}><SelfLearningLibrary /></m.div>}
                 {currentTab === "selflearningadmin" && <m.div key="selflearningadmin" {...pageTransition}><SelfLearningAdminPage /></m.div>}
                 {currentTab === "rounds" && (
                   <m.div key="rounds" {...pageTransition}>
