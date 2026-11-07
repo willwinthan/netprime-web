@@ -1,21 +1,22 @@
 import React, { useEffect, useState } from "react";
-import { Building, Webhook, KeyRound, BookOpen, ShieldCheck, Video, CheckCircle2, XCircle } from "lucide-react";
+import { Building, Webhook, KeyRound, BookOpen, ShieldCheck, Video, CheckCircle2, XCircle, Mail } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { SchoolSettingsPanel } from "../components/settings/SchoolSettingsPanel";
 import { WebhooksPanel } from "../components/settings/WebhooksPanel";
 import { ApiDocsPanel, ApiKeysPanel } from "../components/settings/ApiKeysPanel";
 import { SsoPanel } from "../components/settings/SsoPanel";
+import { EmailPanel } from "../components/settings/EmailPanel";
 import { Card } from "../components/settings/shared";
 import { ProviderStatus } from "../components/settings/SessionMeetingCard";
 import { ErrorBox, Empty } from "../components/site-admin/ui";
 
-type Tab = "school" | "webhooks" | "keys" | "docs" | "sso" | "live";
+type Tab = "school" | "email" | "webhooks" | "keys" | "docs" | "sso" | "live";
 
 /** Permission that opens this page (coordinator: show the menu item when can(user, SETTINGS_PERMISSION)). */
 export const SETTINGS_PERMISSION = "integrations.manage";
 
 /**
- * ตั้งค่าระบบ: school settings, webhooks, API keys + docs, enterprise SSO and meeting providers.
+ * ตั้งค่าระบบ: school settings, email delivery, webhooks, API keys + docs, enterprise SSO and meeting providers.
  * Brand/theme lives in the website designer; pass `onOpenBranding` to link to it.
  */
 export const SettingsPage: React.FC<{ onOpenBranding?: () => void }> = ({ onOpenBranding }) => {
@@ -27,6 +28,7 @@ export const SettingsPage: React.FC<{ onOpenBranding?: () => void }> = ({ onOpen
   }
   const tabs: Array<[Tab, string, React.ReactNode]> = [
     ["school", "ข้อมูลโรงเรียน", <Building size={16} />],
+    ["email", "อีเมล", <Mail size={16} />],
     ["sso", "SSO องค์กร", <ShieldCheck size={16} />],
     ["webhooks", "Webhooks", <Webhook size={16} />],
     ["keys", "API keys", <KeyRound size={16} />],
@@ -51,6 +53,7 @@ export const SettingsPage: React.FC<{ onOpenBranding?: () => void }> = ({ onOpen
         ))}
       </nav>
       {tab === "school" && <SchoolSettingsPanel onOpenBranding={onOpenBranding} />}
+      {tab === "email" && <EmailPanel />}
       {tab === "webhooks" && <WebhooksPanel />}
       {tab === "keys" && <ApiKeysPanel />}
       {tab === "docs" && <ApiDocsPanel />}

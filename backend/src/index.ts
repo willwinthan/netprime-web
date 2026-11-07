@@ -28,15 +28,16 @@ import { platformRouter } from "./handlers/platform";
 import { publicApiRouter } from "./handlers/publicapi";
 import { securityRouter } from "./handlers/security";
 import { selfLearningRouter } from "./handlers/selfLearning";
+import { emailAdminRouter } from "./handlers/emailAdmin";
 import { Env } from "./middleware/rbac";
 import { allowedOrigins } from "./utils/origins";
 import { runScheduledJobs } from "./jobs";
-import { configureEmailSender } from "./utils/email";
+import { configureEmail } from "./utils/email";
 
 const app = new Hono<Env>();
 
 app.use("*", async (c, next) => {
-  configureEmailSender(c.env.EMAIL_FROM);
+  configureEmail(c.env);
   await next();
 });
 
@@ -88,6 +89,7 @@ app.route("/api", assessmentsRouter);
 app.route("/api", marketingRouter);
 app.route("/api", websiteRouter);
 app.route("/api", selfLearningRouter);
+app.route("/api", emailAdminRouter);
 app.route("/api", analyticsRouter);
 app.route("/api", commerceRouter);
 
@@ -106,7 +108,7 @@ app.notFound((c) => {
 export default {
   fetch: app.fetch,
   scheduled: (_event: ScheduledEvent, env: Env["Bindings"], ctx: ExecutionContext) => {
-    configureEmailSender(env.EMAIL_FROM);
+    configureEmail(env);
     ctx.waitUntil(runScheduledJobs(env, ctx));
   }
 };
