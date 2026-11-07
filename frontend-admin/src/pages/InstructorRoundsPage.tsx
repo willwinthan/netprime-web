@@ -14,7 +14,7 @@ interface CourseOption { id: string; title: string }
 
 const EMPTY = { course_id: "", title: "", start_date: "", end_date: "", time_text: "09:00–16:00", mode: "classroom", location: "", price: 0, capacity: 20, registration_deadline: "", description: "" };
 
-/** Instructors schedule rounds of their own courses; staff check each draft and open it for registration. */
+/** Instructors schedule rounds (optionally linked to one of their published courses); staff check each draft and open it for registration. */
 export const InstructorRoundsPage: React.FC = () => {
   const api = useApi();
   const [sessions, setSessions] = useState<AdminSession[] | null>(null);
@@ -44,8 +44,7 @@ export const InstructorRoundsPage: React.FC = () => {
           <h1 style={{ fontSize: "22px" }}>รอบอบรมของฉัน</h1>
           <p style={{ fontSize: "14px", color: "var(--text-secondary)" }}>ลงรอบเป็นฉบับร่างได้เอง เจ้าหน้าที่จะตรวจและเปิดรับสมัครให้</p>
         </div>
-        <button className="tech-button-primary" disabled={courses.length === 0} title={courses.length === 0 ? "ต้องมีคอร์สที่เผยแพร่แล้วก่อน" : undefined}
-          onClick={() => setEditing({})}><CalendarPlus size={16} />ลงรอบอบรม</button>
+        <button className="tech-button-primary" onClick={() => setEditing({})}><CalendarPlus size={16} />ลงรอบอบรม</button>
       </div>
       <ErrorBox message={error} />
       <div className="glass-card" style={{ padding: "8px", overflowX: "auto" }}>
@@ -113,9 +112,11 @@ const RoundForm: React.FC<{ api: Api; initial: Partial<AdminSession>; courses: C
     <Modal title={initial.id ? "แก้ไขรอบอบรม" : "ลงรอบอบรม"} onClose={onClose} width={720}>
       <ErrorBox message={error} />
       <form onSubmit={save} style={grid2}>
-        <Field label="คอร์สของคุณ *" span>
-          <select className="form-input" required value={form.course_id} onChange={pickCourse}>
-            <option value="">— เลือกคอร์ส —</option>
+        <Field label="คอร์สออนไลน์ที่เชื่อม" span hint={courses.length === 0
+          ? "ยังไม่มีคอร์สออนไลน์ที่เผยแพร่แล้ว ลงเป็นคลาสสดได้เลย"
+          : "เลือกเมื่อผู้เรียนรอบนี้ควรได้สิทธิ์เข้าคอร์สออนไลน์ด้วย"}>
+          <select className="form-input" value={form.course_id ?? ""} onChange={pickCourse}>
+            <option value="">— ไม่เชื่อม (คลาสสดอย่างเดียว) —</option>
             {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
           </select>
         </Field>

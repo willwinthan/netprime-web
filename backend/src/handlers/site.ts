@@ -1033,7 +1033,7 @@ adminSiteRouter.delete("/registrations/:id", async (c) => {
 
 // ==========================================
 // INSTRUCTOR ROUTES  (/api/instructor/sessions)
-// Instructors schedule rounds of their own courses as drafts; staff set the round open.
+// Instructors schedule rounds as drafts, optionally linked to one of their own published courses; staff set the round open.
 // They see who is coming, but not registrants' contact, tax or payment details.
 // ==========================================
 
@@ -1063,8 +1063,8 @@ instructorSessionsRouter.post("/instructor/sessions", async (c) => {
   const user = c.get("user");
   const { values, error } = parseFields(await c.req.json().catch(() => null), INSTRUCTOR_SESSION_SPEC);
   if (error) return c.json({ error }, 400);
-  if (!values.course_id) return c.json({ error: "กรุณาเลือกคอร์สของคุณ" }, 400);
-  if (!await ownCourse(db, values.course_id, user.id)) return c.json({ error: "ลงรอบได้เฉพาะคอร์สของคุณ" }, 403);
+  // A classroom-only round needs no online course; a linked course must be the instructor's own.
+  if (values.course_id && !await ownCourse(db, values.course_id, user.id)) return c.json({ error: "เชื่อมได้เฉพาะคอร์สของคุณ" }, 403);
   const problem = await sessionCrossCheck(db, values);
   if (problem) return c.json({ error: problem }, 400);
   const id = newId("ses");
@@ -1090,10 +1090,7 @@ instructorSessionsRouter.patch("/instructor/sessions/:id", async (c) => {
   if (error) return c.json({ error }, 400);
   const keys = Object.keys(values);
   if (keys.length === 0) return c.json({ error: "ไม่มีข้อมูลที่ต้องแก้ไข" }, 400);
-  if (values.course_id !== undefined) {
-    if (!values.course_id) return c.json({ error: "กรุณาเลือกคอร์สของคุณ" }, 400);
-    if (!await ownCourse(db, values.course_id, user.id)) return c.json({ error: "ลงรอบได้เฉพาะคอร์สของคุณ" }, 403);
-  }
+  if (values.course_id && !await ownCourse(db, values.course_id, user.id)) return c.json({ error: "เชื่อมได้เฉพาะคอร์สของคุณ" }, 403);
   const problem = await sessionCrossCheck(db, { ...existing, ...values }, existing.course_id);
   if (problem) return c.json({ error: problem }, 400);
   const updated = await db.prepare(`UPDATE training_sessions SET ${keys.map(k => `${k} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP

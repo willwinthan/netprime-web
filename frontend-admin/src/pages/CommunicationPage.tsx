@@ -82,8 +82,8 @@ export const CommunicationPage: React.FC<{ initialTab?: Tab; startThreadWithUser
             <h3 style={{ fontSize: "15px", marginBottom: "6px" }}>ช่องทางที่พร้อมใช้งาน</h3>
             <ul style={{ fontSize: "14px", margin: 0, paddingLeft: "20px" }}>
               <li>อีเมล: พร้อม (ผ่าน Resend)</li>
-              <li>Web Push: {meta.channels.push ? "พร้อม" : "ยังไม่ได้ตั้งค่า VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY"}</li>
-              <li>LINE: {meta.channels.line ? "พร้อม" : "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET"}</li>
+              <li>Web Push: {meta.channels.push ? "พร้อม" : "ยังไม่เปิดใช้ (ให้ทีมดูแลระบบตั้งค่าคีย์ Web Push)"}</li>
+              <li>LINE: {meta.channels.line ? "พร้อม" : "ยังไม่เปิดใช้ (ให้ทีมดูแลระบบเชื่อมบัญชี LINE OA)"}</li>
             </ul>
           </section>
         </div>

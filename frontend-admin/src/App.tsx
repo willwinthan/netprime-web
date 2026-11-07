@@ -125,7 +125,7 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "commerce", label: "สินค้า ชุดคอร์ส ใบเสนอราคา", icon: <ShoppingBag size={16} />, show: perm("commerce.manage") }
   ] },
   { id: "outreach", title: "สื่อสาร การตลาด และเนื้อหา", hint: "ประกาศ อีเมล ชุมชน affiliate บทความ และหน้าเว็บ", items: [
-    { tab: "communication", label: "การสื่อสารและชุมชน", icon: <MessagesSquare size={16} />, show: perm("communication.manage") },
+    { tab: "communication", label: FEATURES.community ? "การสื่อสารและชุมชน" : "การสื่อสาร", icon: <MessagesSquare size={16} />, show: perm("communication.manage") },
     { tab: "marketing", label: "การตลาด", icon: <Megaphone size={16} />, show: perm("marketing.manage") },
     { tab: "articles", label: "บทความ", icon: <Newspaper size={16} />, show: perm("articles.publish", "articles.manage") },
     { tab: "website", label: "เว็บไซต์", icon: <Globe size={16} />, show: perm(...WEBSITE_PERMISSIONS) },
