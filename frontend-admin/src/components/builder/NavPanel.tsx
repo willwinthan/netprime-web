@@ -5,6 +5,7 @@ import { Empty, ErrorBox } from "../site-admin/ui";
 import { ListEditor, Notice, TextInput } from "./adminKit";
 import { isSafeLink } from "./blocks";
 import { NavItem, refreshSiteNav } from "./siteChrome";
+import { previewCardProps, useBuilderPreview, usePreviewSync } from "./SitePreview";
 
 interface Nav { header: NavItem[]; footer: NavItem[] }
 
@@ -17,6 +18,8 @@ const blank = (): NavItem => ({ label: "", label_en: null, href: "/", new_tab: f
 export const NavPanel: React.FC = () => {
   const api = useApi();
   const [nav, setNav] = useState<Nav | null>(null);
+  const preview = useBuilderPreview();
+  usePreviewSync("nav", nav);
   const [defaults, setDefaults] = useState<Nav | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export const NavPanel: React.FC = () => {
   if (!nav) return error ? <ErrorBox message={error} /> : <Empty text="กำลังโหลด…" />;
 
   const editor = (key: keyof Nav, title: string, max: number) => (
-    <div className="glass-card" style={{ padding: 20 }}>
+    <div className="glass-card" style={{ padding: 20 }} {...previewCardProps(preview, key === "header" ? "nav" : "footer")}>
       <h3 style={{ fontSize: 15, margin: "0 0 4px" }}>{title}</h3>
       <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--text-muted)" }}>ลิงก์ภายในเว็บ เช่น /courses, /p/corporate-training หรือ #contact · ลิงก์ภายนอกขึ้นต้นด้วย https://</p>
       <ListEditor items={nav[key]} max={max} addLabel="เพิ่มเมนู" itemLabel={i => `เมนูที่ ${i + 1}`} blank={blank}

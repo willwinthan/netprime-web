@@ -109,7 +109,7 @@ export const HomePage: React.FC = () => {
 
   return (
     <>
-      <section className="ps-hero">
+      <section className="ps-hero" data-np-section="hero">
         <div className="ps-container ps-hero-inner">
           <div className="ps-hero-copy">
             {home.hero.eyebrow && <span className="ps-eyebrow">{home.hero.eyebrow}</span>}
@@ -141,7 +141,7 @@ export const HomePage: React.FC = () => {
       </section>
 
       {promotion && (
-        <section aria-label="โปรโมชั่น" className="ps-container" style={{ paddingTop: 32 }}>
+        <section aria-label="โปรโมชั่น" className="ps-container" style={{ paddingTop: 32 }} data-np-section="promotion">
           <div className="ps-promo">
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <strong style={{ fontSize: 20 }}>{promotion.title}</strong>
@@ -175,7 +175,7 @@ export const HomePage: React.FC = () => {
       </section>
 
       {home.brands.length > 0 && (
-        <section className="ps-container ps-section" aria-labelledby="home-brands">
+        <section className="ps-container ps-section" aria-labelledby="home-brands" data-np-section="brands">
           <div className="ps-section-head">
             <div><span className="ps-kicker">แบรนด์ที่เราสอน</span><h2 id="home-brands">หลักสูตรจากผู้ผลิตชั้นนำ</h2></div>
           </div>
@@ -183,7 +183,7 @@ export const HomePage: React.FC = () => {
         </section>
       )}
 
-      <section className="ps-container ps-section" aria-labelledby="home-features">
+      <section className="ps-container ps-section" aria-labelledby="home-features" data-np-section="services">
         <div className="ps-section-head">
           <div><span className="ps-kicker">เรียนกับ NetPrime</span><h2 id="home-features">ครบตั้งแต่เรียนจนนำไปใช้งาน</h2></div>
         </div>
@@ -214,7 +214,7 @@ export const HomePage: React.FC = () => {
         </section>
       )}
 
-      {home.faq.length > 0 && <section className="ps-container ps-section ps-faq" aria-labelledby="home-faq">
+      {home.faq.length > 0 && <section className="ps-container ps-section ps-faq" aria-labelledby="home-faq" data-np-section="faq">
         <div style={{ flex: "1 1 280px" }}><span className="ps-kicker">คำถามที่พบบ่อย</span><h2 id="home-faq" className="ps-h2">ก่อนสมัครอบรม</h2></div>
         <div className="ps-faq-list">
           {home.faq.map((item, i) => (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../hooks/useApi";
 import type { Lang } from "../../i18n";
+import { usePreviewDraft } from "../../site/preview";
 
 /** Header/footer menus from the website builder (/api/public/website/nav), fetched once per page load. */
 export interface NavItem { label: string; label_en: string | null; href: string; new_tab: boolean }
@@ -26,12 +27,15 @@ export function refreshSiteNav() {
 /** null while loading or when the API is unreachable: callers keep their built-in menu. */
 export function useSiteNav(): SiteNav | null {
   const [nav, setNav] = useState<SiteNav | null>(null);
+  const draft = usePreviewDraft();
   useEffect(() => {
     let alive = true;
     fetchNav().then(n => { if (alive) setNav(n); }).catch(() => undefined);
     listeners.add(setNav);
     return () => { alive = false; listeners.delete(setNav); };
   }, []);
+  // Website builder preview: unsaved menus replace the published ones.
+  if (nav && draft.nav) return { ...nav, nav: draft.nav as SiteNav["nav"] };
   return nav;
 }
 

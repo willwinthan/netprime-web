@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { CalendarDays, Clock, MapPin, Phone, Mail, MessageCircle, Megaphone, ArrowRight, CheckCircle, X } from "lucide-react";
 import { API_BASE_URL, apiFetch } from "../../hooks/useApi";
 import { MODE_LABEL, SessionMode, formatBaht, formatDate, formatSessionDates } from "../site-admin/ui";
+import { usePreviewDraft } from "../../site/preview";
 
 // ==========================================
 // Public data access (no authentication)
@@ -50,11 +51,21 @@ export async function publicPostForm<T>(path: string, form: FormData): Promise<T
 let sitePromise: Promise<PublicSiteData> | null = null;
 export function usePublicSite() {
   const [site, setSite] = useState<PublicSiteData | null>(null);
+  const draft = usePreviewDraft();
   useEffect(() => {
     sitePromise ??= publicGet<PublicSiteData>("/site").catch(error => { sitePromise = null; throw error; });
     sitePromise.then(setSite).catch(() => setSite(null));
   }, []);
-  return site;
+  // Website builder preview: unsaved homepage copy and settings replace the published ones.
+  if (!site || (!draft.home && !draft.settings)) return site;
+  const settings = draft.settings ? { ...site.settings, ...draft.settings } as PublicSettings : site.settings;
+  const autoRounds = settings.announcement?.auto !== false;
+  return {
+    ...site,
+    settings,
+    upcoming_sessions: autoRounds ? site.upcoming_sessions : [],
+    ...(draft.home ? { home: draft.home } : {})
+  } as PublicSiteData;
 }
 
 const sectionStyle: React.CSSProperties = { borderTop: "1px solid rgba(0,0,0,0.05)", paddingTop: "48px", scrollMarginTop: "96px" };
@@ -454,7 +465,7 @@ export const ContactSection: React.FC = () => {
     [<Clock size={18} />, "เวลาทำการ", s?.hours]
   ];
   return (
-    <section id="contact" style={sectionStyle}>
+    <section id="contact" style={sectionStyle} data-np-section="contact">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "32px" }}>
         <div>
           <span style={eyebrow}>ติดต่อเรา</span>

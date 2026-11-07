@@ -24,7 +24,7 @@ export const LegalPage: React.FC<{ pageKey: LegalKey }> = ({ pageKey }) => {
   const blocks = useMemo(() => parseMarkdown(page?.content || ""), [page?.content]);
 
   return (
-    <article className="ps-container" style={{ maxWidth: 820, paddingTop: 40, paddingBottom: 48 }}>
+    <article className="ps-container" style={{ maxWidth: 820, paddingTop: 40, paddingBottom: 48 }} data-np-section="legal">
       {error && <p role="alert" style={{ color: "#b42318" }}>{error}</p>}
       {!page && !error && <p className="ps-muted">กำลังโหลด…</p>}
       {page && (

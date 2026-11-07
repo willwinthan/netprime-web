@@ -1,5 +1,6 @@
 import React, { useEffect, useSyncExternalStore } from "react";
 import { API_BASE_URL } from "../../hooks/useApi";
+import { IN_PREVIEW, onPreviewTheme } from "../../site/preview";
 
 /**
  * Theme & branding (website.design): loaded once from /api/public/website/theme and applied as CSS
@@ -104,6 +105,8 @@ function setFavicon(url: string | null) {
 
 /** Applies (custom=true) or clears (default theme) the variables on <html>. */
 export function applyTheme(theme: Theme, custom: boolean) {
+  // In the builder preview a draft theme wins over the published one, and nothing is cached.
+  if (previewing && !custom) return;
   const root = document.documentElement;
   const vars = themeVars(theme);
   for (const name of Object.keys(vars)) root.style.removeProperty(name);
@@ -119,8 +122,12 @@ export function applyTheme(theme: Theme, custom: boolean) {
   for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
   loadFont(theme.font);
   setFavicon(theme.favicon_url);
+  if (IN_PREVIEW) return;
   try { localStorage.setItem(VARS_KEY, JSON.stringify({ vars, font: fontHref(theme.font) })); } catch { /* storage unavailable */ }
 }
+
+/** Set once a draft theme arrives in the builder preview; the published theme no longer applies. */
+let previewing = false;
 
 // ---------- Shared store ----------
 
@@ -139,6 +146,7 @@ export function loadTheme(force = false): Promise<void> {
   loading = fetch(`${API_BASE_URL}/public/website/theme`)
     .then(res => res.ok ? res.json() : Promise.reject(new Error(String(res.status))))
     .then((data: { theme: Theme; updated_at: string | null }) => {
+      if (previewing) return;
       const custom = !!data.updated_at;
       applyTheme(data.theme, custom);
       emit({ theme: data.theme, custom, loaded: true });
@@ -169,3 +177,10 @@ export function useBranding() {
 
 /** Mount once (console or site) to load and apply the theme. Renders nothing. */
 export const ThemeBridge: React.FC = () => { useTheme(); return null; };
+
+onPreviewTheme(raw => {
+  const theme = raw as Theme;
+  previewing = true;
+  applyTheme(theme, true);
+  emit({ theme, custom: true, loaded: true });
+});

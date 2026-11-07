@@ -4,6 +4,7 @@ import { useApi } from "../../hooks/useApi";
 import { ErrorBox, Empty, Field, grid2, formatDateTime } from "./ui";
 import type { HomeContent } from "../../site/HomePage";
 import { Markdown, parseMarkdown } from "../../site/Markdown";
+import { previewCardProps, useBuilderPreview, usePreviewSync } from "../builder/SitePreview";
 
 type Api = ReturnType<typeof useApi>;
 type Section = "home" | "privacy" | "terms" | "refund-policy";
@@ -31,6 +32,9 @@ function safeLink(value: string): boolean {
 export const HomeContentPanel: React.FC = () => {
   const api = useApi();
   const [section, setSection] = useState<Section>("home");
+  const preview = useBuilderPreview();
+  // The preview follows the page being edited: the homepage or one of the policy pages.
+  useEffect(() => { preview.setPath(section === "home" ? "/" : `/${section}`); preview.focus(section === "home" ? null : "legal"); }, [section]);
   return (
     <div style={{ display: "grid", gap: "16px", maxWidth: "900px" }}>
       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
@@ -64,6 +68,8 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const preview = useBuilderPreview();
+  usePreviewSync("home", form);
 
   useEffect(() => {
     api.get<{ home: HomeContent; defaults: HomeContent; icons: string[]; updated_at: string | null }>("/admin/site/home")
@@ -131,7 +137,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
   return (
     <form onSubmit={save} className="site-form" style={{ display: "grid", gap: "20px" }}>
       <ErrorBox message={error} />
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "hero")}>
         <h3 style={{ fontSize: "16px", marginBottom: "14px" }}>ส่วนหัวของหน้าแรก</h3>
         <div style={grid2}>
           <Field label="ข้อความเล็กเหนือหัวข้อ" hint="ไม่บังคับ"><input className="form-input" maxLength={60} value={form.hero.eyebrow} onChange={e => setHero("eyebrow", e.target.value)} /></Field>
@@ -140,7 +146,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "brands")}>
         <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>การ์ดแบรนด์</h3>
         <p style={hint}>แสดงในหัวข้อ "แบรนด์ที่เราสอน" · ไม่มีรายการ = ซ่อนหัวข้อนี้</p>
         {form.brands.map((b, i) => (
@@ -159,7 +165,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
         <AddButton list="brands" label="เพิ่มแบรนด์" />
       </div>
 
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "services")}>
         <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>บริการ / จุดเด่น</h3>
         <p style={hint}>แสดงในหัวข้อ "เรียนกับ NetPrime" ของหน้าแรกและหน้าเกี่ยวกับเรา</p>
         {form.services.map((s, i) => (
@@ -179,7 +185,7 @@ const HomeEditor: React.FC<{ api: Api }> = ({ api }) => {
         <AddButton list="services" label="เพิ่มบริการ" />
       </div>
 
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "faq")}>
         <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>คำถามที่พบบ่อย</h3>
         <p style={hint}>ข้อแรกจะเปิดค้างไว้ · ไม่มีรายการ = ซ่อนหัวข้อนี้</p>
         {form.faq.map((f, i) => (
