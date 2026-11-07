@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { previewCardProps, useBuilderPreview, usePreviewSync } from "../builder/SitePreview";
 import { Pencil, Trash2, Plus, ImageUp, Phone, Mail, Save, ExternalLink } from "lucide-react";
 import { useApi } from "../../hooks/useApi";
 import { IconButton } from "./SessionsPanel";
@@ -141,20 +142,24 @@ export const PromotionsPanel: React.FC = () => {
   const [items, setItems] = useState<Promotion[]>([]);
   const [editing, setEditing] = useState<Partial<Promotion> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const preview = useBuilderPreview();
+  useEffect(() => { preview.focus("promotion"); }, []);
 
-  const load = async () => {
+  const load = async (changed = false) => {
     try { setItems((await api.get<{ promotions: Promotion[] }>("/admin/site/promotions")).promotions); }
     catch (err: any) { setError(err.message); }
+    // The homepage shows the first active promotion: reload the preview to see the change.
+    if (changed) preview.reload();
   };
   useEffect(() => { load(); }, [api.token]);
 
   const toggle = async (p: Promotion) => {
-    try { await api.patch(`/admin/site/promotions/${p.id}`, { active: !p.active }); await load(); }
+    try { await api.patch(`/admin/site/promotions/${p.id}`, { active: !p.active }); await load(true); }
     catch (err: any) { setError(err.message); }
   };
   const remove = async (p: Promotion) => {
     if (!confirm(`ลบโปรโมชั่น "${p.title}"?`)) return;
-    try { await api.request(`/admin/site/promotions/${p.id}`, { method: "DELETE" }); await load(); }
+    try { await api.request(`/admin/site/promotions/${p.id}`, { method: "DELETE" }); await load(true); }
     catch (err: any) { setError(err.message); }
   };
 
@@ -187,7 +192,7 @@ export const PromotionsPanel: React.FC = () => {
           ))}
         </div>
       )}
-      {editing && <PromotionForm api={api} initial={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <PromotionForm api={api} initial={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(true); }} />}
     </div>
   );
 };
@@ -240,6 +245,8 @@ const PromotionForm: React.FC<{ api: Api; initial: Partial<Promotion>; onClose: 
 export const SettingsPanel: React.FC = () => {
   const api = useApi();
   const [form, setForm] = useState<Record<string, any> | null>(null);
+  const preview = useBuilderPreview();
+  usePreviewSync("settings", form);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -266,7 +273,7 @@ export const SettingsPanel: React.FC = () => {
   return (
     <form onSubmit={save} className="site-form" style={{ display: "grid", gap: "20px", maxWidth: "860px" }}>
       <ErrorBox message={error} />
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "announcement")}>
         <h3 style={{ fontSize: "16px", marginBottom: "4px" }}>แถบประกาศบนสุดของเว็บ</h3>
         <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "14px" }}>แสดงรอบอบรมที่ใกล้เปิดให้อัตโนมัติ ถ้าต้องการแจ้งวันหยุดหรือโปรโมชั่นด่วน ให้ปิดการแสดงอัตโนมัติแล้วใช้ข้อความด้านล่าง</p>
         <div style={grid2}>
@@ -280,7 +287,7 @@ export const SettingsPanel: React.FC = () => {
           <Field label="ลิงก์เมื่อกด" hint="เช่น #schedule หรือ https://…" span><input className="form-input" maxLength={500} value={form.announcement.link || ""} onChange={e => setAnn("link", e.target.value)} /></Field>
         </div>
       </div>
-      <div className="glass-card" style={{ padding: "24px" }}>
+      <div className="glass-card" style={{ padding: "24px" }} {...previewCardProps(preview, "contact")}>
         <h3 style={{ fontSize: "16px", marginBottom: "14px" }}>ข้อมูลติดต่อ (แสดงที่ header, footer และหน้าติดต่อ)</h3>
         <div style={grid2}>
           <Field label="ชื่อบริษัท" span><input className="form-input" maxLength={120} value={form.company || ""} onChange={set("company")} /></Field>

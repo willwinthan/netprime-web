@@ -6,6 +6,7 @@ import { ImageInput, Notice, SelectInput, TextInput } from "./adminKit";
 import { DEFAULT_THEME, FONTS, FontName, Theme, contrastRatio, fontStack, isHex, loadFont, publishTheme, themeVars } from "./theme";
 import fullLogo from "../../../logo/NetPrimeFullLogo.png";
 import "../../site/site.css";
+import { useBuilderPreview, usePreviewSync } from "./SitePreview";
 
 /**
  * Tab "ธีมและแบรนด์": school name, logo, favicon, colors (contrast-checked like the server), font and corner radius,
@@ -22,6 +23,8 @@ export const ThemePanel: React.FC = () => {
     api.get<{ theme: Theme }>("/website/theme").then(d => setTheme(d.theme)).catch(err => setError(err.message));
   }, [api.token]);
   useEffect(() => { if (theme) loadFont(theme.font); }, [theme?.font]);
+  const preview = useBuilderPreview();
+  usePreviewSync("theme", theme);
 
   const checks = useMemo(() => {
     if (!theme) return [];
@@ -48,7 +51,7 @@ export const ThemePanel: React.FC = () => {
 
   const vars = themeVars(theme) as React.CSSProperties;
   return (
-    <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", alignItems: "start" }}>
+    <div style={{ display: "grid", gap: 20, gridTemplateColumns: preview.active ? "minmax(0, 1fr)" : "repeat(auto-fit, minmax(340px, 1fr))", alignItems: "start" }}>
       <div className="glass-card" style={{ padding: 20, display: "grid", gap: 14 }}>
         <ErrorBox message={error} />
         {notice && <Notice>{notice}</Notice>}
@@ -83,7 +86,8 @@ export const ThemePanel: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 8, position: "sticky", top: 12 }}>
+      {/* Small sample only when the full-site preview is hidden. */}
+      {!preview.active && <div style={{ display: "grid", gap: 8, position: "sticky", top: 12 }}>
         <strong style={{ fontSize: 14 }}>ตัวอย่างสด</strong>
         <div className="ps" style={{ ...vars, minHeight: 0, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(0,0,0,0.08)", fontFamily: fontStack(theme.font) }}>
           <div className="ps-header" style={{ position: "static" }}>
@@ -109,7 +113,7 @@ export const ThemePanel: React.FC = () => {
             <div className="ps-card" style={{ padding: 16 }}><strong>การ์ดตัวอย่าง</strong><p className="ps-muted" style={{ margin: "6px 0 0" }}>มุมโค้งตามค่าที่ตั้งไว้</p></div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 };

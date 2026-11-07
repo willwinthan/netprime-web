@@ -6,6 +6,8 @@ import { Empty } from "../components/site-admin/ui";
 import { PromotionsPanel, SettingsPanel } from "../components/site-admin/ContentPanels";
 import { HomeContentPanel } from "../components/site-admin/HomeContentPanel";
 import { InstallAppButton } from "../pwa/pwa";
+import { PreviewLayout } from "../components/builder/SitePreview";
+import type { PreviewSection } from "../site/preview";
 
 // Builder panels are split so the BlockNote editor loads only when opened.
 const PagesPanel = lazy(() => import("../components/builder/PagesPanel"));
@@ -13,6 +15,14 @@ const NavPanel = lazy(() => import("../components/builder/NavPanel"));
 const ThemePanel = lazy(() => import("../components/builder/ThemePanel"));
 
 type Tab = "home" | "pages" | "nav" | "theme" | "promotions" | "settings";
+
+/** Tabs shown next to a live preview of the site ("pages" has its own block preview). */
+const PREVIEW_TABS: Tab[] = ["home", "nav", "theme", "promotions", "settings"];
+/** Which tab edits a part of the site clicked in the preview. */
+const SECTION_TAB: Record<PreviewSection, Tab> = {
+  hero: "home", brands: "home", services: "home", faq: "home", legal: "home",
+  nav: "nav", footer: "nav", promotion: "promotions", announcement: "settings", contact: "settings"
+};
 
 const TAB_PERMISSION: Record<Tab, string> = WEBSITE_TABS;
 
@@ -60,12 +70,20 @@ export const WebsiteBuilderPage: React.FC = () => {
         ))}
       </nav>
       <Suspense fallback={<Empty text="กำลังโหลด…" />}>
-        {tab === "home" && <HomeContentPanel />}
         {tab === "pages" && <PagesPanel />}
-        {tab === "nav" && <NavPanel />}
-        {tab === "theme" && <ThemePanel />}
-        {tab === "promotions" && <PromotionsPanel />}
-        {tab === "settings" && <SettingsPanel />}
+        {PREVIEW_TABS.includes(tab) && (
+          <PreviewLayout resetKey={tab} elsewhere={section => {
+            const target = SECTION_TAB[section];
+            if (target === tab || !allowed.includes(target)) return null;
+            return { label: tabs.find(([key]) => key === target)?.[1] ?? target, go: () => setTab(target) };
+          }}>
+            {tab === "home" && <HomeContentPanel />}
+            {tab === "nav" && <NavPanel />}
+            {tab === "theme" && <ThemePanel />}
+            {tab === "promotions" && <PromotionsPanel />}
+            {tab === "settings" && <SettingsPanel />}
+          </PreviewLayout>
+        )}
       </Suspense>
     </div>
   );

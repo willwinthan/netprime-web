@@ -172,7 +172,7 @@ const UpcomingBar: React.FC<{ rounds: UpcomingRound[] }> = ({ rounds }) => {
   const date = new Intl.DateTimeFormat(lang === "th" ? "th-TH" : "en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
     .format(new Date(`${round.start_date}T00:00:00Z`));
   return (
-    <div className="ps-announce ps-announce-rounds" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
+    <div className="ps-announce ps-announce-rounds" data-np-section="announcement" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
       <Link to={`/schedule?register=${encodeURIComponent(round.id)}`} className="ps-announce-link">
         <span className="ps-announce-tag">{t("announce.upcoming")}</span>
@@ -206,12 +206,12 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
       <a href="#main" className="ps-sr">{t("a11y.skip")}</a>
       {upcoming.length > 0 ? <UpcomingBar rounds={upcoming} /> : announcement?.active && announcement.text && (
         announcement.link
-          ? <button type="button" className="ps-announce" onClick={() => openSiteLink(announcement.link!)}>
+          ? <button type="button" className="ps-announce" data-np-section="announcement" onClick={() => openSiteLink(announcement.link!)}>
               <span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span><ArrowIcon size={16} />
             </button>
-          : <div className="ps-announce" role="note"><span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span></div>
+          : <div className="ps-announce" role="note" data-np-section="announcement"><span className="ps-announce-tag">{t("announce.tag")}</span><span>{announcement.text}</span></div>
       )}
-      <header className="ps-header">
+      <header className="ps-header" data-np-section="nav">
         <div className="ps-container ps-header-inner">
           <Link to="/" className="ps-brand">
             {brand.logo ? <>
@@ -234,7 +234,7 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
       <main id="main" className="ps-main-area">{children}</main>
 
-      <footer className="ps-footer">
+      <footer className="ps-footer" data-np-section="footer">
         <div className="ps-container ps-footer-grid">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <img className="ps-footer-logo" src={brand.logo || fullLogo} alt={brand.name} />
