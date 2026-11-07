@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Eye, ExternalLink, FilePlus2, History, Pencil, Plus, Save, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Eye, ExternalLink, FilePlus2, History, Pencil, Plus, Save, Trash2, Upload } from "lucide-react";
 import { API_BASE_URL, useApi } from "../hooks/useApi";
 import { Chip, Empty, ErrorBox, Field, Modal, formatDateTime, grid2, tableStyle, tdStyle, thStyle } from "../components/site-admin/ui";
 import { IconBtn, ImageInput, Notice, SelectInput, TextInput } from "../components/builder/adminKit";
@@ -18,6 +18,8 @@ interface AdminLesson {
   cover_url: string | null; level: Exclude<Level, ""> | null; status: "draft" | "published"; sort_order: number;
   current_file_id: string | null; published_at: string | null; updated_at: string;
   file_version: number | null; file_size: number | null; uses_kit: number | null; file_uploaded_at: string | null;
+  /** Signed-in learners who opened it / reported it complete (Lesson Kit progress). */
+  learners: number; completed: number;
 }
 interface LessonFile {
   id: string; version: number; filename: string | null; size_bytes: number; uses_kit: boolean; external_hosts: string[]; created_at: string;
@@ -67,6 +69,8 @@ export const SelfLearningAdminPage: React.FC = () => {
           <p className="header-desc">อัปโหลดบทเรียนเป็นไฟล์ .html ไฟล์เดียว บทเรียนที่เผยแพร่แล้วจะแสดงที่เมนู Self-learning ของหน้าเว็บ (/self-learning)</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a href="/lesson-kit/netprime-lesson-template.html" download className="tech-button-outline"
+            title="ไฟล์ตัวอย่างที่มี Lesson Kit: สีตามธีมเว็บ ความสูงพอดีกรอบ และเก็บความคืบหน้าของผู้เรียน"><Download size={16} />ไฟล์ต้นแบบ</a>
           <a href="/self-learning" target="_blank" rel="noreferrer" className="tech-button-outline"><ExternalLink size={16} />เปิดหน้าเว็บ</a>
           <button type="button" className="tech-button-primary" onClick={() => setCreating(true)}><FilePlus2 size={16} />เพิ่มบทเรียน</button>
         </div>
@@ -76,7 +80,7 @@ export const SelfLearningAdminPage: React.FC = () => {
         {!lessons ? <Empty text="กำลังโหลด…" /> : lessons.length === 0 ? <Empty text="ยังไม่มีบทเรียน กด เพิ่มบทเรียน เพื่อเริ่ม" /> : (
           <div className="glass-card" style={{ padding: 8, overflowX: "auto" }}>
             <table style={tableStyle}>
-              <thead><tr><th style={thStyle}>ลำดับ</th><th style={thStyle}>บทเรียน</th><th style={thStyle}>สถานะ</th><th style={thStyle}>ไฟล์ปัจจุบัน</th><th style={thStyle}>แก้ไขล่าสุด</th><th style={thStyle} /></tr></thead>
+              <thead><tr><th style={thStyle}>ลำดับ</th><th style={thStyle}>บทเรียน</th><th style={thStyle}>สถานะ</th><th style={thStyle}>ไฟล์ปัจจุบัน</th><th style={thStyle}>ผู้เรียน</th><th style={thStyle}>แก้ไขล่าสุด</th><th style={thStyle} /></tr></thead>
               <tbody>
                 {lessons.map((l, i) => (
                   <tr key={l.id}>
@@ -96,6 +100,7 @@ export const SelfLearningAdminPage: React.FC = () => {
                     <td style={{ ...tdStyle, fontSize: 13 }}>
                       {l.file_version ? <>เวอร์ชัน {l.file_version} · {fileSize(l.file_size)}{!l.uses_kit && <div style={{ color: "#92400e" }}>ไม่ได้ใช้ Lesson Kit</div>}</> : <span style={{ color: "#92400e" }}>ยังไม่มีไฟล์</span>}
                     </td>
+                    <td style={{ ...tdStyle, fontSize: 13 }} title="นับเฉพาะผู้เรียนที่ login">{l.learners ? <>{l.learners} คน<div style={{ color: "var(--text-muted)" }}>เรียนครบ {l.completed}</div></> : "—"}</td>
                     <td style={{ ...tdStyle, fontSize: 13, color: "var(--text-secondary)" }}>{formatDateTime(l.updated_at)}</td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                       <span style={{ display: "inline-flex", gap: 4 }}>
@@ -222,6 +227,7 @@ const LessonEditor: React.FC<{ api: Api; lessonId: string; onClose: () => void }
               <h3 style={{ margin: 0, fontSize: 15 }}>ไฟล์บทเรียน</h3>
               <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
                 ไฟล์ .html ไฟล์เดียว ไม่เกิน 15 MB ใส่ CSS, JavaScript, ฟอนต์และรูปไว้ในไฟล์ (หรือโหลดจากเว็บภายนอก) อัปโหลดใหม่ได้ทุกเมื่อ ลิงก์เดิมไม่เปลี่ยน และย้อนกลับไปเวอร์ชันเก่าได้
+                เริ่มจาก <a href="/lesson-kit/netprime-lesson-template.html" download>ไฟล์ต้นแบบ</a> เพื่อให้สีเปลี่ยนตามธีมของเว็บและเก็บความคืบหน้าของผู้เรียนที่ login ได้
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <input ref={fileInput} type="file" accept=".html,.htm,text/html" style={{ display: "none" }} onChange={e => upload(e.target.files?.[0])} />
@@ -292,8 +298,8 @@ const UploadReport: React.FC<{ file: LessonFile }> = ({ file }) => (
   <div className="glass-card" style={{ padding: "12px 14px", fontSize: 13, display: "grid", gap: 6 }}>
     <strong>ผลตรวจไฟล์เวอร์ชัน {file.version} ({fileSize(file.size_bytes)})</strong>
     {file.uses_kit
-      ? <span style={{ color: "#1f6b45" }}>ใช้ Lesson Kit: กรอบบทเรียนปรับความสูงตามเนื้อหาได้</span>
-      : <span style={{ color: "#92400e" }}>ไม่พบ Lesson Kit: กรอบบทเรียนจะสูงคงที่ 900 px และไม่จำตำแหน่งบทใน URL</span>}
+      ? <span style={{ color: "#1f6b45" }}>ใช้ Lesson Kit: ปรับความสูงตามเนื้อหา รับธีมจากเว็บ และเก็บความคืบหน้าได้ (ถ้าบทเรียนส่งมา)</span>
+      : <span style={{ color: "#92400e" }}>ไม่พบ Lesson Kit: กรอบบทเรียนจะสูงคงที่ 900 px สีไม่เปลี่ยนตามธีมเว็บ และไม่เก็บความคืบหน้าของผู้เรียนในระบบ</span>}
     {file.external_hosts.length > 0
       ? <span>ไฟล์อ้างถึงเว็บภายนอก: {file.external_hosts.join(", ")} ตรวจว่าเชื่อถือได้ก่อนเผยแพร่</span>
       : <span>ไม่อ้างถึงเว็บภายนอก</span>}

@@ -4,6 +4,7 @@
 //
 // ใช้:  NETPRIME_TOKEN=<JWT ของ admin> node scripts/import-self-learning.mjs --base <URL ของ backend>
 // รันซ้ำได้: บทเรียนที่มี slug นี้แล้วจะถูกข้าม ไม่เขียนทับไฟล์ที่อัปโหลดใหม่ในหลังบ้าน
+//       เพิ่ม --update เพื่ออัปโหลดไฟล์ใน repo เป็นเวอร์ชันใหม่ของบทเรียนที่มีอยู่แล้ว (เวอร์ชันเก่ายังย้อนกลับได้ในหลังบ้าน)
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,7 @@ const LESSONS = [
 const args = process.argv.slice(2);
 const baseIndex = args.indexOf('--base');
 const base = baseIndex >= 0 ? args[baseIndex + 1]?.replace(/\/$/, '') : null;
+const update = args.includes('--update');
 const token = process.env.NETPRIME_TOKEN;
 if (!base || !token) {
   console.error('ต้องระบุ --base <URL ของ backend> และตัวแปร NETPRIME_TOKEN');
@@ -35,18 +37,25 @@ async function api(path, init = {}) {
   return data;
 }
 
-const { lessons } = await api('/self-learning/lessons');
-const existing = new Set(lessons.map(lesson => lesson.slug));
-for (const { file, ...fields } of LESSONS) {
-  if (existing.has(fields.slug)) {
-    console.log(`ข้าม ${fields.slug} (มีอยู่แล้ว)`);
-    continue;
-  }
-  const { lesson } = await api('/self-learning/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+async function uploadFile(lessonId, file) {
   const html = await readFile(fileURLToPath(new URL(`./self-learning/${file}`, import.meta.url)));
   const form = new FormData();
   form.append('file', new Blob([html], { type: 'text/html' }), file);
-  const { file: uploaded } = await api(`/self-learning/lessons/${lesson.id}/file`, { method: 'POST', body: form });
+  return (await api(`/self-learning/lessons/${lessonId}/file`, { method: 'POST', body: form })).file;
+}
+
+const { lessons } = await api('/self-learning/lessons');
+const existing = new Map(lessons.map(lesson => [lesson.slug, lesson]));
+for (const { file, ...fields } of LESSONS) {
+  const found = existing.get(fields.slug);
+  if (found) {
+    if (!update) { console.log(`ข้าม ${fields.slug} (มีอยู่แล้ว ใช้ --update เพื่ออัปโหลดไฟล์ใหม่)`); continue; }
+    const uploaded = await uploadFile(found.id, file);
+    console.log(`อัปโหลด ${fields.slug} เป็นเวอร์ชัน ${uploaded.version} (${Math.round(uploaded.size_bytes / 1024)} KB)`);
+    continue;
+  }
+  const { lesson } = await api('/self-learning/lessons', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+  const uploaded = await uploadFile(lesson.id, file);
   await api(`/self-learning/lessons/${lesson.id}/publish`, { method: 'POST' });
   console.log(`นำเข้าและเผยแพร่ ${fields.slug} (${Math.round(uploaded.size_bytes / 1024)} KB)`);
 }

@@ -149,3 +149,46 @@ test('deleting a published lesson needs an emailed code and removes its files', 
   const draft = await createLesson();
   await expectStatus(`/api/self-learning/lessons/${draft.id}`, 200, { method: 'DELETE', token: coord });
 });
+
+test('signed-in learners save and resume progress on published lessons only', async () => {
+  const lesson = await createLesson();
+  await upload(coord, lesson.id, lessonHtml());
+  const path = `/api/me/self-learning/${lesson.slug}`;
+  await expectStatus(path, 401);
+  await expectStatus(path, 404, { token: student }, 'drafts take no progress');
+  await expectStatus(path, 404, { method: 'PUT', token: student, body: { percent: 10 } });
+  await expectStatus(`/api/self-learning/lessons/${lesson.id}/publish`, 200, { method: 'POST', token: coord });
+
+  assert.equal((await expectStatus(path, 200, { token: student })).progress, null);
+  await expectStatus(path, 400, { method: 'PUT', token: student, body: { percent: 101 } });
+  await expectStatus(path, 400, { method: 'PUT', token: student, body: { percent: 5, state: { blob: 'x'.repeat(70 * 1024) } } });
+  await expectStatus(path, 200, { method: 'PUT', token: student, body: { percent: 40, state: { seen: [0, 1] } } });
+  let saved = (await expectStatus(path, 200, { token: student })).progress;
+  assert.equal(saved.percent, 40);
+  assert.deepEqual(saved.state, { seen: [0, 1] });
+  assert.equal(saved.completed_at, null);
+
+  await expectStatus(path, 200, { method: 'PUT', token: student, body: { percent: 100, completed: true, state: { seen: [0, 1, 2] } } });
+  // Completion sticks even if the lesson later reports less (a reset, another device).
+  await expectStatus(path, 200, { method: 'PUT', token: student, body: { percent: 30, completed: false, state: { seen: [0] } } });
+  saved = (await expectStatus(path, 200, { token: student })).progress;
+  assert.equal(saved.percent, 30);
+  assert.ok(saved.completed_at);
+
+  // Each account has its own progress; the list feeds the lesson cards.
+  assert.equal((await expectStatus(path, 200, { token: instructor })).progress, null);
+  const mine = await expectStatus('/api/me/self-learning', 200, { token: student });
+  assert.ok(mine.progress.some(p => p.slug === lesson.slug && p.completed_at));
+
+  // Staff see how many learners opened and finished it.
+  const listed = (await expectStatus('/api/self-learning/lessons', 200, { token: coord })).lessons.find(l => l.id === lesson.id);
+  assert.equal(listed.learners, 1);
+  assert.equal(listed.completed, 1);
+
+  // A draft with learner progress needs an emailed code to delete, and the progress goes with it.
+  await expectStatus(`/api/self-learning/lessons/${lesson.id}/unpublish`, 200, { method: 'POST', token: coord });
+  assert.equal((await request(`/api/self-learning/lessons/${lesson.id}`, { method: 'DELETE', token: coord })).status, 428);
+  const done = await confirmedRequest(`/api/self-learning/lessons/${lesson.id}`, 'self_learning.delete', lesson.id, { token: coord });
+  assert.equal(done.status, 200);
+  assert.ok(!(await expectStatus('/api/me/self-learning', 200, { token: student })).progress.some(p => p.slug === lesson.slug));
+});

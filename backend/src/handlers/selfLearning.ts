@@ -9,6 +9,7 @@ import { allowedOrigins } from "../utils/origins";
  * per lesson; the public site lists published lessons at /self-learning and embeds the file in an iframe.
  *   Public:  /api/public/self-learning, /api/public/self-learning/:slug, /api/public/self-learning/files/:id
  *   Console: /api/self-learning/*   (rbac + site.self_learning)
+ *   Learner: /api/me/self-learning    (rbac; progress a lesson reports through the Lesson Kit, per account)
  *
  * The uploaded file runs its own scripts, so it is never served from the site's origin (where the JWT sits
  * in localStorage): files come from SELF_LEARNING_ORIGIN, or this Worker's origin, and may only be framed
@@ -20,6 +21,7 @@ const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const LEVELS = ["beginner", "intermediate", "advanced"] as const;
+const MAX_STATE_CHARS = 64 * 1024;
 const LESSON_COLUMNS = ["slug", "title", "title_en", "summary", "summary_en", "cover_url", "level"] as const;
 
 type C = Context<Env>;
@@ -203,7 +205,9 @@ selfLearningRouter.use("/self-learning/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
 });
 
-const CONSOLE_SELECT = `SELECT l.*, f.version AS file_version, f.size_bytes AS file_size, f.uses_kit, f.created_at AS file_uploaded_at
+const CONSOLE_SELECT = `SELECT l.*, f.version AS file_version, f.size_bytes AS file_size, f.uses_kit, f.created_at AS file_uploaded_at,
+    (SELECT COUNT(*) FROM self_learning_progress p WHERE p.lesson_id = l.id) AS learners,
+    (SELECT COUNT(*) FROM self_learning_progress p WHERE p.lesson_id = l.id AND p.completed_at IS NOT NULL) AS completed
   FROM self_learning_lessons l LEFT JOIN self_learning_files f ON f.id = l.current_file_id`;
 
 async function loadLesson(c: C, id: string) {
@@ -340,11 +344,12 @@ selfLearningRouter.post("/self-learning/reorder", async (c) => {
 
 selfLearningRouter.delete("/self-learning/lessons/:id", async (c) => {
   const id = c.req.param("id");
-  // A published lesson needs an emailed code from its creator or an admin.
+  // A published lesson, or one with learner progress, needs an emailed code from its creator or an admin.
   const denied = await requireDeleteConfirmation(c, "self_learning.delete", id);
   if (denied) return denied;
   const files = await c.env.DB.prepare("SELECT r2_key FROM self_learning_files WHERE lesson_id = ?").bind(id).all<{ r2_key: string }>();
-  const [, result] = await c.env.DB.batch([
+  const [, , result] = await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM self_learning_progress WHERE lesson_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM self_learning_files WHERE lesson_id = ?").bind(id),
     c.env.DB.prepare("DELETE FROM self_learning_lessons WHERE id = ?").bind(id)
   ]);
@@ -353,4 +358,56 @@ selfLearningRouter.delete("/self-learning/lessons/:id", async (c) => {
   for (const { r2_key } of files.results) await c.env.ASSETS.delete(r2_key).catch(() => undefined);
   await audit(c, "delete", id);
   return c.json({ message: "ลบบทเรียนแล้ว" });
+});
+
+// ==========================================
+// Learner progress  (/api/me/self-learning, any signed-in account)
+// ==========================================
+
+selfLearningRouter.use("/me/self-learning", rbac());
+selfLearningRouter.use("/me/self-learning/*", rbac());
+selfLearningRouter.use("/me/self-learning/*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "no-store");
+});
+
+/** Progress on every published lesson, for the lesson cards. */
+selfLearningRouter.get("/me/self-learning", async (c) => {
+  const rows = await c.env.DB.prepare(`SELECT l.slug, p.percent, p.completed_at, p.updated_at FROM self_learning_progress p
+    JOIN self_learning_lessons l ON l.id = p.lesson_id WHERE p.user_id = ? AND l.status = 'published'`).bind(c.get("user").id).all();
+  c.header("Cache-Control", "no-store");
+  return c.json({ progress: rows.results });
+});
+
+const publishedLesson = (c: C, slug: string) => SLUG_RE.test(slug)
+  ? c.env.DB.prepare("SELECT id FROM self_learning_lessons WHERE slug = ? AND status = 'published'").bind(slug).first<{ id: string }>()
+  : Promise.resolve(null);
+
+selfLearningRouter.get("/me/self-learning/:slug", async (c) => {
+  const lesson = await publishedLesson(c, c.req.param("slug").toLowerCase());
+  if (!lesson) return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
+  const row = await c.env.DB.prepare("SELECT percent, state, completed_at, updated_at FROM self_learning_progress WHERE user_id = ? AND lesson_id = ?")
+    .bind(c.get("user").id, lesson.id).first<{ percent: number; state: string | null; completed_at: string | null; updated_at: string }>();
+  if (!row) return c.json({ progress: null });
+  let state: unknown = null;
+  try { state = row.state ? JSON.parse(row.state) : null; } catch { state = null; }
+  return c.json({ progress: { ...row, state } });
+});
+
+/** PUT /api/me/self-learning/:slug { percent, completed?, state? } — what the lesson last reported. */
+selfLearningRouter.put("/me/self-learning/:slug", async (c) => {
+  const lesson = await publishedLesson(c, c.req.param("slug").toLowerCase());
+  if (!lesson) return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
+  const body = await readJson(c);
+  const percent = Number(body.percent);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) return c.json({ error: "ความคืบหน้าต้องอยู่ระหว่าง 0–100" }, 400);
+  const state = body.state === undefined || body.state === null ? null : JSON.stringify(body.state);
+  if (state && state.length > MAX_STATE_CHARS) return c.json({ error: "ข้อมูลความคืบหน้ายาวเกิน 64 KB" }, 400);
+  const completed = body.completed === true;
+  await c.env.DB.prepare(`INSERT INTO self_learning_progress (user_id, lesson_id, percent, state, completed_at, updated_at)
+      VALUES (?, ?, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP END, CURRENT_TIMESTAMP)
+    ON CONFLICT (user_id, lesson_id) DO UPDATE SET percent = excluded.percent, state = excluded.state,
+      completed_at = COALESCE(self_learning_progress.completed_at, excluded.completed_at), updated_at = CURRENT_TIMESTAMP`)
+    .bind(c.get("user").id, lesson.id, Math.round(percent), state, completed ? 1 : 0).run();
+  return c.json({ message: "บันทึกความคืบหน้าแล้ว" });
 });
