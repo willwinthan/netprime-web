@@ -47,6 +47,7 @@ export const PERMISSIONS = [
   { key: "commerce.manage", group: "การเงินและคอร์ส", label: "จัดการชุดคอร์ส สมาชิกรายช่วง ผ่อนชำระ และใบเสนอราคา" },
   { key: "marketing.manage", group: "การตลาด", label: "จัดการ affiliate ฟอร์มเก็บ lead popup และ tracking" },
   { key: "website.design", group: "เว็บไซต์", label: "สร้างหน้าเว็บ แก้ธีม และแม่แบบใบประกาศ" },
+  { key: "agents.approve", group: "ระบบ", label: "ดูและอนุมัติงานที่ AI agent ขอทำ (ต้องมีสิทธิ์ของงานนั้นด้วย เช่น ยืนยันการชำระเงิน)" },
   // Admin-only: SSO providers, API keys and webhooks can impersonate or export every account.
   { key: "integrations.manage", group: "ระบบ", label: "ตั้งค่าโรงเรียน webhook API key SSO และการเชื่อมต่อภายนอก", adminOnly: true }
 ] as const;

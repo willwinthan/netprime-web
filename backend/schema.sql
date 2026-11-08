@@ -8,6 +8,8 @@ DROP TABLE IF EXISTS course_live_sessions;
 DROP TABLE IF EXISTS session_meetings;
 DROP TABLE IF EXISTS sso_identities;
 DROP TABLE IF EXISTS sso_providers;
+DROP TABLE IF EXISTS agent_activity;
+DROP TABLE IF EXISTS agent_actions;
 DROP TABLE IF EXISTS api_keys;
 DROP TABLE IF EXISTS webhook_deliveries;
 DROP TABLE IF EXISTS webhook_endpoints;
@@ -1154,7 +1156,8 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
     entity TEXT NOT NULL,
     entity_id TEXT,
     detail TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    api_key_id TEXT     -- agent key that asked for the change (migration 0037)
 );
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log (created_at);
 
@@ -2110,8 +2113,58 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TEXT,
     revoked_at TEXT,
     created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Agent keys (migration 0037): kind, daily quota, Asia/Bangkok time window, IP allowlist, pause.
+    kind TEXT NOT NULL DEFAULT 'integration' CHECK(kind IN ('integration', 'agent')),
+    description TEXT,
+    daily_limit INTEGER CHECK(daily_limit IS NULL OR daily_limit BETWEEN 1 AND 1000000),
+    allowed_hours TEXT,  -- "HH:MM-HH:MM" Asia/Bangkok; NULL = any time
+    allowed_days TEXT,   -- ISO weekdays "1,2,3,4,5" (1 = Monday); NULL = every day
+    allowed_ips TEXT,    -- comma-separated IPs or IPv4 CIDRs; NULL = anywhere
+    paused_at TEXT
 );
+
+-- Work an agent asked for. "act" tools wait here for a person to approve; "draft" tools run at once
+-- and are recorded here too, so idempotency keys and the history cover both.
+CREATE TABLE IF NOT EXISTS agent_actions (
+    id TEXT PRIMARY KEY,
+    api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    tool TEXT NOT NULL,
+    tier TEXT NOT NULL CHECK(tier IN ('draft', 'act')),
+    input_json TEXT NOT NULL,
+    input_hash TEXT NOT NULL,           -- SHA-256 of tool + input, compared on idempotent replays
+    idempotency_key TEXT,
+    summary TEXT NOT NULL,              -- what will happen, in Thai, for the approver
+    preview_json TEXT,                  -- target state when the action was submitted
+    reason TEXT,                        -- why the agent wants this (shown to the approver)
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'executing', 'executed', 'failed', 'rejected', 'cancelled', 'expired')),
+    result_json TEXT,
+    error TEXT,
+    decided_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    decided_at TEXT,
+    decision_note TEXT,
+    executed_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_actions_idempotency ON agent_actions (api_key_id, idempotency_key); -- NULL keys never collide
+CREATE INDEX IF NOT EXISTS idx_agent_actions_status ON agent_actions (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_actions_key ON agent_actions (api_key_id, created_at);
+
+-- Every request an agent key makes (kept 90 days by the daily job).
+CREATE TABLE IF NOT EXISTS agent_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    ip TEXT,
+    action_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_activity_key ON agent_activity (api_key_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_activity_created ON agent_activity (created_at);
 
 -- Enterprise SSO identity providers (OIDC). partner_id maps an organization's own IdP.
 CREATE TABLE IF NOT EXISTS sso_providers (

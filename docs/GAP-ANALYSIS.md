@@ -103,6 +103,7 @@
 | PDPA: ดาวน์โหลดข้อมูลของฉัน, คำขอลบบัญชี, หน้าดำเนินการของ admin | `privacy.ts` |
 | Self-learning: คลังบทเรียน HTML, ใช้ในคอร์สได้, บันทึกความคืบหน้า | `selfLearning.ts` |
 | หน้าผู้สอน: หน้าคอร์สแบบแท็บ, URL ของแต่ละหน้า, หน้าต่างบทเรียนเดียว, อัปโหลดรูปปก | `components/instructor/` |
+| Agent platform ระยะที่ 1: agent key (โควตา ช่วงเวลา IP หยุดได้ทันที), คิวอนุมัติ tool ระดับลงมือ, API v1 ส่วนรอบอบรม/ผู้สมัคร/lead/ข้อความติดต่อ/รายงาน, ฟีด `GET /v1/events` (ระยะที่ 2–4 ดู `docs/AGENT-PLATFORM.md`) | `agentApi.ts`, `agents.ts`, migration `0037_agent_platform.sql` |
 
 ## P2 — ปรับปรุงหลังเปิดใช้งาน
 

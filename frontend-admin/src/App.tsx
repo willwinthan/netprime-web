@@ -28,6 +28,7 @@ const PrivacyPanel = lazy(() => import("./pages/PrivacyPages").then(m => ({ defa
 const PrivacyRequestsPage = lazy(() => import("./pages/PrivacyPages").then(m => ({ default: m.PrivacyRequestsPage })));
 const CertificatesPage = lazy(() => import("./pages/CertificatesPage").then(m => ({ default: m.CertificatesPage })));
 const AuditPage = lazy(() => import("./pages/AuditPage").then(m => ({ default: m.AuditPage })));
+const AgentQueuePage = lazy(() => import("./pages/AgentQueuePage").then(m => ({ default: m.AgentQueuePage })));
 const VerifyCertificate = lazy(() => import("./pages/VerifyCertificate").then(m => ({ default: m.VerifyCertificate })));
 const AnalyticsDashboard = lazy(() => import("./pages/AnalyticsDashboard").then(m => ({ default: m.AnalyticsDashboard })));
 const ReportsPage = lazy(() => import("./pages/ReportsPage").then(m => ({ default: m.ReportsPage })));
@@ -73,6 +74,7 @@ import {
   ChevronDown,
   CalendarDays,
   History,
+  Bot,
   Menu,
   X
 } from "lucide-react";
@@ -80,7 +82,7 @@ import {
 type ConsoleTab = "dashboard" | "selflearningadmin" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
-  | "settings" | "ai" | "affiliate" | "commerce" | "audit";
+  | "settings" | "ai" | "affiliate" | "commerce" | "audit" | "agents";
 
 type NavItem = { tab: ConsoleTab; label: string; icon: React.ReactNode; show: (user: User | null) => boolean };
 type NavGroup = { id: string; title: string; hint: string; items: NavItem[] };
@@ -136,6 +138,7 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "users", label: "ผู้ใช้และสิทธิ์", icon: <UserCog size={16} />, show: perm("users.view", "roles.manage") },
     { tab: "privacy", label: "คำขอข้อมูลส่วนบุคคล", icon: <ShieldAlert size={16} />, show: perm("privacy.manage") },
     { tab: "audit", label: "ประวัติการแก้ไข", icon: <History size={16} />, show: perm("site.audit") },
+    { tab: "agents", label: "คิวอนุมัติ AI agent", icon: <Bot size={16} />, show: perm("agents.approve") },
     { tab: "ai", label: "ผู้ช่วย AI", icon: <Sparkles size={16} />, show: perm("integrations.manage") },
     { tab: "settings", label: "ตั้งค่าระบบ", icon: <Settings size={16} />, show: perm("integrations.manage") }
   ] }
@@ -521,6 +524,7 @@ export const App: React.FC = () => {
                 {currentTab === "ai" && <m.div key="ai" {...pageTransition}><AiSettingsPanel /></m.div>}
                 {currentTab === "settings" && <m.div key="settings" {...pageTransition}><SettingsPage onOpenBranding={() => setCurrentTab("website")} /></m.div>}
                 {currentTab === "audit" && <m.div key="audit" {...pageTransition}><AuditPage /></m.div>}
+                {currentTab === "agents" && <m.div key="agents" {...pageTransition}><AgentQueuePage /></m.div>}
                 {currentTab === "commerce" && <m.div key="commerce" {...pageTransition}><CommercePage /></m.div>}
                 {currentTab === "affiliate" && <m.div key="affiliate" {...pageTransition}><AffiliateDashboard /></m.div>}
                 {currentTab === "profile" && (

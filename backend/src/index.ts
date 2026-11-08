@@ -34,6 +34,8 @@ import { Env } from "./middleware/rbac";
 import { allowedOrigins } from "./utils/origins";
 import { runScheduledJobs } from "./jobs";
 import { configureEmail } from "./utils/email";
+import { setInternalDispatcher } from "./utils/dispatch";
+import { agentsAdminRouter } from "./handlers/agents";
 
 const app = new Hono<Env>();
 
@@ -94,6 +96,10 @@ app.route("/api", emailAdminRouter);
 app.route("/api", siteDraftsRouter);
 app.route("/api", analyticsRouter);
 app.route("/api", commerceRouter);
+app.route("/api", agentsAdminRouter);
+
+// Approved agent actions call the staff routes in-process (utils/dispatch.ts).
+setInternalDispatcher((request, env, ctx) => app.fetch(request, env, ctx));
 
 // Global Error Handler
 app.onError((err, c) => {

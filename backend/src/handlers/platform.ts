@@ -12,7 +12,7 @@ import {
   WEBHOOK_EVENTS, WEBHOOK_EVENT_NAMES, MAX_ATTEMPTS, isPrivateHost, nextAttemptAt, signatureHeader, subscribed,
   verifySignatureHeader, webhookEventFor, webhookUrlError
 } from "../utils/webhooks";
-import { API_SCOPES, API_SCOPE_LABELS, isApiScope } from "../middleware/apikey";
+import { API_SCOPES, API_SCOPE_LABELS, isApiScope, normalizeDays, normalizeHours, normalizeIps } from "../middleware/apikey";
 import { clearSchoolCache, loadSchoolSettings, parseDomains, parseSchoolSettings } from "../utils/school";
 import {
   OidcError, assertedEmail, emailDomain, emailVerifiedClaim, loadDiscovery, loadJwks, normalizeIssuer, pkceChallenge, randomValue, tokenKid, verifyIdToken,
@@ -387,23 +387,79 @@ platformRouter.post("/admin/platform/webhook-deliveries/:id/redeliver", async (c
 
 // ---------- API keys ----------
 
+const KEY_LIST_FIELDS = `k.id, k.name, k.kind, k.description, k.prefix, k.scopes, k.rate_limit_per_minute, k.daily_limit, k.allowed_hours, k.allowed_days,
+  k.allowed_ips, k.paused_at, k.created_at, k.last_used_at, k.revoked_at, k.expires_at, u.name AS created_by_name`;
+
 platformRouter.get("/admin/platform/api-keys", async (c) => {
-  const rows = await c.env.DB.prepare(`SELECT k.id, k.name, k.prefix, k.scopes, k.rate_limit_per_minute, k.created_at, k.last_used_at, k.revoked_at, k.expires_at,
-    u.name AS created_by_name FROM api_keys k LEFT JOIN users u ON u.id = k.created_by ORDER BY k.revoked_at IS NOT NULL, k.created_at DESC`).all<Record<string, any>>();
+  const rows = await c.env.DB.prepare(`SELECT ${KEY_LIST_FIELDS} FROM api_keys k LEFT JOIN users u ON u.id = k.created_by
+    ORDER BY k.revoked_at IS NOT NULL, k.created_at DESC`).all<Record<string, any>>();
   return c.json({
     keys: rows.results.map(r => ({ ...r, scopes: safeList(r.scopes) })),
     scopes: API_SCOPES.map(s => ({ name: s, label: API_SCOPE_LABELS[s] }))
   });
 });
 
+type KeySettings = Partial<{
+  description: string | null; daily_limit: number | null; allowed_hours: string | null; allowed_days: string | null; allowed_ips: string | null;
+  scopes: string[]; rate_limit_per_minute: number;
+}>;
+
+/** Validates the editable key settings present in `body` (create and PATCH share it). */
+function parseKeySettings(body: Record<string, unknown>, requireScopes: boolean): KeySettings | string {
+  const out: KeySettings = {};
+  if (requireScopes || body.scopes !== undefined) {
+    const scopes = Array.isArray(body.scopes) ? [...new Set(body.scopes)] : [];
+    if (!scopes.length || !scopes.every(isApiScope)) return "กรุณาเลือกสิทธิ์ (scope) อย่างน้อย 1 รายการ";
+    out.scopes = scopes as string[];
+  }
+  if (body.rate_limit_per_minute !== undefined) {
+    const limit = Number(body.rate_limit_per_minute);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) return "อัตราการเรียกต่อนาทีต้องเป็น 1–10,000";
+    out.rate_limit_per_minute = limit;
+  }
+  if (body.description !== undefined) {
+    const text = typeof body.description === "string" ? body.description.trim() : "";
+    if (text.length > 500) return "คำอธิบายยาวได้ไม่เกิน 500 ตัวอักษร";
+    out.description = text || null;
+  }
+  if (body.daily_limit !== undefined) {
+    if (body.daily_limit === null || body.daily_limit === "") out.daily_limit = null;
+    else {
+      const n = Number(body.daily_limit);
+      if (!Number.isInteger(n) || n < 1 || n > 1_000_000) return "โควตาต่อวันต้องเป็น 1–1,000,000 (เว้นว่าง = ไม่จำกัด)";
+      out.daily_limit = n;
+    }
+  }
+  if (body.allowed_hours !== undefined) {
+    const hours = normalizeHours(body.allowed_hours);
+    if (hours === false) return "ช่วงเวลาต้องอยู่ในรูป HH:MM-HH:MM เช่น 08:00-18:00";
+    out.allowed_hours = hours;
+  }
+  if (body.allowed_days !== undefined) {
+    const days = normalizeDays(body.allowed_days);
+    if (days === false) return "วันที่อนุญาตต้องเป็นเลขวัน 1–7 (1 = จันทร์)";
+    out.allowed_days = days;
+  }
+  if (body.allowed_ips !== undefined) {
+    const ips = normalizeIps(body.allowed_ips);
+    if (ips === false) return "IP ที่อนุญาตต้องเป็น IP หรือ IPv4 CIDR คั่นด้วยจุลภาค (ไม่เกิน 20 รายการ)";
+    out.allowed_ips = ips;
+  }
+  return out;
+}
+
 platformRouter.post("/admin/platform/api-keys", async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 80) return c.json({ error: "กรุณาตั้งชื่อ key (ไม่เกิน 80 ตัวอักษร)" }, 400);
-  const scopes = Array.isArray(body?.scopes) ? [...new Set(body!.scopes)] : [];
-  if (!scopes.length || !scopes.every(isApiScope)) return c.json({ error: "กรุณาเลือกสิทธิ์ (scope) อย่างน้อย 1 รายการ" }, 400);
-  const limit = body?.rate_limit_per_minute === undefined ? 120 : Number(body.rate_limit_per_minute);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) return c.json({ error: "อัตราการเรียกต่อนาทีต้องเป็น 1–10,000" }, 400);
+  const kind = body?.kind === undefined ? "integration" : body.kind;
+  if (kind !== "integration" && kind !== "agent") return c.json({ error: "ชนิดของ key ต้องเป็น integration หรือ agent" }, 400);
+  const settings = parseKeySettings(body!, true);
+  if (typeof settings === "string") return c.json({ error: settings }, 400);
+  if (kind === "integration" && (settings.daily_limit || settings.allowed_hours || settings.allowed_days || settings.allowed_ips)) {
+    return c.json({ error: "โควตารายวัน ช่วงเวลา และ IP ใช้ได้กับ agent key เท่านั้น" }, 400);
+  }
+  const limit = settings.rate_limit_per_minute ?? (kind === "agent" ? 60 : 120);
   let expiresAt: string | null = null;
   if (body?.expires_at) {
     const ms = typeof body.expires_at === "string" ? Date.parse(body.expires_at) : NaN;
@@ -414,13 +470,40 @@ platformRouter.post("/admin/platform/api-keys", async (c) => {
   if ((active?.n ?? 0) >= 50) return c.json({ error: "มี API key ที่ใช้งานได้สูงสุด 50 รายการ" }, 400);
   const secret = "npk_" + randomToken(32);
   const id = newId("key");
-  await c.env.DB.prepare(`INSERT INTO api_keys (id, name, key_hash, prefix, scopes, rate_limit_per_minute, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, name, await sha256Hex(secret), secret.slice(0, 12), JSON.stringify(scopes), limit, expiresAt, c.get("user").id).run();
-  await audit(c, "create", "api_key", id, { name, scopes });
-  return c.json({
-    key: { id, name, prefix: secret.slice(0, 12), scopes, rate_limit_per_minute: limit, expires_at: expiresAt, last_used_at: null, revoked_at: null },
-    secret, message: "คัดลอก API key เก็บไว้ ระบบจะไม่แสดงอีก"
-  }, 201);
+  await c.env.DB.prepare(`INSERT INTO api_keys (id, name, key_hash, prefix, scopes, rate_limit_per_minute, expires_at, created_by,
+      kind, description, daily_limit, allowed_hours, allowed_days, allowed_ips) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, name, await sha256Hex(secret), secret.slice(0, 12), JSON.stringify(settings.scopes), limit, expiresAt, c.get("user").id,
+      kind, settings.description ?? null, settings.daily_limit ?? null, settings.allowed_hours ?? null, settings.allowed_days ?? null, settings.allowed_ips ?? null).run();
+  await audit(c, "create", "api_key", id, { name, kind, scopes: settings.scopes });
+  const key = await c.env.DB.prepare(`SELECT ${KEY_LIST_FIELDS} FROM api_keys k LEFT JOIN users u ON u.id = k.created_by WHERE k.id = ?`).bind(id).first<Record<string, any>>();
+  return c.json({ key: { ...key, scopes: settings.scopes }, secret, message: "คัดลอก API key เก็บไว้ ระบบจะไม่แสดงอีก" }, 201);
+});
+
+/** Edits scopes, limits and (agent keys) quota, time window and IPs; the key itself never changes. */
+platformRouter.patch("/admin/platform/api-keys/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  if (!body || typeof body !== "object") return c.json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
+  const row = await c.env.DB.prepare("SELECT kind FROM api_keys WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ kind: string }>();
+  if (!row) return c.json({ error: "ไม่พบ API key หรือถูกเพิกถอนไปแล้ว" }, 404);
+  const settings = parseKeySettings(body, false);
+  if (typeof settings === "string") return c.json({ error: settings }, 400);
+  if (row.kind !== "agent" && ["daily_limit", "allowed_hours", "allowed_days", "allowed_ips"].some(k => (settings as Record<string, unknown>)[k] != null)) {
+    return c.json({ error: "โควตารายวัน ช่วงเวลา และ IP ใช้ได้กับ agent key เท่านั้น" }, 400);
+  }
+  if (typeof body.name === "string") {
+    const name = body.name.trim();
+    if (!name || name.length > 80) return c.json({ error: "กรุณาตั้งชื่อ key (ไม่เกิน 80 ตัวอักษร)" }, 400);
+    (settings as Record<string, unknown>).name = name;
+  }
+  const values: Record<string, unknown> = { ...settings };
+  if (values.scopes) values.scopes = JSON.stringify(values.scopes);
+  const keys = Object.keys(values);
+  if (!keys.length) return c.json({ error: "ไม่มีข้อมูลที่ต้องแก้ไข" }, 400);
+  await c.env.DB.prepare(`UPDATE api_keys SET ${keys.map(k => `${k} = ?`).join(", ")} WHERE id = ?`).bind(...keys.map(k => values[k]), id).run();
+  await audit(c, "update", "api_key", id, settings);
+  const key = await c.env.DB.prepare(`SELECT ${KEY_LIST_FIELDS} FROM api_keys k LEFT JOIN users u ON u.id = k.created_by WHERE k.id = ?`).bind(id).first<Record<string, any>>();
+  return c.json({ key: { ...key, scopes: safeList(key!.scopes) } });
 });
 
 platformRouter.delete("/admin/platform/api-keys/:id", async (c) => {
