@@ -1,7 +1,7 @@
 // Manual bank-transfer orders, staff confirmation, receipts, refunds and certificate revocation.
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
 
 let admin, coord, student, other;
 before(async () => {
@@ -258,9 +258,7 @@ test('payment instructions are editable only with payments.manage', async () => 
 
 test('certificate revoke and reissue; public verification shows revoked', async () => {
   // Earn the Workers certificate: finish both lessons and answer each quiz correctly.
-  for (const lesson of ['lesson_cf_workers_intro', 'lesson_cf_workers_hono']) {
-    await expectStatus(`/api/student/lessons/${lesson}/progress`, 200, { method: 'POST', token: student.token, body: { resume_seconds: 10, completed: 1 } });
-  }
+  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(student.token, id)));
   const quizzes = await expectStatus('/api/student/courses/course_cf_workers/quizzes', 200, { token: student.token });
   for (const quiz of quizzes) {
     for (let i = 0; i < quiz.options.length; i++) {

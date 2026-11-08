@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { dangerCode, expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
 
 const COURSE = 'course_cf_workers';
 const LESSON = 'lesson_cf_workers_intro';
@@ -309,9 +309,7 @@ test('essays wait for manual grading, then notify the learner', async () => {
 
 test('requires_final_exam gates the certificate until the final exam is passed', async () => {
   const student = await account('final-exam', ['student']);
-  for (const lessonId of ['lesson_cf_workers_intro', 'lesson_cf_workers_hono']) {
-    await expectStatus(`/api/student/lessons/${lessonId}/progress`, 200, { method: 'POST', token: student.token, body: { resume_seconds: 30, completed: 1 } });
-  }
+  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(student.token, id)));
   for (const quizId of ['quiz_workers_intro_1', 'quiz_workers_hono_1']) {
     await expectStatus(`/api/student/quizzes/${quizId}/submit`, 200, { method: 'POST', token: student.token, body: { answer_index: 0 } });
   }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
 
 let learner;
 before(async () => { learner = await login('student1@netprime.com', 'stud123'); });
@@ -13,10 +13,7 @@ test('certificate requires every lesson and at least 80% server-graded answers',
   await expectStatus('/api/student/lessons/lesson_cf_workers_intro/quiz-attempts', 403, {
     method: 'POST', token: learner.token, body: { score: 100, total_questions: 100 } });
 
-  for (const lessonId of ['lesson_cf_workers_intro', 'lesson_cf_workers_hono']) {
-    await expectStatus(`/api/student/lessons/${lessonId}/progress`, 200, { method: 'POST', token: learner.token,
-      body: { resume_seconds: 30, completed: 1 } });
-  }
+  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(learner.token, id)));
   await expectStatus(cert, 400, { method: 'POST', token: learner.token });
   const correct = await expectStatus('/api/student/quizzes/quiz_workers_intro_1/submit', 200,
     { method: 'POST', token: learner.token, body: { answer_index: 0 } });

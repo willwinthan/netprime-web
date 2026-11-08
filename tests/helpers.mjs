@@ -44,3 +44,18 @@ export async function confirmedRequest(path, action, targetId, { token, method =
   const issued = await dangerCode(token, action, targetId, approver);
   return request(path, { token, method, body: { ...body, confirmation_code: issued.debug_code } });
 }
+
+/**
+ * Completes a video lesson the legitimate way: player heartbeats spaced like real playback.
+ * Seeded lessons have no stored length, so the first heartbeat reports a 2-second video
+ * (utils/videoProgress.ts), and one heartbeat 2.1 s later credits the whole of it.
+ */
+export async function watchVideoLesson(token, lessonId) {
+  const beat = resume_seconds => expectStatus(`/api/student/lessons/${lessonId}/progress`, 200,
+    { method: 'POST', token, body: { resume_seconds, duration: 2 } });
+  await beat(0);
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  const done = await beat(2);
+  assert.equal(done.completed, 1, `video lesson ${lessonId} did not complete: ${JSON.stringify(done)}`);
+  return done;
+}

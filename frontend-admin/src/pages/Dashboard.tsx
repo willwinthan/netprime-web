@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FEATURES } from "../features";
 import { useApi, User, API_BASE_URL, hasRole } from "../hooks/useApi";
-import { VideoPlayer } from "../components/VideoPlayer";
+import { VideoPlayer, type WatchStatus } from "../components/VideoPlayer";
 import { motion, AnimatePresence } from "framer-motion";
 import Confetti from "react-confetti";
 import { CourseOrderModal } from "../components/learner/CourseOrder";
@@ -137,6 +137,9 @@ export const Dashboard: React.FC = () => {
   // Playback resume & current state
   const [playbackResumeSeconds, setPlaybackResumeSeconds] = useState<number>(0);
   const [currentVideoSeconds, setCurrentVideoSeconds] = useState<number>(0);
+  const [watchStatus, setWatchStatus] = useState<WatchStatus | null>(null);
+  const activeLessonRef = useRef<string | null>(null);
+  activeLessonRef.current = activeLessonId;
 
   // Lecture notes state
   const [notes, setNotes] = useState<any[]>([]);
@@ -743,20 +746,9 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Throttled playback progress save handler (calls API every 5 seconds)
-  const handleTimeProgressUpdate = async (seconds: number) => {
+  // Current playback time (note timestamps); progress is saved by the player heartbeat below
+  const handleTimeProgressUpdate = (seconds: number) => {
     setCurrentVideoSeconds(seconds);
-    const sec = Math.floor(seconds);
-    if (sec > 0 && sec % 5 === 0 && activeLessonId) {
-      try {
-        await api.post(`/student/lessons/${activeLessonId}/progress`, {
-          resume_seconds: seconds,
-          completed: 0
-        });
-      } catch (err) {
-        console.error("Failed to sync playback progress:", err);
-      }
-    }
   };
 
   // Fetch Q&A threads
@@ -837,14 +829,16 @@ export const Dashboard: React.FC = () => {
       setVideoLoading(true);
       setActiveLessonId(lessonId);
       setVideoData(null);
+      setWatchStatus(null);
       // Text / PDF / embed / SCORM and locked lessons render in LessonContentView instead
       if (meta?.locked || (meta?.type && meta.type !== "video")) return;
 
       // Fetch progress
       let resumeTime = 0;
       try {
-        const prog = await api.get<{ resume_seconds: number; completed: number }>(`/student/lessons/${lessonId}/progress`);
+        const prog = await api.get<{ resume_seconds: number; completed: number; watched_seconds?: number; required_seconds?: number | null }>(`/student/lessons/${lessonId}/progress`);
         resumeTime = prog.resume_seconds || 0;
+        setWatchStatus({ watched_seconds: prog.watched_seconds || 0, required_seconds: prog.required_seconds ?? null, completed: !!prog.completed });
       } catch (err) {
         console.error("Failed to fetch lesson progress:", err);
       }
@@ -898,37 +892,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Telemetry: Update progress on backend as they watch
-  const handleProgressUpdate = async (percent: number) => {
-    if (!selectedCourseId || !enrollment) return;
-    
-    // Only update if current percent is greater than recorded progress
-    if (percent <= enrollment.progress_percent) return;
-
-    try {
-      const data = await api.patch<any>("/progress", {
-        course_id: selectedCourseId,
-        progress_percent: percent
-      });
-
-      // Update local enrollment state
-      setEnrollment(prev => prev ? {
-        ...prev,
-        progress_percent: data.progress_percent,
-        completed_at: data.completed_at
-      } : null);
-
-      // Update in courses list as well
-      setCourses(prev => prev.map(c => 
-        c.id === selectedCourseId ? { ...c, progress_percent: percent, completed_at: data.completed_at } : c
-      ));
-
-      checkGamificationResponse(data);
-    } catch (err) {
-      console.error("Failed to sync progress telemetry:", err);
-    }
-  };
-
   // Reload lesson completion and locks (sequential unlocks) after a lesson is completed
   const refreshCurriculum = async (courseId: string) => {
     try {
@@ -943,21 +906,25 @@ export const Dashboard: React.FC = () => {
   };
   const activeLessonMeta = lessons.find(l => l.id === activeLessonId) || null;
 
-  // Triggered when lesson is completed
-  const handleVideoCompleted = async () => {
-    if (!activeLessonId || !selectedCourseId) return;
+  // Player heartbeat: the server credits real playback and completes the video lesson itself
+  const handleVideoHeartbeat = async (lessonId: string, seconds: number, duration: number | null) => {
+    const courseId = selectedCourseId;
+    if (!courseId || !enrollment) return;
     try {
-      const result = await api.post<{ progress_percent: number }>(`/student/lessons/${activeLessonId}/progress`, {
-        resume_seconds: currentVideoSeconds,
-        completed: 1
-      });
-      setEnrollment(prev => prev ? { ...prev, progress_percent: result.progress_percent,
-        completed_at: result.progress_percent === 100 ? new Date().toISOString() : prev.completed_at } : null);
-      setCourses(prev => prev.map(course => course.id === selectedCourseId
-        ? { ...course, progress_percent: result.progress_percent } : course));
-      refreshCurriculum(selectedCourseId);
+      const result = await api.post<{ completed: number; progress_percent: number; watched_seconds: number; required_seconds: number | null }>(
+        `/student/lessons/${lessonId}/progress`, { resume_seconds: seconds, ...(duration ? { duration } : {}) });
+      if (activeLessonRef.current !== lessonId) return; // the learner has moved to another lesson
+      const wasComplete = !!watchStatus?.completed;
+      setWatchStatus({ watched_seconds: result.watched_seconds, required_seconds: result.required_seconds, completed: !!result.completed });
+      if (result.completed && !wasComplete) {
+        setEnrollment(prev => prev ? { ...prev, progress_percent: result.progress_percent,
+          completed_at: result.progress_percent === 100 ? new Date().toISOString() : prev.completed_at } : null);
+        setCourses(prev => prev.map(course => course.id === courseId
+          ? { ...course, progress_percent: result.progress_percent } : course));
+        refreshCurriculum(courseId);
+      }
     } catch (error) {
-      console.error("Failed to complete lesson:", error);
+      console.error("Failed to save playback progress:", error);
     }
   };
 
@@ -2563,8 +2530,8 @@ export const Dashboard: React.FC = () => {
                               isMock={videoData.isMock}
                               videoProvider={videoData.videoProvider}
                               videoStreamUid={videoData.videoStreamUid}
-                              onProgress={handleProgressUpdate}
-                              onComplete={handleVideoCompleted}
+                              onHeartbeat={handleVideoHeartbeat}
+                              watchStatus={watchStatus}
                               initialTime={playbackResumeSeconds}
                               onTimeUpdate={handleTimeProgressUpdate}
                             />
@@ -3524,7 +3491,7 @@ export const Dashboard: React.FC = () => {
                 ข้อมูลการเรียนของ LMS
               </h3>
               <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
-                ระบบ edge ของเราบันทึกความคืบหน้าของวิดีโอแบบเรียลไทม์ เมื่อดูวิดีโอถึง 95% ระบบจะซิงก์ข้อมูลไปยังฐานข้อมูล Cloudflare D1 ทันทีและบันทึกเวลาที่เรียนจบให้อัตโนมัติ
+                ระบบบันทึกเวลาที่ดูวิดีโอจริงระหว่างเล่น เมื่อดูถึง 90% ของความยาววิดีโอ บทเรียนจะถูกบันทึกว่าเรียนจบให้อัตโนมัติ การกรอข้ามไปท้ายวิดีโอจะไม่นับเป็นเวลาที่ดู ส่วนบทความ PDF และสื่อฝังให้กด "ทำเครื่องหมายว่าเรียนแล้ว" ท้ายบทเรียน
               </p>
             </div>
 

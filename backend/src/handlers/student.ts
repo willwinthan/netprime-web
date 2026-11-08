@@ -7,6 +7,7 @@ import { verifiedTokenUserId } from "./courses";
 import { finalExamBlock } from "./assessments";
 import { trackEvent } from "../utils/events";
 import { completionState, lessonGateFor, lessonLockResponse, trackCompletionChange } from "../utils/courseContent";
+import { creditHeartbeat, MAX_DURATION_SECONDS, validDuration, vimeoDuration, WATCHED_FRACTION } from "../utils/videoProgress";
 
 export const studentRouter = new Hono<Env>();
 
@@ -411,25 +412,29 @@ studentRouter.delete("/student/notes/:id", rbac(["student", "admin"]), async (c)
 });
 
 /**
- * Save playback resume progress position
- * POST /api/student/lessons/:lessonId/progress
+ * Video heartbeat: saves the resume position and credits real playback (utils/videoProgress.ts).
+ * A video lesson completes on its own once enough playback has been credited; `completed` from the client
+ * is ignored. Other lesson types only save the position here: text, PDF and embed lessons use
+ * POST /student/lessons/:id/complete and SCORM completes from the package.
+ * POST /api/student/lessons/:lessonId/progress  { resume_seconds, duration? }
  */
 studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admin"]), async (c) => {
   const lessonId = c.req.param("lessonId");
   const user = c.get("user");
   const db = c.env.DB;
-  const { resume_seconds, completed } = await c.req.json<{ resume_seconds: number; completed?: number }>();
+  const { resume_seconds, completed, duration } = await c.req.json<{ resume_seconds: number; completed?: number; duration?: number }>();
 
-  if (!Number.isFinite(resume_seconds) || resume_seconds < 0 || (completed !== undefined && completed !== 0 && completed !== 1)) {
+  if (!Number.isFinite(resume_seconds) || resume_seconds < 0 || resume_seconds > MAX_DURATION_SECONDS ||
+      (completed !== undefined && completed !== 0 && completed !== 1)) {
     return c.json({ error: "ต้องระบุค่า resume_seconds และ completed ที่ถูกต้อง" }, 400);
   }
 
   try {
     // 1. Fetch course_id from lesson
     const lesson = await db
-      .prepare("SELECT course_id, type FROM lessons WHERE id = ?")
+      .prepare("SELECT course_id, type, video_provider, video_stream_uid, duration_seconds FROM lessons WHERE id = ?")
       .bind(lessonId)
-      .first<{ course_id: string; type: string }>();
+      .first<{ course_id: string; type: string; video_provider: string | null; video_stream_uid: string | null; duration_seconds: number | null }>();
 
     if (!lesson) {
       return c.json({ error: "ไม่พบบทเรียนนี้" }, 404);
@@ -442,20 +447,38 @@ studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admi
     if (locked) return locked;
     const before = await completionState(db, user.id, lessonId, lesson.course_id);
 
-    // 2. Upsert progress record
-    const compVal = completed && lesson.type !== "scorm" ? 1 : 0;
-    await db
-      .prepare(`
-        INSERT INTO lesson_progress (user_id, lesson_id, course_id, resume_seconds, completed)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, lesson_id) 
-        DO UPDATE SET 
-          resume_seconds = excluded.resume_seconds,
-          completed = MAX(lesson_progress.completed, excluded.completed),
-          updated_at = CURRENT_TIMESTAMP
-      `)
-      .bind(user.id, lessonId, lesson.course_id, resume_seconds, compVal)
-      .run();
+    if (lesson.type !== "video") {
+      await db.prepare(`INSERT INTO lesson_progress (user_id, lesson_id, course_id, resume_seconds, completed) VALUES (?, ?, ?, ?, 0)
+        ON CONFLICT(user_id, lesson_id) DO UPDATE SET resume_seconds = excluded.resume_seconds, updated_at = CURRENT_TIMESTAMP`)
+        .bind(user.id, lessonId, lesson.course_id, resume_seconds).run();
+      const row = await db.prepare("SELECT completed FROM lesson_progress WHERE user_id = ? AND lesson_id = ?")
+        .bind(user.id, lessonId).first<{ completed: number }>();
+      const progress = await learningProgress(db, user.id, lesson.course_id);
+      return c.json({ message: "บันทึกตำแหน่งล่าสุดเรียบร้อยแล้ว", resume_seconds, completed: row?.completed ? 1 : 0,
+        progress_percent: progress.progressPercent });
+    }
+
+    // 2. Video length: Vimeo from oEmbed (server side), otherwise the first length a player reports
+    let length = lesson.duration_seconds;
+    if (!length) {
+      if (lesson.video_provider === "vimeo" && lesson.video_stream_uid)
+        length = await vimeoDuration(lesson.video_stream_uid, c.env.FRONTEND_ORIGINS);
+      length = length ?? validDuration(duration);
+      if (length) await db.prepare("UPDATE lessons SET duration_seconds = ? WHERE id = ? AND duration_seconds IS NULL")
+        .bind(length, lessonId).run();
+    }
+
+    // 3. Credit this heartbeat, then complete the lesson once enough playback has been credited
+    await creditHeartbeat(db, user.id, lessonId, lesson.course_id, resume_seconds, Date.now());
+    const row = await db.prepare("SELECT watched_seconds, completed FROM lesson_progress WHERE user_id = ? AND lesson_id = ?")
+      .bind(user.id, lessonId).first<{ watched_seconds: number; completed: number }>();
+    const watched = row?.watched_seconds ?? 0;
+    let isComplete = !!row?.completed;
+    if (!isComplete && length && watched >= length * WATCHED_FRACTION) {
+      await db.prepare("UPDATE lesson_progress SET completed = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND lesson_id = ?")
+        .bind(user.id, lessonId).run();
+      isComplete = true;
+    }
 
     const progress = await learningProgress(db, user.id, lesson.course_id);
     await db.prepare(`UPDATE enrollments SET progress_percent = ?,
@@ -463,12 +486,15 @@ studentRouter.post("/student/lessons/:lessonId/progress", rbac(["student", "admi
       status = CASE WHEN ? = 100 THEN 'completed' ELSE 'active' END
       WHERE user_id = ? AND course_id = ?`)
       .bind(progress.progressPercent, progress.progressPercent, progress.progressPercent, user.id, lesson.course_id).run();
-    await trackCompletionChange(db, user.id, lesson.course_id, lessonId, before, compVal === 1, progress.progressPercent);
+    await trackCompletionChange(db, user.id, lesson.course_id, lessonId, before, isComplete, progress.progressPercent);
 
     return c.json({
       message: "บันทึกความคืบหน้าการดูบทเรียนเรียบร้อยแล้ว",
       resume_seconds,
-      completed: compVal,
+      completed: isComplete ? 1 : 0,
+      watched_seconds: Math.round(watched),
+      duration_seconds: length ?? null,
+      required_seconds: length ? Math.ceil(length * WATCHED_FRACTION) : null,
       progress_percent: progress.progressPercent
     });
   } catch (error) {
@@ -488,15 +514,19 @@ studentRouter.get("/student/lessons/:lessonId/progress", rbac(["student", "admin
 
   try {
     const progress = await db
-      .prepare("SELECT resume_seconds, completed FROM lesson_progress WHERE user_id = ? AND lesson_id = ?")
+      .prepare(`SELECT lp.resume_seconds, lp.completed, lp.watched_seconds, l.duration_seconds
+        FROM lessons l LEFT JOIN lesson_progress lp ON lp.lesson_id = l.id AND lp.user_id = ? WHERE l.id = ?`)
       .bind(user.id, lessonId)
-      .first<{ resume_seconds: number; completed: number }>();
+      .first<{ resume_seconds: number | null; completed: number | null; watched_seconds: number | null; duration_seconds: number | null }>();
+    const length = progress?.duration_seconds ?? null;
 
-    if (!progress) {
-      return c.json({ resume_seconds: 0, completed: 0 });
-    }
-
-    return c.json(progress);
+    return c.json({
+      resume_seconds: progress?.resume_seconds ?? 0,
+      completed: progress?.completed ? 1 : 0,
+      watched_seconds: Math.round(progress?.watched_seconds ?? 0),
+      duration_seconds: length,
+      required_seconds: length ? Math.ceil(length * WATCHED_FRACTION) : null
+    });
   } catch (error) {
     console.error("Get lesson progress failed:", error);
     return c.json({ error: "เกิดข้อผิดพลาดภายในระบบขณะโหลดความคืบหน้า" }, 500);

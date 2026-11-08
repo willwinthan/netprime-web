@@ -624,6 +624,8 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
     if (problem) return { error: problem, status: 403 };
     values.video_stream_uid = uid || null;
     values.video_provider = provider;
+    // A different video has a different length: measure it again (utils/videoProgress.ts)
+    if ((uid || null) !== (current?.video_stream_uid ?? null) || provider !== current?.video_provider) values.duration_seconds = null;
     values.handout_r2_key = handout || null;
   }
 

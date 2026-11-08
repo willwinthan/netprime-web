@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
 
 let student, secondStudent, instructor, partner, admin;
 before(async () => {
@@ -77,10 +77,7 @@ test('notes persist and remain private to the owner', async () => {
 });
 
 test('certificate issuance is repeatable without duplicates and publicly verifiable', async () => {
-  for (const lessonId of ['lesson_cf_workers_intro', 'lesson_cf_workers_hono']) {
-    await expectStatus(`/api/student/lessons/${lessonId}/progress`, 200, { method: 'POST', token: student.token,
-      body: { resume_seconds: 60, completed: 1 } });
-  }
+  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(student.token, id)));
   for (const quizId of ['quiz_workers_intro_1', 'quiz_workers_hono_1']) {
     await expectStatus(`/api/student/quizzes/${quizId}/submit`, 200, { method: 'POST', token: student.token,
       body: { answer_index: 0 } });
