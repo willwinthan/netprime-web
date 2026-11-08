@@ -16,9 +16,9 @@ import { ASSERTION_HEADER, verifyAssertion } from "../utils/agentAssertion";
  */
 export const API_SCOPES = [
   "users:read", "users:write", "courses:read", "enrollments:read", "enrollments:write", "orders:read",
-  "sessions:read", "registrations:read", "leads:read", "inquiries:read", "reports:read", "events:read",
+  "sessions:read", "registrations:read", "leads:read", "inquiries:read", "qa:read", "reports:read", "events:read",
   "leads:write", "inquiries:write", "sessions:write", "articles:write",
-  "orders:confirm", "registrations:write", "sessions:publish", "articles:publish", "messages:send"
+  "orders:confirm", "registrations:write", "sessions:publish", "articles:publish", "messages:send", "qa:answer"
 ] as const;
 export type ApiScope = typeof API_SCOPES[number];
 export const API_SCOPE_LABELS: Record<ApiScope, string> = {
@@ -32,6 +32,7 @@ export const API_SCOPE_LABELS: Record<ApiScope, string> = {
   "registrations:read": "อ่านผู้สมัครรอบอบรม",
   "leads:read": "อ่าน lead จากฟอร์ม",
   "inquiries:read": "อ่านข้อความติดต่อ",
+  "qa:read": "อ่านคำถามของผู้เรียนในบทเรียน (ไม่มีอีเมลผู้ถาม)",
   "reports:read": "อ่านรายงานและสรุปงานประจำวัน",
   "events:read": "ดึงฟีดเหตุการณ์ (GET /v1/events)",
   "leads:write": "ร่าง: เปลี่ยนสถานะและเพิ่มบันทึกของ lead",
@@ -42,7 +43,8 @@ export const API_SCOPE_LABELS: Record<ApiScope, string> = {
   "registrations:write": "ลงมือ: ขอเปลี่ยนสถานะผู้สมัครและแจ้งผู้สมัคร (ต้องมีคนอนุมัติ)",
   "sessions:publish": "ลงมือ: ขอเปิด/ปิดรับสมัครรอบอบรม (ต้องมีคนอนุมัติ)",
   "articles:publish": "ลงมือ: ขอเผยแพร่บทความ (ต้องมีคนอนุมัติ)",
-  "messages:send": "ลงมือ: ขอส่งอีเมลหรือ LINE (ต้องมีคนอนุมัติ)"
+  "messages:send": "ลงมือ: ขอส่งอีเมลหรือ LINE (ต้องมีคนอนุมัติ)",
+  "qa:answer": "ลงมือ: ร่างคำตอบคำถามในบทเรียน (ผู้สอนหรือผู้ดูแลอนุมัติแล้วโพสต์ในชื่อผู้อนุมัติ)"
 };
 export const isApiScope = (value: unknown): value is ApiScope => typeof value === "string" && (API_SCOPES as readonly string[]).includes(value);
 
