@@ -462,10 +462,12 @@ instructorRouter.patch("/instructor/lessons/:id", rbac(["instructor", "admin"]),
     await db
       .prepare(
         `UPDATE lessons 
-         SET title = ?, video_stream_uid = ?, video_provider = ?, handout_r2_key = ?, sort_order = ? 
+         SET title = ?, video_stream_uid = ?, video_provider = ?, handout_r2_key = ?, sort_order = ?,
+           duration_seconds = CASE WHEN ? THEN NULL ELSE duration_seconds END
          WHERE id = ?`
       )
-      .bind(newTitle, newVideoUid, newVideoProvider, newHandoutKey, newSortOrder, lessonId)
+      .bind(newTitle, newVideoUid, newVideoProvider, newHandoutKey, newSortOrder,
+        newVideoUid !== lesson.video_stream_uid || newVideoProvider !== lesson.video_provider ? 1 : 0, lessonId)
       .run();
 
     return c.json({

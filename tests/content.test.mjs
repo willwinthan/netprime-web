@@ -499,3 +499,51 @@ test('instructor course list returns price, cover and access period, and editing
   assert.equal(updated.cover_image_url, null);
   assert.ok(updated.thumbnail_url, 'falls back to a stock picture');
 });
+
+test('video lessons complete only from paced playback heartbeats, never from completed: 1', async () => {
+  const course = await newCourse(instructor.token, 'Verified Video Course');
+  const video = await addLesson(instructor.token, course, { title: 'วิดีโอ', type: 'video', video_provider: 'youtube', video_stream_uid: 'dQw4w9WgXcQ' });
+  await expectStatus(`/api/admin/courses/${course}/approve`, 200, { method: 'POST', token: admin.token });
+  await expectStatus(`/api/courses/${course}/enroll`, 201, { method: 'POST', token: student.token });
+  const beat = (token, body) => expectStatus(`/api/student/lessons/${video.id}/progress`, 200, { method: 'POST', token, body });
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  // A direct "completed: 1" only sets the baseline; the first reported length (60 s) is stored
+  let res = await beat(student.token, { resume_seconds: 0, completed: 1, duration: 60 });
+  assert.equal(res.completed, 0);
+  assert.equal(res.duration_seconds, 60);
+  assert.equal(res.required_seconds, 54);
+  // Jumping to the end at once earns nothing (heartbeat too soon after the last one)
+  res = await beat(student.token, { resume_seconds: 60, completed: 1 });
+  assert.equal(res.completed, 0);
+  assert.equal(res.watched_seconds, 0);
+  // After 2.1 s of wall time at most ~2× that plus slack is credited, not the 60 s jump
+  await wait(2100);
+  res = await beat(student.token, { resume_seconds: 60, duration: 1 });
+  assert.equal(res.completed, 0);
+  assert.ok(res.watched_seconds >= 4 && res.watched_seconds < 15, JSON.stringify(res));
+  assert.equal(res.duration_seconds, 60, 'a later, shorter length report does not replace the stored one');
+  // Rewinding earns nothing
+  await wait(2100);
+  res = await beat(student.token, { resume_seconds: 10 });
+  assert.ok(res.watched_seconds < 15, JSON.stringify(res));
+  // The "mark as read" endpoint refuses video lessons
+  await expectStatus(`/api/student/lessons/${video.id}/complete`, 400, { method: 'POST', token: student.token });
+  const saved = await expectStatus(`/api/student/lessons/${video.id}/progress`, 200, { token: student.token });
+  assert.equal(saved.completed, 0);
+  assert.equal(saved.resume_seconds, 10);
+
+  // Changing the lesson's video clears the stored length; paced playback then completes the lesson
+  await expectStatus(`/api/instructor/lessons/${video.id}/settings`, 200, { method: 'PATCH', token: instructor.token,
+    body: { video_provider: 'youtube', video_stream_uid: 'aqz-KE-bpKQ' } });
+  await expectStatus('/api/admin/accounts', 201, { method: 'POST', token: admin.token,
+    body: { email: 'video-learner@example.invalid', name: 'ผู้เรียนวิดีโอ', password: 'video-learner-1', roles: ['student'] } });
+  const viewer = await login('video-learner@example.invalid', 'video-learner-1');
+  await expectStatus(`/api/courses/${course}/enroll`, 201, { method: 'POST', token: viewer.token });
+  await beat(viewer.token, { resume_seconds: 0, duration: 2 });
+  await wait(2100);
+  res = await beat(viewer.token, { resume_seconds: 2 });
+  assert.equal(res.duration_seconds, 2);
+  assert.equal(res.completed, 1);
+  assert.equal(res.progress_percent, 100);
+});
