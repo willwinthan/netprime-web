@@ -11,7 +11,7 @@ import { Notice } from "../components/settings/shared";
  * target and runs the same staff flow as the console button. Approving a tool also needs that tool's
  * own permission (e.g. payments.manage). History and the agents' request log are in the other tabs.
  */
-interface Preview { summary: string; target: Record<string, unknown>; warnings: string[] }
+interface Preview { summary: string; target: Record<string, unknown>; warnings: string[]; excerpts?: { label: string; text: string }[] }
 interface Action {
   id: string; tool: string; tool_label: string; tier: "draft" | "act"; status: string; summary: string; reason: string | null;
   input: Record<string, unknown> | null; preview: Preview | null; result: unknown; error: string | null;
@@ -107,6 +107,7 @@ export const AgentQueuePage: React.FC = () => {
               </div>
               <div style={{ fontSize: "15px" }}>{a.summary}</div>
               {a.reason && <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>เหตุผลจาก agent: {a.reason}</div>}
+              <Excerpts list={a.preview?.excerpts} />
               <Warnings list={a.preview?.warnings} />
               {!a.can_approve && <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>บัญชีของคุณอนุมัติงานนี้ไม่ได้ ต้องมีสิทธิ์ {a.approver_permission}</div>}
             </div>
@@ -178,6 +179,18 @@ export const AgentQueuePage: React.FC = () => {
   );
 };
 
+/** Text the approver must read before deciding (a learner's question and the drafted answer). */
+const Excerpts: React.FC<{ list?: { label: string; text: string }[] }> = ({ list }) => list && list.length ? (
+  <div style={{ display: "grid", gap: "8px" }}>
+    {list.map(e => (
+      <div key={e.label} style={{ borderLeft: "3px solid rgba(124,58,237,0.35)", padding: "6px 10px", background: "rgba(124,58,237,0.04)", borderRadius: "6px" }}>
+        <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "2px" }}>{e.label}</div>
+        <div style={{ fontSize: "14px", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.text}</div>
+      </div>
+    ))}
+  </div>
+) : null;
+
 const Warnings: React.FC<{ list?: string[] }> = ({ list }) => list && list.length ? (
   <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "13px", color: "#b45309" }}>
     {list.map(w => <li key={w}><AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{w}</li>)}
@@ -213,7 +226,8 @@ const DecideModal: React.FC<{ action: Action; mode: "approve" | "reject"; onClos
         {action.reason && <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>เหตุผลจาก agent: {action.reason}</div>}
         {current === null ? <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>กำลังตรวจข้อมูลล่าสุด…</div>
           : stale ? <div style={{ color: "var(--danger)", fontSize: "13px" }}>ข้อมูลเปลี่ยนไปแล้ว: {(current as { error: string }).error} (ถ้าอนุมัติ งานนี้จะไม่สำเร็จ)</div>
-          : <div style={{ fontSize: "13px" }}>สถานะปัจจุบัน: {(current as Preview).summary}<Warnings list={(current as Preview).warnings} /></div>}
+          : <div style={{ fontSize: "13px", display: "grid", gap: "8px" }}><div>สถานะปัจจุบัน: {(current as Preview).summary}</div>
+              <Excerpts list={(current as Preview).excerpts} /><Warnings list={(current as Preview).warnings} /></div>}
         <details>
           <summary style={{ cursor: "pointer", fontSize: "13px" }}>ข้อมูลที่ agent ส่งมา</summary>
           <pre style={{ fontSize: "12px", background: "rgba(15,23,42,0.04)", padding: "10px", borderRadius: "8px", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{JSON.stringify(action.input, null, 2)}</pre>
