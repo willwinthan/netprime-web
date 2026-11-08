@@ -1916,3 +1916,61 @@ adminSiteRouter.get("/audit", async (c) => {
     ORDER BY l.created_at DESC LIMIT ? OFFSET ?`).bind(limit, offset).all();
   return c.json({ entries: rows.results });
 });
+
+// ---------- Drafts from AI agents (utils/agentTools.ts: draft_session, draft_article) ----------
+// The same field rules as the console forms; the result is never public: a session is saved as a draft
+// and an article as a draft or sent for review. Publishing stays with publish_session / publish_article.
+
+/** Validates a new draft training session. `session_dates` may be a comma-separated list of days. */
+export function parseAgentSession(input: Record<string, unknown>): { values: Values } | { error: string } {
+  const body: Record<string, unknown> = { ...input, status: "draft" };
+  if (typeof body.session_dates === "string") body.session_dates = body.session_dates.split(",").map(d => d.trim()).filter(Boolean);
+  const { values, error } = parseFields(body, SESSION_SPEC);
+  return error ? { error } : { values };
+}
+
+/** Checks that need the database (dates, instructor, linked course) and warnings for a reviewer. */
+export async function checkAgentSession(db: D1Database, values: Values): Promise<{ error: string } | { warnings: string[] }> {
+  const problem = await sessionCrossCheck(db, values);
+  if (problem) return { error: problem };
+  const warnings: string[] = [];
+  if (values.start_date < bangkokToday()) warnings.push("วันเริ่มอยู่ในอดีต");
+  if (!values.price) warnings.push("ราคา 0 บาท (อบรมฟรี)");
+  const same = await db.prepare("SELECT id, status FROM training_sessions WHERE title = ? AND start_date = ? LIMIT 1")
+    .bind(values.title, values.start_date).first<{ id: string; status: string }>();
+  if (same) warnings.push(`มีรอบชื่อและวันเริ่มเดียวกันอยู่แล้ว (${same.id}, ${same.status})`);
+  return { warnings };
+}
+
+export async function insertAgentSession(db: D1Database, values: Values): Promise<Record<string, unknown> | null> {
+  const id = newId("ses");
+  await db.prepare(`INSERT INTO training_sessions (id, ${SESSION_COLUMNS.join(", ")}, created_by)
+    VALUES (?, ${SESSION_COLUMNS.map(() => "?").join(", ")}, NULL)`)
+    .bind(id, ...SESSION_COLUMNS.map(k => values[k])).run();
+  return db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).bind(id).first();
+}
+
+/** Validates a new agent article: Markdown body, no author credit, review note or publish date. */
+export function parseAgentArticle(input: Record<string, unknown>, forReview: boolean): { values: Values } | { error: string } {
+  const body: Record<string, unknown> = { ...input, status: forReview ? "review" : "draft" };
+  for (const key of ["author_label", "review_note", "published_at", "notion_page_id", "content_json"]) delete body[key];
+  const { values, error } = parseFields(body, ARTICLE_SPEC);
+  const problem = error || articleValues(values);
+  if (problem) return { error: problem };
+  if (!values.slug) values.slug = slugify(values.title);
+  return { values };
+}
+
+export async function insertAgentArticle(db: D1Database, values: Values): Promise<Record<string, unknown> | "slug_taken"> {
+  const id = newId("art");
+  const keys = Object.keys(ARTICLE_SPEC);
+  try {
+    await db.prepare(`INSERT INTO articles (id, ${keys.join(", ")}, author_id, submitted_at)
+      VALUES (?, ${keys.map(() => "?").join(", ")}, NULL, ${values.status === "review" ? "CURRENT_TIMESTAMP" : "NULL"})`)
+      .bind(id, ...keys.map(k => values[k] ?? null)).run();
+  } catch (err) {
+    if (uniqueViolation(err)) return "slug_taken";
+    throw err;
+  }
+  return (await db.prepare("SELECT id, slug, title, category, excerpt, status, submitted_at, created_at FROM articles WHERE id = ?").bind(id).first())!;
+}

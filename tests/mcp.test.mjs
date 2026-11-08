@@ -55,7 +55,7 @@ test('setup: agent keys with read and write MCP access', async () => {
   const reader = await make('MCP reader', { scopes: ['reports:read', 'sessions:read', 'inquiries:read', 'events:read', 'orders:confirm'], mcp_access: 'read' });
   keys.reader = reader.secret; keys.readerId = reader.key.id;
   assert.equal(reader.key.mcp_access, 'read');
-  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'orders:confirm', 'orders:read'], mcp_access: 'write' });
+  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'sessions:write', 'articles:write', 'orders:confirm', 'orders:read'], mcp_access: 'write' });
   keys.writer = writer.secret; keys.writerId = writer.key.id;
   const off = await make('No MCP', { scopes: ['reports:read'], mcp_access: 'off' });
   keys.off = off.secret;
@@ -120,6 +120,17 @@ test('write access: draft runs at once, act goes to the approval queue', async (
   const draft = await callTool(keys.writer, 'update_inquiry', { inquiry_id: inquiry.id, status: 'in_progress', note: 'โทรกลับแล้ว', idempotency_key: `inq-${inquiry.id}` });
   assert.equal(draft.isError, false, draft.text);
   assert.equal(draft.data.data.status, 'executed');
+
+  // New drafts: a training round and an article, neither public
+  const round = await callTool(keys.writer, 'draft_session', { title: 'MCP Round', start_date: '2031-01-10', end_date: '2031-01-11', capacity: 8, price: 4500 });
+  assert.equal(round.isError, false, round.text);
+  assert.equal(round.data.data.result.session.status, 'draft');
+  const article = await callTool(keys.writer, 'draft_article', { title: 'MCP Article', body: 'เนื้อหา', dry_run: true });
+  assert.equal(article.data.dry_run, true);
+  assert.equal(article.data.requires_approval, false);
+  const roundTool = (await mcp(keys.writer, 'tools/list')).body.result.tools.find(t => t.name === 'draft_session');
+  assert.equal(roundTool.annotations.destructiveHint, false);
+  assert.deepEqual(roundTool.inputSchema.required.sort(), ['capacity', 'end_date', 'start_date', 'title']);
 
   const order = (await expectStatus('/api/student/orders', 201, { method: 'POST', token: student, body: { course_id: 'course_aws_net' } })).order;
   const dry = await callTool(keys.writer, 'confirm_order', { order_id: order.reference, amount_received: order.amount, dry_run: true });

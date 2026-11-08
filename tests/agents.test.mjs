@@ -10,7 +10,7 @@ const agent = {};
 const api = (path, key, options = {}) => request(path, { ...options, headers: { Authorization: `Bearer ${key}`, ...(options.headers || {}) } });
 const day = n => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 const AGENT_SCOPES = ['sessions:read', 'registrations:read', 'leads:read', 'inquiries:read', 'reports:read', 'events:read', 'orders:read',
-  'inquiries:write', 'leads:write', 'orders:confirm', 'registrations:write', 'sessions:publish', 'messages:send', 'enrollments:write', 'users:write'];
+  'inquiries:write', 'leads:write', 'sessions:write', 'articles:write', 'orders:confirm', 'registrations:write', 'sessions:publish', 'messages:send', 'enrollments:write', 'users:write'];
 const fixtures = {};
 
 test('setup: sign in and create website activity', async () => {
@@ -275,6 +275,59 @@ test('act tools through staff routes: registration status, round publishing and 
   const learner = (await login('student2@netprime.com', 'stud123')).token;
   const course = await expectStatus('/api/courses/course_cisco_ccna', 200, { token: learner });
   assert.ok(course.enrollment, 'learner can open the course');
+});
+
+test('draft tools: new training rounds and articles stay private until published', async () => {
+  const run = body => api('/api/v1/actions', agent.key, { method: 'POST', body });
+  // Training round: validated like the console form, saved as a draft
+  assert.equal((await run({ tool: 'draft_session', input: { title: 'x', start_date: day(40), end_date: day(41) } })).status, 400, 'capacity is required');
+  const backwards = await run({ tool: 'draft_session', input: { title: 'Agent Round', start_date: day(41), end_date: day(40), capacity: 10 } });
+  assert.equal(backwards.status, 422);
+  assert.equal(backwards.data.code, 'invalid_input');
+  assert.equal((await run({ tool: 'draft_session', input: { title: 'Agent Round', start_date: day(40), end_date: day(41), capacity: 10, status: 'open' } })).status, 400, 'agents cannot choose the status');
+  const dup = await run({ tool: 'draft_session', dry_run: true, input: { title: 'Agent Draft Round', start_date: day(30), end_date: day(31), capacity: 10 } });
+  assert.ok(dup.data.preview.warnings.some(w => w.includes('เดียวกัน')), JSON.stringify(dup.data));
+  const input = { title: 'Agent Proposed Round', vendor: 'Cisco', start_date: day(40), end_date: day(47), session_dates: `${day(40)}, ${day(47)}`,
+    capacity: 12, price: 12900, mode: 'hybrid', time_text: '09:00–16:00' };
+  const made = await run({ tool: 'draft_session', input, reason: 'ลูกค้าขอรอบเสาร์', idempotency_key: 'draft-round-1' });
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  assert.equal(made.data.data.tier, 'draft');
+  const session = made.data.data.result.session;
+  assert.equal(session.status, 'draft');
+  assert.equal(session.price, 12900);
+  assert.deepEqual(JSON.parse(session.session_dates), [day(40), day(47)]);
+  assert.equal((await run({ tool: 'draft_session', input, reason: 'ลูกค้าขอรอบเสาร์', idempotency_key: 'draft-round-1' })).data.replayed, true);
+  const pub = await expectStatus('/api/public/sessions', 200);
+  assert.ok(!JSON.stringify(pub).includes(session.id), 'a draft round is not on the website');
+  // Publishing it is still an act tool that waits for a person
+  const queued = await run({ tool: 'publish_session', input: { session_id: session.id, status: 'open' } });
+  assert.equal(queued.status, 202);
+  assert.equal((await expectStatus(`/api/admin/agents/actions/${queued.data.data.id}/approve`, 200, { method: 'POST', token: admin, body: {} })).action.status, 'executed');
+  assert.ok(JSON.stringify(await expectStatus('/api/public/sessions', 200)).includes(session.id));
+
+  // Article: Markdown body, sent for review by default, never published by this tool
+  const art = await run({ tool: 'draft_article', input: { title: 'Agent Article', body: '# หัวข้อ\n\nเนื้อหาจาก agent', slug: 'agent-article-1', author_label: 'x' } });
+  assert.equal(art.status, 400, 'agents cannot credit an author');
+  const written = await run({ tool: 'draft_article', input: { title: 'Agent Article', body: '# หัวข้อ\n\nเนื้อหาจาก agent', slug: 'agent-article-1', excerpt: 'สรุปสั้น' } });
+  assert.equal(written.status, 201, JSON.stringify(written.data));
+  const article = written.data.data.result.article;
+  assert.equal(article.status, 'review');
+  assert.ok(article.submitted_at);
+  const note = { tool: 'draft_article', input: { title: 'Agent Note', body: 'ร่าง', submit_for_review: false }, idempotency_key: 'draft-note-1' };
+  const kept = await run(note);
+  assert.equal(kept.status, 201, JSON.stringify(kept.data));
+  assert.equal(kept.data.data.result.article.status, 'draft');
+  assert.equal((await run(note)).data.replayed, true, 'a generated slug does not break idempotency');
+  assert.match(kept.data.data.result.article.slug, /^agent-note-/);
+  const taken = await run({ tool: 'draft_article', input: { title: 'Again', body: 'x', slug: 'agent-article-1' } });
+  assert.equal(taken.status, 409);
+  assert.equal(taken.data.code, 'slug_taken');
+  assert.equal((await request('/api/public/articles/agent-article-1')).status, 404, 'not public');
+  const list = await expectStatus('/api/admin/site/articles', 200, { token: coord });
+  assert.ok(JSON.stringify(list).includes(article.id), 'coordinators see the agent article to review');
+  const audit = await expectStatus('/api/admin/site/audit?limit=100', 200, { token: admin });
+  assert.ok(audit.entries.some(e => e.entity === 'article' && e.entity_id === article.id && e.api_key_id === agent.id));
+  assert.ok(audit.entries.some(e => e.entity === 'session' && e.entity_id === session.id && e.api_key_id === agent.id));
 });
 
 test('state changes after submission fail the action instead of acting on stale data', async () => {

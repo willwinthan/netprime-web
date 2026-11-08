@@ -33,7 +33,7 @@ agent key คือแถวในตาราง `api_keys` ที่ `kind = '
 | ระดับ | scope |
 |---|---|
 | อ่าน | `sessions:read` `registrations:read` `leads:read` `inquiries:read` `reports:read` `events:read` `orders:read` `courses:read` `users:read` `enrollments:read` |
-| ร่าง | `leads:write` `inquiries:write` |
+| ร่าง | `leads:write` `inquiries:write` `sessions:write` `articles:write` |
 | ลงมือ | `orders:confirm` `registrations:write` `sessions:publish` `articles:publish` `messages:send` `enrollments:write` |
 
 ## 2. tool สามระดับและคิวรออนุมัติ
@@ -43,10 +43,16 @@ agent key คือแถวในตาราง `api_keys` ที่ `kind = '
 | ระดับ | ทำงานอย่างไร | tool |
 |---|---|---|
 | **อ่าน** | เรียก GET endpoint โดยตรง | `get_daily_ops_summary` `get_report_summary` `list_training_sessions` `list_registrations` `list_leads` `list_inquiries` `list_orders` `list_courses` `list_users` `list_enrollments` `get_events` |
-| **ร่าง** | ทำทันที เปลี่ยนเฉพาะข้อมูลภายในที่ลูกค้าไม่เห็น | `update_lead` `update_inquiry` (เปลี่ยนสถานะและต่อท้ายบันทึกด้วยชื่อ agent) |
+| **ร่าง** | ทำทันที เปลี่ยนเฉพาะข้อมูลภายในที่ลูกค้าไม่เห็น | `update_lead` `update_inquiry` (เปลี่ยนสถานะและต่อท้ายบันทึกด้วยชื่อ agent) `draft_session` (สร้างรอบอบรมใหม่สถานะ draft) `draft_article` (เขียนบทความ Markdown เป็นฉบับร่างหรือส่งตรวจ) |
 | **ลงมือ** | เข้าคิวรอคนอนุมัติ | `confirm_order` (payments.manage) `update_registration` (site.sessions, ส่งอีเมลแจ้งผู้สมัคร) `publish_session` (site.sessions) `publish_article` (articles.publish) `grant_enrollment` (users.manage) `send_email` (communication.manage) `send_line` (communication.manage) |
 
 วงเล็บหลัง tool ระดับลงมือคือสิทธิ์ที่ผู้อนุมัติต้องมี**เพิ่มจาก** `agents.approve`
+
+### ร่างรอบอบรมและบทความ
+
+- `draft_session` ใช้กฎเดียวกับฟอร์มในคอนโซล (วันที่ วันอบรมที่ไม่ต่อเนื่อง วิทยากร คอร์สที่เชื่อม) agent เลือกสถานะเองไม่ได้ รอบใหม่เป็น `draft` เสมอและไม่แสดงบนเว็บ ตัวอย่าง (dry run) เตือนเมื่อวันเริ่มอยู่ในอดีต ราคา 0 บาท หรือมีรอบชื่อและวันเริ่มเดียวกันอยู่แล้ว ถ้าจะเปิดรับสมัครให้ส่ง `publish_session` ซึ่งต้องมีคนอนุมัติ
+- `draft_article` รับเนื้อหาแบบ Markdown บทความเข้าคิวตรวจ (`review`) เป็นค่าเริ่มต้น หรือเก็บเป็น `draft` เมื่อส่ง `submit_for_review: false` agent ใส่ชื่อผู้เขียน หมายเหตุผู้ตรวจ หรือวันเผยแพร่ไม่ได้ บทความไม่มี `author_id` ผู้ประสานงาน (`articles.manage`) จึงแก้ต่อในคอนโซลได้ ถ้าไม่ระบุ `slug` ระบบตั้งให้ตอนสร้าง ถ้า slug ซ้ำได้ `409 slug_taken`
+- ทั้งสอง tool สร้างของใหม่เท่านั้น ยังแก้ฉบับร่างที่มีอยู่ไม่ได้ ถ้าต้องแก้ เจ้าหน้าที่แก้ในคอนโซล
 
 ### การส่งงาน
 
