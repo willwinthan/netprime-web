@@ -2302,7 +2302,7 @@ ALTER TABLE session_registrations ADD COLUMN receipt_nos TEXT;   -- One receipt 
 
 CREATE INDEX IF NOT EXISTS idx_training_sessions_instructor ON training_sessions(instructor_id);
 
--- Verified video progress (migrations/0037_verified_video_progress.sql): video lessons complete only after
+-- Verified video progress (migrations/0039_verified_video_progress.sql): video lessons complete only after
 -- the server has credited enough real playback from player heartbeats (handlers/student.ts).
 ALTER TABLE lessons ADD COLUMN duration_seconds REAL;
 ALTER TABLE lesson_progress ADD COLUMN watched_seconds REAL NOT NULL DEFAULT 0;
