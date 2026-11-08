@@ -43,7 +43,7 @@ export const CourseAssessments: React.FC<{ courseId: string }> = ({ courseId }) 
         {TABS.map(t => <button key={t.key} style={tabButton(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
       {tab === "bank" && <QuestionBankPage courseId={courseId} />}
-      {tab === "exams" && <ExamBuilder courseId={courseId} lessons={lessons} />}
+      {tab === "exams" && <ExamBuilder courseId={courseId} lessons={lessons} onOpenBank={() => setTab("bank")} />}
       {tab === "assignments" && <AssignmentManager courseId={courseId} lessons={lessons} />}
       {tab === "video" && <VideoQuestionsEditor lessons={lessons} />}
       {tab === "grading" && <GradingQueue courseId={courseId} />}

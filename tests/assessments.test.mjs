@@ -463,6 +463,23 @@ test('interactive video questions: hidden key, answers stored and reported', asy
   await expectStatus(`/api/instructor/courses/${COURSE}/gradebook`, 403, { token: otherTeacher.token });
 });
 
+test('course reviewers read every exam with its questions and answer keys; others cannot', async () => {
+  const [qid] = await createBank(teacher.token, [{ type: 'single', prompt: 'รีวิว: D1 คืออะไร', options: ['ฐานข้อมูล', 'คิว'], correct: [0], explanation: 'D1 เป็น SQLite' }]);
+  const exam = await createExam({ title: 'ข้อสอบให้ผู้ตรวจดู', question_ids: [qid], status: 'draft' });
+  const path = `/api/admin/courses/${COURSE}/assessments`;
+  await expectStatus(path, 401);
+  await expectStatus(path, 403, { token: teacher.token });
+  await expectStatus(path, 403, { token: learner.token });
+  const view = await expectStatus(path, 200, { token: admin.token });
+  assert.ok(view.bank_size >= 1);
+  const found = view.exams.find(e => e.id === exam.id);
+  assert.equal(found.status, 'draft', 'drafts are shown to the reviewer');
+  const q = found.questions.find(x => x.id === qid);
+  assert.deepEqual(q.correct, [0]);
+  assert.equal(q.explanation, 'D1 เป็น SQLite');
+  await expectStatus('/api/admin/courses/course_missing/assessments', 404, { token: admin.token });
+});
+
 test('exam report with item statistics and CSV export', async () => {
   const ids = await createBank(teacher.token, [
     { type: 'single', prompt: 'รายงาน ข้อ 1', options: ['ถูก', 'ผิด'], correct: [0] },

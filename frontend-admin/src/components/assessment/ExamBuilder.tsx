@@ -15,7 +15,7 @@ const emptyDraft = (): Draft => ({
   show_answers: "after_submit", available_from: null, available_until: null, status: "draft", question_ids: []
 });
 
-const ExamEditor: React.FC<{ courseId: string; exam: Exam | null; lessons: LessonRef[]; onSaved: () => void; onClose: () => void }> = ({ courseId, exam, lessons, onSaved, onClose }) => {
+const ExamEditor: React.FC<{ courseId: string; exam: Exam | null; lessons: LessonRef[]; onSaved: () => void; onClose: () => void; onOpenBank?: () => void }> = ({ courseId, exam, lessons, onSaved, onClose, onOpenBank }) => {
   const api = useApi();
   const [d, setD] = useState<Draft>(emptyDraft);
   const [bank, setBank] = useState<BankQuestion[]>([]);
@@ -120,7 +120,12 @@ const ExamEditor: React.FC<{ courseId: string; exam: Exam | null; lessons: Lesso
           <div>
             <p style={{ ...mutedText, marginBottom: "8px" }}>เลือกแล้ว {d.question_ids.length} ข้อ • รวม {totalPoints} คะแนน</p>
             <div style={{ maxHeight: "280px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px", border: "1px solid var(--border-subtle)", borderRadius: "0.75rem", padding: "10px" }}>
-              {bank.length === 0 && <span style={mutedText}>ยังไม่มีคำถามในคลัง เพิ่มคำถามที่แท็บ "คลังข้อสอบ" ก่อน</span>}
+              {bank.length === 0 && (
+                <div style={{ ...rowFlex, justifyContent: "space-between" }}>
+                  <span style={mutedText}>ยังไม่มีคำถามในคลัง ข้อสอบเลือกคำถามจากคลังข้อสอบ จึงต้องเพิ่มคำถามก่อน</span>
+                  {onOpenBank && <button type="button" className="tech-button-outline" style={smallButton} onClick={onOpenBank}>ไปเพิ่มคำถามในคลังข้อสอบ</button>}
+                </div>
+              )}
               {bank.map(q => (
                 <label key={q.id} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px" }}>
                   <input type="checkbox" checked={d.question_ids.includes(q.id)} onChange={() => toggleQuestion(q.id)} />
@@ -162,8 +167,11 @@ const ExamEditor: React.FC<{ courseId: string; exam: Exam | null; lessons: Lesso
   );
 };
 
-/** Exams of a course with the "final exam required for certificate" switch. */
-export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> = ({ courseId, lessons }) => {
+/**
+ * Exams of a course with the "final exam required for certificate" switch. Exams pick questions from the
+ * course question bank, so an empty bank shows the two steps and a way to the bank tab (`onOpenBank`).
+ */
+export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[]; onOpenBank?: () => void }> = ({ courseId, lessons, onOpenBank }) => {
   const api = useApi();
   const { confirmDelete, dangerDialog } = useDangerousDelete();
   const [exams, setExams] = useState<Exam[]>([]);
@@ -172,10 +180,15 @@ export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> =
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Exam | "new" | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  const [bankSize, setBankSize] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await api.request<{ exams: Exam[]; requires_final_exam: boolean }>(`/instructor/courses/${courseId}/exams`);
+      const [res, bank] = await Promise.all([
+        api.request<{ exams: Exam[]; requires_final_exam: boolean }>(`/instructor/courses/${courseId}/exams`),
+        api.request<{ questions: BankQuestion[] }>(`/instructor/courses/${courseId}/questions`)
+      ]);
+      setBankSize(bank.questions.length);
       setExams(res.exams);
       setRequiresFinal(res.requires_final_exam);
       setError(null);
@@ -222,6 +235,16 @@ export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> =
         <button className="tech-button-primary" style={smallButton} onClick={() => setEditing("new")}><Plus size={14} /> สร้างข้อสอบ</button>
       </div>
       <ErrorBox message={error} />
+      {bankSize === 0 && (
+        <div role="note" style={{ ...cardStyle, marginBottom: "16px", background: "var(--primary-glow)", display: "grid", gap: "8px" }}>
+          <strong style={{ fontSize: "14px" }}>สร้างข้อสอบใน 2 ขั้น</strong>
+          <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "13px", display: "grid", gap: "4px" }}>
+            <li>เพิ่มคำถามใน "คลังข้อสอบ" ของคอร์สนี้ (ตอนนี้ยังไม่มีคำถาม)</li>
+            <li>กด "สร้างข้อสอบ" แล้วเลือกคำถามจากคลัง หรือตั้งให้สุ่มตามแท็กและความยาก</li>
+          </ol>
+          {onOpenBank && <button type="button" className="tech-button-primary" style={{ ...smallButton, justifySelf: "start" }} onClick={onOpenBank}>ไปที่คลังข้อสอบ</button>}
+        </div>
+      )}
       {loading ? <Empty text="กำลังโหลด..." /> : exams.length === 0 ? <Empty text="ยังไม่มีข้อสอบ" /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           {exams.map(e => (
@@ -255,7 +278,8 @@ export const ExamBuilder: React.FC<{ courseId: string; lessons: LessonRef[] }> =
         </div>
       )}
       {editing && <ExamEditor courseId={courseId} exam={editing === "new" ? null : editing} lessons={lessons}
-        onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+        onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}
+        onOpenBank={onOpenBank && (() => { setEditing(null); onOpenBank(); })} />}
       {reportId && (
         <Modal title="รายงานผลสอบ" onClose={() => setReportId(null)} width={960}>
           <ExamReport examId={reportId} />

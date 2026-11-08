@@ -4,7 +4,7 @@ import { ErrorBox, Field, grid2 } from "../site-admin/ui";
 import type { InstructorCourse } from "./types";
 
 /** Picture field: upload a file (stored by POST /instructor/images) or paste a link. */
-const ImageField: React.FC<{ label: string; hint: string; value: string; onChange: (url: string) => void; wide?: boolean }> = ({ label, hint, value, onChange, wide }) => {
+export const ImageField: React.FC<{ label: string; hint: string; value: string; onChange: (url: string) => void; wide?: boolean }> = ({ label, hint, value, onChange, wide }) => {
   const api = useApi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

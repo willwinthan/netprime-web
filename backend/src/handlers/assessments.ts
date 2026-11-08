@@ -1,5 +1,6 @@
 import { Hono, Context } from "hono";
 import { Env, rbac } from "../middleware/rbac";
+import { permit } from "../utils/permissions";
 import { trackEvent } from "../utils/events";
 import { createNotification } from "./notifications";
 import { lessonLockResponse } from "../utils/courseContent";
@@ -634,6 +635,31 @@ assessmentsRouter.delete("/instructor/exams/:id", rbac(["instructor", "admin"]),
   await c.env.DB.prepare("DELETE FROM exams WHERE id = ?").bind(loaded.exam.id).run();
   await audit(c, "exam.delete", "exam", loaded.exam.id, loaded.exam.title);
   return c.json({ success: true });
+});
+
+/**
+ * Read-only view for the course reviewer (courses.approve): every exam with its questions and answer
+ * keys, random-draw rules, and assignments, so a course can be checked before it is published.
+ * GET /api/admin/courses/:courseId/assessments
+ */
+assessmentsRouter.get("/admin/courses/:courseId/assessments", rbac(), permit("courses.approve"), async (c) => {
+  const db = c.env.DB;
+  const course = await db.prepare("SELECT id, requires_final_exam FROM courses WHERE id = ?").bind(c.req.param("courseId"))
+    .first<{ id: string; requires_final_exam: number }>();
+  if (!course) return c.json({ error: "ไม่พบคอร์ส" }, 404);
+  const exams = await db.prepare(`SELECT e.*, l.title AS lesson_title FROM exams e LEFT JOIN lessons l ON l.id = e.lesson_id
+    WHERE e.course_id = ? ORDER BY e.is_final, e.created_at, e.id`).bind(course.id).all<ExamRow & { lesson_title: string | null }>();
+  const questions = await db.prepare(`SELECT eq.exam_id, q.* FROM exam_questions eq JOIN question_bank q ON q.id = eq.question_id
+    JOIN exams e ON e.id = eq.exam_id WHERE e.course_id = ? ORDER BY eq.sort_order`).bind(course.id).all<BankRow & { exam_id: string }>();
+  const bankSize = await db.prepare("SELECT COUNT(*) AS n FROM question_bank WHERE course_id = ?").bind(course.id).first<{ n: number }>();
+  const assignments = await db.prepare(`SELECT a.id, a.title, a.instructions, a.max_score, a.due_at, a.status, l.title AS lesson_title
+    FROM assignments a JOIN lessons l ON l.id = a.lesson_id WHERE a.course_id = ? ORDER BY l.sort_order, a.created_at`).bind(course.id).all();
+  return c.json({
+    requires_final_exam: !!course.requires_final_exam,
+    bank_size: bankSize?.n ?? 0,
+    exams: exams.results.map(e => ({ ...examView(e), questions: questions.results.filter(q => q.exam_id === e.id).map(bankView) })),
+    assignments: assignments.results
+  });
 });
 
 /** PATCH /api/instructor/courses/:courseId/assessment-settings { requires_final_exam } */

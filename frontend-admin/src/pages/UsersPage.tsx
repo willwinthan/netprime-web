@@ -336,27 +336,30 @@ const AccountDialog: React.FC<{ api: Api; meta: Meta; account: Account | null; o
               const on = form.roles.includes(r.key);
               const locked = lockedRole(r.key);
               return (
+                // Same 2px border on and off so ticking a role never resizes the cards under the pointer.
                 <label key={r.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", borderRadius: 12, cursor: locked ? "default" : "pointer", opacity: locked && !on ? 0.6 : 1,
-                  border: on ? `2px solid ${ROLE_TONE[r.key].color}` : "1px solid rgba(15,23,42,0.12)", background: on ? ROLE_TONE[r.key].bg : "#fff" }}>
-                  <input type="checkbox" checked={on} disabled={locked} onChange={() => toggleRole(r.key)} style={{ marginTop: 3 }} />
-                  <span><strong style={{ fontSize: 14 }}>{r.label}</strong><br /><span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{r.description}</span></span>
+                  border: `2px solid ${on ? ROLE_TONE[r.key].color : "rgba(15,23,42,0.12)"}`, background: on ? ROLE_TONE[r.key].bg : "#fff" }}>
+                  <input type="checkbox" checked={on} disabled={locked} onChange={() => toggleRole(r.key)} style={{ marginTop: 3 }}
+                    aria-label={r.label} aria-describedby={`role-desc-${r.key}`} />
+                  <span><strong style={{ fontSize: 14 }}>{r.label}</strong><br /><span id={`role-desc-${r.key}`} style={{ fontSize: 12, color: "var(--text-secondary)" }}>{r.description}</span></span>
                 </label>
               );
             })}
           </div>
-          {form.roles.length === 0 && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#b42318" }}>เลือกบทบาทอย่างน้อย 1 บทบาท</p>}
-          {form.roles.length > 0 && !allowsOrg && form.roles.some(r => r === "partner" || r === "student") && (
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--text-secondary)" }}>บัญชีที่เป็นเจ้าหน้าที่หรือผู้สอนผูกกับองค์กรไม่ได้ ระบบจะบันทึกเป็นผู้เรียนรายบุคคล</p>
-          )}
+          {/* Reserved line: the warning comes and goes without moving the fields below. */}
+          <p role={form.roles.length === 0 ? "alert" : undefined} style={{ margin: "8px 0 0", minHeight: 18, fontSize: 13, color: "#b42318" }}>
+            {form.roles.length === 0 ? "เลือกบทบาทอย่างน้อย 1 บทบาท" : ""}
+          </p>
         </fieldset>
-        {allowsOrg && (
-          <Field label={needsOrg ? "องค์กร *" : "องค์กร (ถ้าเป็นพนักงานหรือนักศึกษาขององค์กร)"} span>
-            <select className="form-input" required={needsOrg} value={form.partner_id} onChange={e => setForm(f => ({ ...f, partner_id: e.target.value }))}>
-              <option value="">{needsOrg ? "เลือกองค์กร" : "— ผู้เรียนรายบุคคล —"}</option>
-              {meta.partners.map(p => <option key={p.id} value={p.id}>{p.company_name} ({p.partner_type === "university" ? "มหาวิทยาลัย" : "บริษัท"} · ที่นั่ง {p.allocated_seats}/{p.total_seats})</option>)}
-            </select>
-          </Field>
-        )}
+        {/* Always rendered (disabled when it does not apply) so the form keeps its height while roles change. */}
+        <Field label={needsOrg ? "องค์กร *" : "องค์กร (ถ้าเป็นพนักงานหรือนักศึกษาขององค์กร)"} span
+          hint="ใช้ได้กับผู้เรียนและผู้ดูแลองค์กรเท่านั้น บัญชีที่เป็นเจ้าหน้าที่หรือผู้สอนผูกกับองค์กรไม่ได้">
+          <select className="form-input" required={needsOrg && allowsOrg} disabled={!allowsOrg} value={allowsOrg ? form.partner_id : ""}
+            onChange={e => setForm(f => ({ ...f, partner_id: e.target.value }))}>
+            <option value="">{needsOrg ? "เลือกองค์กร" : "— ผู้เรียนรายบุคคล —"}</option>
+            {meta.partners.map(p => <option key={p.id} value={p.id}>{p.company_name} ({p.partner_type === "university" ? "มหาวิทยาลัย" : "บริษัท"} · ที่นั่ง {p.allocated_seats}/{p.total_seats})</option>)}
+          </select>
+        </Field>
         {isNew && (
           <fieldset style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0, display: "grid", gap: 8 }}>
             <legend className="form-label" style={{ marginBottom: 8 }}>การตั้งรหัสผ่าน</legend>
