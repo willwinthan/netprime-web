@@ -153,6 +153,7 @@ CREATE TABLE users (
     last_login_at TEXT,
     sessions_revoked_at TEXT, -- ISO time; tokens issued before it are rejected
     email_verified_at TEXT, -- NULL until the address is confirmed (see migrations/0011_account_tokens.sql)
+    must_change_password INTEGER NOT NULL DEFAULT 0, -- 1 when someone else chose the password (migrations/0040_must_change_password.sql)
     FOREIGN KEY(partner_id) REFERENCES partners(id)
 );
 

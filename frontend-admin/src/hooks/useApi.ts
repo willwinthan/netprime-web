@@ -25,6 +25,8 @@ export interface User {
   permissions?: string[];
   /** False until the address is confirmed from the emailed link (soft: sign-in is never blocked). */
   email_verified?: boolean;
+  /** True while the account still has a password staff chose; the API blocks the console until it is changed. */
+  must_change_password?: boolean;
 }
 
 /** True when the signed-in user holds any of the given roles (older cached users only have `role`). */
@@ -76,6 +78,11 @@ export function useApi() {
     if (!response.ok) {
       // A late response from a previous login must not clear a newer session.
       if (response.status === 401 && token && localStorage.getItem("netprime_token") === token) publish(null, null);
+      // A session opened before an admin reset lands on the set-password screen (App.tsx).
+      if (response.status === 403 && data.code === "password_change_required" && token && localStorage.getItem("netprime_token") === token) {
+        const current = JSON.parse(localStorage.getItem("netprime_user") || "null") as User | null;
+        if (current && !current.must_change_password) publish(token, { ...current, must_change_password: true });
+      }
       throw new Error(data.error || `คำขอไม่สำเร็จ (${response.status})`);
     }
     return data as T;

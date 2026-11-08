@@ -183,6 +183,7 @@ async function handleAssignSeat(c: Context<Env>) {
     password?: string;
     invite?: boolean;
     partner_id?: string;
+    require_password_change?: boolean;
   }>().catch(() => null);
   if (!body || typeof body !== "object") return c.json({ error: "ข้อมูลไม่ถูกต้อง" }, 400);
 
@@ -190,6 +191,8 @@ async function handleAssignSeat(c: Context<Env>) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const password = typeof body.password === "string" && body.password ? body.password : null;
   const invite = !password && body.invite === true;
+  // Only the local test harness may skip the first-sign-in password change (see handlers/accounts.ts).
+  const mustChange = password && !(body.require_password_change === false && c.env.ALLOW_LOCAL_SEED_PASSWORDS === "true") ? 1 : 0;
 
   if (!EMAIL_RE.test(email) || email.length > 254 || !name || name.length > 120) {
     return c.json({ error: "ต้องระบุอีเมลที่ถูกต้องและชื่อ (ไม่เกิน 120 ตัวอักษร)" }, 400);
@@ -224,11 +227,12 @@ async function handleAssignSeat(c: Context<Env>) {
     const newUserId = "usr_" + crypto.randomUUID();
     const passwordHash = await hashPassword(password ?? crypto.randomUUID() + crypto.randomUUID());
     const results = await db.batch([
-      db.prepare(`INSERT INTO users (id, email, password_hash, name, role, partner_id)
-        SELECT ?, ?, ?, ?, 'student', p.id FROM partners p
+      // A password the partner chose must be replaced at first sign-in (middleware/rbac.ts).
+      db.prepare(`INSERT INTO users (id, email, password_hash, name, role, partner_id, must_change_password)
+        SELECT ?, ?, ?, ?, 'student', p.id, ? FROM partners p
         WHERE p.id = ? AND
           (SELECT COUNT(*) FROM users u WHERE u.partner_id = p.id AND u.role = 'student' AND u.staff_role IS NULL) < p.total_seats`)
-        .bind(newUserId, email, passwordHash, name, targetPartnerId),
+        .bind(newUserId, email, passwordHash, name, mustChange, targetPartnerId),
       recountSeats(db, targetPartnerId)
     ]);
     if (!results[0].meta.changes) {

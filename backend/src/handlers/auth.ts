@@ -19,8 +19,15 @@ async function session(user: UserPayload, secret: string, db: D1Database, extra:
   const token = await jwt.sign({ ...user, exp, iat_ms: extra.iat_ms ?? Date.now(), jti: crypto.randomUUID() } as any, secret);
   return {
     token,
-    user: { ...user, corporate_id: user.partner_id, permissions: await permissionsForRoles(db, user.roles), email_verified: extra.email_verified ?? false }
+    user: { ...user, corporate_id: user.partner_id, permissions: await permissionsForRoles(db, user.roles), email_verified: extra.email_verified ?? false,
+      must_change_password: await mustChangePassword(db, user.id) }
   };
+}
+
+/** True while the account still has a password someone else chose (rbac blocks most routes). */
+async function mustChangePassword(db: D1Database, userId: string): Promise<boolean> {
+  const row = await db.prepare("SELECT must_change_password FROM users WHERE id = ?").bind(userId).first<{ must_change_password: number | null }>();
+  return !!row?.must_change_password;
 }
 
 /** Secret links are only echoed back for the local test harness (never set in staging/production). */
@@ -156,7 +163,7 @@ authRouter.post("/reset-password", async (c) => {
   const now = new Date().toISOString();
   await db.batch([
     // Receiving the link proves the address, so the account also becomes verified.
-    db.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?")
+    db.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ?, email_verified_at = COALESCE(email_verified_at, ?), must_change_password = 0 WHERE id = ?")
       .bind(await hashPassword(body.password), now, now, user.id),
     db.prepare("UPDATE account_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND purpose IN ('reset', 'invite') AND used_at IS NULL").bind(user.id)
   ]);
@@ -222,12 +229,14 @@ authRouter.post("/logout", rbac(), async (c) => {
 });
 
 async function profile(c: Context<Env>, user: UserPayload) {
-  const row = await c.env.DB.prepare("SELECT email_verified_at FROM users WHERE id = ?").bind(user.id).first<{ email_verified_at: string | null }>();
+  const row = await c.env.DB.prepare("SELECT email_verified_at, must_change_password FROM users WHERE id = ?").bind(user.id)
+    .first<{ email_verified_at: string | null; must_change_password: number | null }>();
   return {
     ...user,
     corporate_id: user.partner_id,
     permissions: await permissionsForRoles(c.env.DB, user.roles),
-    email_verified: !!row?.email_verified_at
+    email_verified: !!row?.email_verified_at,
+    must_change_password: !!row?.must_change_password
   };
 }
 
@@ -267,7 +276,7 @@ authRouter.post("/change-password", rbac(), async (c) => {
     return c.json({ error: "รหัสผ่านปัจจุบันไม่ถูกต้อง" }, 400);
   }
   const revokedMs = Date.now();
-  await c.env.DB.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ? WHERE id = ?")
+  await c.env.DB.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ?, must_change_password = 0 WHERE id = ?")
     .bind(await hashPassword(next), new Date(revokedMs).toISOString(), user.id).run();
   await deliver(c, "Password changed", () => sendPasswordChangedEmail(user.email, user.name, appUrl(c.env, "/dashboard"), c.env.RESEND_API_KEY, c.env.DB));
   const { exp, ...identity } = user;

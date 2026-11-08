@@ -361,7 +361,7 @@ const AccountDialog: React.FC<{ api: Api; meta: Meta; account: Account | null; o
           <fieldset style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0, display: "grid", gap: 8 }}>
             <legend className="form-label" style={{ marginBottom: 8 }}>การตั้งรหัสผ่าน</legend>
             {([["invite", "ส่งลิงก์เชิญทางอีเมล", "ผู้ใช้ตั้งรหัสผ่านเองจากลิงก์ (ใช้ได้ 7 วัน) และอีเมลถือว่ายืนยันแล้ว"],
-               ["password", "ตั้งรหัสผ่านเอง", "กำหนดรหัสผ่านเริ่มต้น แล้วแจ้งผู้ใช้ทางช่องทางที่ปลอดภัย"]] as const).map(([key, label, hint]) => (
+               ["password", "ตั้งรหัสผ่านเอง", "กำหนดรหัสผ่านชั่วคราว ผู้ใช้ต้องเปลี่ยนเป็นรหัสของตัวเองตอนเข้าสู่ระบบครั้งแรก"]] as const).map(([key, label, hint]) => (
               <label key={key} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
                 <input type="radio" name="setup" checked={form.setup === key} onChange={() => setForm(f => ({ ...f, setup: key }))} style={{ marginTop: 3 }} />
                 <span><strong>{label}</strong><br /><span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{hint}</span></span>
@@ -370,7 +370,7 @@ const AccountDialog: React.FC<{ api: Api; meta: Meta; account: Account | null; o
           </fieldset>
         )}
         {isNew && form.setup === "password" && (
-          <Field label="รหัสผ่านเริ่มต้น" hint="อย่างน้อย 12 ตัวอักษร แจ้งผู้ใช้ทางช่องทางที่ปลอดภัย" span>
+          <Field label="รหัสผ่านชั่วคราว" hint="อย่างน้อย 12 ตัวอักษร แจ้งผู้ใช้ทางช่องทางที่ปลอดภัย ผู้ใช้ต้องเปลี่ยนตอนเข้าสู่ระบบครั้งแรก" span>
             <input className="form-input" type="password" required minLength={12} maxLength={256} autoComplete="new-password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
           </Field>
         )}
@@ -401,7 +401,7 @@ const AccountDialog: React.FC<{ api: Api; meta: Meta; account: Account | null; o
           <strong style={{ fontSize: 14 }}>ความปลอดภัยของบัญชี</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input className="form-input" type="password" placeholder="รหัสผ่านใหม่ (12 ตัวอักษรขึ้นไป)" autoComplete="new-password" minLength={12} value={newPassword} onChange={e => setNewPassword(e.target.value)} style={{ flex: "1 1 240px" }} />
-            <button className="tech-button-outline" disabled={busy || newPassword.length < 12} onClick={() => action(`/admin/accounts/${account!.id}/password`, { password: newPassword }, "ตั้งรหัสผ่านใหม่แล้ว และให้ผู้ใช้ออกจากระบบทุกอุปกรณ์")}><KeyRound size={16} />ตั้งรหัสผ่านใหม่</button>
+            <button className="tech-button-outline" disabled={busy || newPassword.length < 12} onClick={() => action(`/admin/accounts/${account!.id}/password`, { password: newPassword }, "ตั้งรหัสผ่านชั่วคราวแล้ว ผู้ใช้ออกจากระบบทุกอุปกรณ์และต้องตั้งรหัสผ่านของตัวเองตอนเข้าสู่ระบบครั้งถัดไป")}><KeyRound size={16} />ตั้งรหัสผ่านใหม่</button>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {account!.status === "active" && (

@@ -217,17 +217,20 @@ accountsRouter.post("/accounts", permit("users.manage"), async (c) => {
   const stored = storedRole(primary);
   // Invited accounts get a random password nobody knows until they follow the link.
   const hash = await hashPassword(invite ? crypto.randomUUID() + crypto.randomUUID() : password);
+  // A password the admin chose must be replaced at first sign-in (middleware/rbac.ts). Only the local
+  // test harness may skip this, so API suites can use the accounts they create.
+  const mustChange = !invite && !(body.require_password_change === false && c.env.ALLOW_LOCAL_SEED_PASSWORDS === "true") ? 1 : 0;
   try {
     if (primary === "student" && partnerId) {
       // Organization students take a seat; the capacity check and insert are one statement.
-      const result = await db.prepare(`INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id)
-        SELECT ?, ?, ?, ?, 'student', NULL, p.id FROM partners p WHERE p.id = ? AND ${SEAT_AVAILABLE}`)
-        .bind(id, email, hash, name, partnerId, id).run();
+      const result = await db.prepare(`INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id, must_change_password)
+        SELECT ?, ?, ?, ?, 'student', NULL, p.id, ? FROM partners p WHERE p.id = ? AND ${SEAT_AVAILABLE}`)
+        .bind(id, email, hash, name, mustChange, partnerId, id).run();
       if (!result.meta.changes) return c.json({ error: "องค์กรนี้ใช้ที่นั่งครบแล้ว เพิ่มที่นั่งก่อนหรือเลือกบทบาทอื่น" }, 409);
       await recountSeats(db, partnerId);
     } else {
-      await db.prepare("INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(id, email, hash, name, stored.role, stored.staff_role, partnerId).run();
+      await db.prepare("INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(id, email, hash, name, stored.role, stored.staff_role, partnerId, mustChange).run();
     }
   } catch (error: any) {
     if (String(error?.message).includes("UNIQUE constraint failed")) return c.json({ error: "อีเมลนี้มีบัญชีอยู่แล้ว เพิ่มบทบาทให้บัญชีเดิมแทนการสร้างใหม่" }, 409);
@@ -317,10 +320,10 @@ accountsRouter.post("/accounts/:id/password", permit("users.manage"), async (c) 
   if (!roles) return c.json({ error: "ไม่พบผู้ใช้" }, 404);
   if (!c.get("user").roles.includes("admin") && roles.includes("admin")) return c.json({ error: "เฉพาะผู้ดูแลระบบเท่านั้นที่จัดการบัญชีผู้ดูแลระบบได้" }, 403);
   if (!(await withinActorPermissions(c, roles))) return c.json({ error: BEYOND_ACTOR }, 403);
-  await c.env.DB.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ? WHERE id = ?")
+  await c.env.DB.prepare("UPDATE users SET password_hash = ?, sessions_revoked_at = ?, must_change_password = 1 WHERE id = ?")
     .bind(await hashPassword(password), new Date().toISOString(), id).run();
   await audit(c, "reset_password", "user", id);
-  return c.json({ message: "ตั้งรหัสผ่านใหม่แล้ว ผู้ใช้ต้องเข้าสู่ระบบใหม่ทุกอุปกรณ์" });
+  return c.json({ message: "ตั้งรหัสผ่านชั่วคราวแล้ว ผู้ใช้ต้องเข้าสู่ระบบใหม่และตั้งรหัสผ่านของตัวเองก่อนใช้งาน" });
 });
 
 /** Sends a new invitation link (older unused links stop working). */

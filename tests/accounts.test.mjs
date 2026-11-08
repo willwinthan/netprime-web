@@ -176,3 +176,43 @@ test('forgot password is rate limited per email', async () => {
   for (let i = 0; i < 5; i++) await expectStatus('/api/auth/forgot-password', 200, { method: 'POST', headers: as(freshIp()), body: { email } });
   await expectStatus('/api/auth/forgot-password', 429, { method: 'POST', headers: as(freshIp()), body: { email } });
 });
+
+test('a password chosen by staff must be replaced before the account can use the system', async () => {
+  const ip = freshIp();
+  const admin = await login('admin@netprime.com', 'admin123');
+  const email = unique('temp-password');
+  const created = await expectStatus('/api/admin/accounts', 201, { method: 'POST', token: admin.token,
+    body: { email, name: 'Temp Password', roles: ['instructor'], password: 'temporary-password-1', require_password_change: true } });
+
+  const first = await login(email, 'temporary-password-1');
+  assert.equal(first.user.must_change_password, true);
+  const blocked = await request('/api/instructor/analytics', { token: first.token });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.data.code, 'password_change_required');
+  assert.equal((await expectStatus('/api/auth/me', 200, { token: first.token })).user.must_change_password, true);
+
+  const changed = await expectStatus('/api/auth/change-password', 200, { method: 'POST', token: first.token,
+    body: { current_password: 'temporary-password-1', new_password: 'my-own-password-123' } });
+  assert.equal(changed.user.must_change_password, false);
+  await expectStatus('/api/instructor/analytics', 200, { token: changed.token });
+  assert.equal((await login(email, 'my-own-password-123')).user.must_change_password, false);
+
+  // An admin reset sets a temporary password again; the emailed reset link clears it.
+  await expectStatus(`/api/admin/accounts/${created.user.id}/password`, 200, { method: 'POST', token: admin.token, body: { password: 'temporary-password-2' } });
+  const again = await login(email, 'temporary-password-2');
+  assert.equal(again.user.must_change_password, true);
+  assert.equal((await request('/api/instructor/analytics', { token: again.token })).status, 403);
+  const link = await expectStatus('/api/auth/forgot-password', 200, { method: 'POST', headers: as(ip), body: { email } });
+  await expectStatus('/api/auth/reset-password', 200, { method: 'POST', headers: as(ip), body: { token: tokenFrom(link.debug_url), password: 'reset-password-1234' } });
+  const afterReset = await login(email, 'reset-password-1234');
+  assert.equal(afterReset.user.must_change_password, false);
+  await expectStatus('/api/instructor/analytics', 200, { token: afterReset.token });
+
+  // Invited and self-registered accounts chose their own password.
+  const invited = await expectStatus('/api/admin/accounts', 201, { method: 'POST', token: admin.token,
+    body: { email: unique('invited-flag'), name: 'Invited', roles: ['student'], invite: true } });
+  await expectStatus('/api/auth/reset-password', 200, { method: 'POST', headers: as(ip), body: { token: tokenFrom(invited.debug_url), password: 'invited-password-12' } });
+  assert.equal((await login(invited.user.email, 'invited-password-12')).user.must_change_password, false);
+  const selfEmail = unique('self-flag');
+  assert.equal((await register(selfEmail, 'self-chosen-pass-1', ip)).user.must_change_password, false);
+});

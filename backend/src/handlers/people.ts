@@ -556,7 +556,8 @@ const MAX_ROWS = 2000;
 const MAX_BATCH = 100;
 type Mode = "skip" | "update";
 type Setup = "invite" | "password";
-interface ImportOptions { mode: Mode; setup: Setup }
+/** skip_password_change is only ever set by the local test harness (see handlers/accounts.ts). */
+interface ImportOptions { mode: Mode; setup: Setup; skip_password_change?: boolean }
 type Cells = Record<string, string>;
 
 const COLUMN_ALIASES: Record<string, string> = {
@@ -734,10 +735,11 @@ const publicRow = (p: PlannedRow) => ({
  * Validates every row and opens an import (import_id); commit then sends the returned `records` back in batches.
  */
 peopleRouter.post("/admin/people/import/preview", permit("users.import"), async (c) => {
-  const body = await c.req.json<{ csv?: unknown; filename?: unknown; mode?: unknown; setup?: unknown }>().catch(() => null);
+  const body = await c.req.json<{ csv?: unknown; filename?: unknown; mode?: unknown; setup?: unknown; require_password_change?: unknown }>().catch(() => null);
   if (typeof body?.csv !== "string" || !body.csv.trim()) return c.json({ error: "กรุณาเลือกไฟล์ CSV" }, 400);
   if (body.csv.length > 3_000_000) return c.json({ error: "ไฟล์ใหญ่เกินไป (ไม่เกิน 3 MB)" }, 400);
-  const options: ImportOptions = { mode: body.mode === "update" ? "update" : "skip", setup: body.setup === "password" ? "password" : "invite" };
+  const options: ImportOptions = { mode: body.mode === "update" ? "update" : "skip", setup: body.setup === "password" ? "password" : "invite",
+    ...(body.require_password_change === false && c.env.ALLOW_LOCAL_SEED_PASSWORDS === "true" ? { skip_password_change: true } : {}) };
   const parsed = recordsFromCsv(body.csv);
   if (typeof parsed === "string") return c.json({ error: parsed }, 400);
   const ctx = await planContext(c.env.DB, parsed.records.map(r => (r.cells.email || "").trim().toLowerCase()));
@@ -821,15 +823,17 @@ peopleRouter.post("/admin/people/import/:id/commit", permit("users.import"), asy
     const takesSeat = primary === "student" && !!p.partner_id;
     if (!p.existing) {
       const hash = await hashPassword(p.password ?? crypto.randomUUID() + crypto.randomUUID());
+      // An imported password was chosen by staff, so it must be replaced at first sign-in (middleware/rbac.ts).
+      const mustChange = p.password && !options.skip_password_change ? 1 : 0;
       // Organization students take a seat: the capacity check is part of the insert. When it inserts
       // nothing, the role rows below fail their foreign key and the whole row is rolled back.
       statements.push(takesSeat
-        ? db.prepare(`INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id)
-            SELECT ?, ?, ?, ?, 'student', NULL, p.id FROM partners p WHERE p.id = ?
+        ? db.prepare(`INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id, must_change_password)
+            SELECT ?, ?, ?, ?, 'student', NULL, p.id, ? FROM partners p WHERE p.id = ?
             AND (SELECT COUNT(*) FROM users x WHERE x.partner_id = p.id AND x.role = 'student' AND x.staff_role IS NULL) < p.total_seats`)
-            .bind(userId, p.email, hash, p.name, p.partner_id)
-        : db.prepare("INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(userId, p.email, hash, p.name, stored.role, stored.staff_role, p.partner_id));
+            .bind(userId, p.email, hash, p.name, mustChange, p.partner_id)
+        : db.prepare("INSERT INTO users (id, email, password_hash, name, role, staff_role, partner_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(userId, p.email, hash, p.name, stored.role, stored.staff_role, p.partner_id, mustChange));
     } else {
       // Update = additive: roles, organization (only when none), tags, field values, enrollments. Nothing is removed.
       const primaryChanged = primary !== p.existing.primary;

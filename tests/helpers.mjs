@@ -5,7 +5,21 @@ if (!base || new URL(base).hostname !== '127.0.0.1') {
   throw new Error('Run tests via pnpm test or pnpm test:readiness; only an isolated loopback Worker is allowed.');
 }
 
+/**
+ * Accounts created with an admin-chosen password must change it before any other API works
+ * (middleware/rbac.ts). Suites that only need a working account opt out; the local Worker honours
+ * the flag because ALLOW_LOCAL_SEED_PASSWORDS is on. Pass require_password_change explicitly to test the gate.
+ */
+function withTestDefaults(path, method, body) {
+  const setsPassword = path === '/api/admin/people/import/preview' || ((path === '/api/admin/accounts' || path === '/api/corporate/roster') && body?.password);
+  if (method === 'POST' && setsPassword && body && typeof body === 'object' && body.require_password_change === undefined) {
+    return { ...body, require_password_change: false };
+  }
+  return body;
+}
+
 export async function request(path, { token, method = 'GET', body, headers = {} } = {}) {
+  body = withTestDefaults(path, method, body);
   const response = await fetch(`${base}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
