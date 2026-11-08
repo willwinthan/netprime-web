@@ -9,12 +9,13 @@ interface ApiKey {
   id: string; name: string; prefix: string; scopes: string[]; rate_limit_per_minute: number; created_at?: string;
   last_used_at: string | null; revoked_at: string | null; expires_at: string | null; created_by_name?: string | null;
   kind: "integration" | "agent"; description: string | null; daily_limit: number | null; allowed_hours: string | null;
-  allowed_days: string | null; allowed_ips: string | null; paused_at: string | null;
+  allowed_days: string | null; allowed_ips: string | null; paused_at: string | null; mcp_access?: "off" | "read" | "write";
 }
 interface ScopeInfo { name: string; label: string }
 
 const DAY_LABELS = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 const daysText = (days: string | null) => days ? days.split(",").map(d => DAY_LABELS[Number(d) - 1]).join(" ") : "ทุกวัน";
+const MCP_LABEL: Record<string, string> = { off: "ปิด MCP", read: "MCP: อ่านอย่างเดียว", write: "MCP: อ่าน + ส่งงาน" };
 const smallButton: React.CSSProperties = { padding: "4px 10px", fontSize: "12px" };
 
 /**
@@ -61,7 +62,7 @@ export const ApiKeysPanel: React.FC = () => {
       <ErrorBox message={error} />
       <Notice message={notice} />
       {secret && <SecretOnce label="API key ใหม่" value={secret} onDone={() => setSecret(null)} />}
-      <Card title="API keys" description={<>ใช้เรียก REST API ที่ <code>{API_BASE_URL}/v1</code> ด้วย header <code>Authorization: Bearer npk_…</code> ระบบเก็บเฉพาะค่า hash ของ key · <strong>agent key</strong> สำหรับ AI agent ภายนอก: งานที่ส่งอีเมล ยืนยันเงิน หรือเผยแพร่ ต้องรอคนอนุมัติในหน้า "คิวอนุมัติ AI agent"</>}
+      <Card title="API keys" description={<>ใช้เรียก REST API ที่ <code>{API_BASE_URL}/v1</code> ด้วย header <code>Authorization: Bearer npk_…</code> ระบบเก็บเฉพาะค่า hash ของ key · <strong>agent key</strong> สำหรับ AI agent ภายนอก: งานที่ส่งอีเมล ยืนยันเงิน หรือเผยแพร่ ต้องรอคนอนุมัติในหน้า "คิวอนุมัติ AI agent" · ต่อผ่าน MCP ได้ที่ <code>{API_BASE_URL.replace(/\/api$/, "")}/mcp</code></>}
         actions={<div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button className="tech-button-outline" onClick={() => setEditing("new-agent")}><Bot size={16} />สร้าง agent key</button>
           <button className="tech-button-primary" onClick={() => setEditing("new-integration")}><Plus size={16} />สร้าง API key</button>
@@ -86,6 +87,7 @@ export const ApiKeysPanel: React.FC = () => {
                         <div>{k.daily_limit ? `${k.daily_limit.toLocaleString("th-TH")}/วัน` : "ไม่จำกัดต่อวัน"}</div>
                         <div>{daysText(k.allowed_days)} {k.allowed_hours ?? "ทุกเวลา"}</div>
                         {k.allowed_ips && <div title={k.allowed_ips}>จำกัด IP {k.allowed_ips.split(",").length} รายการ</div>}
+                        <div>{MCP_LABEL[k.mcp_access ?? "read"]}</div>
                       </>}
                     </td>
                     <td style={tdStyle}>{formatInstant(k.last_used_at)}</td>
@@ -126,6 +128,7 @@ const KeyForm: React.FC<{ scopes: ScopeInfo[]; existing: ApiKey | null; kind: Ap
   const [to, setTo] = useState(hoursTo || "");
   const [days, setDays] = useState<number[]>(existing?.allowed_days ? existing.allowed_days.split(",").map(Number) : [1, 2, 3, 4, 5, 6, 7]);
   const [ips, setIps] = useState(existing?.allowed_ips ?? "");
+  const [mcp, setMcp] = useState<string>(existing?.mcp_access ?? "read");
   const [expires, setExpires] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -137,7 +140,7 @@ const KeyForm: React.FC<{ scopes: ScopeInfo[]; existing: ApiKey | null; kind: Ap
       const body: Record<string, unknown> = { name, scopes: selected, rate_limit_per_minute: limit };
       if (agent) Object.assign(body, {
         description, daily_limit: daily ? Number(daily) : null, allowed_hours: from && to ? `${from}-${to}` : null,
-        allowed_days: days.length === 7 ? null : days, allowed_ips: ips.trim() || null
+        allowed_days: days.length === 7 ? null : days, allowed_ips: ips.trim() || null, mcp_access: mcp
       });
       if (existing) {
         await api.patch(`/admin/platform/api-keys/${existing.id}`, body);
@@ -181,6 +184,13 @@ const KeyForm: React.FC<{ scopes: ScopeInfo[]; existing: ApiKey | null; kind: Ap
                   onClick={() => setDays(prev => on ? prev.filter(d => d !== i + 1) : [...prev, i + 1])}>{label}</button>;
               })}
             </div>
+          </Field>
+          <Field label="การใช้ผ่าน MCP" hint="MCP client เช่น Claude เพิ่ม server ด้วย URL /mcp แล้ววาง key นี้ในหน้าอนุญาต หรือส่ง key เป็น Bearer token">
+            <select className="form-input" value={mcp} onChange={e => setMcp(e.target.value)}>
+              <option value="read">อ่านอย่างเดียว (แนะนำเริ่มต้น)</option>
+              <option value="write">อ่าน + ส่งงานร่าง/ลงมือ (งานลงมือยังต้องอนุมัติ)</option>
+              <option value="off">ปิด ใช้ REST API เท่านั้น</option>
+            </select>
           </Field>
           <Field label="IP ที่อนุญาต" hint="เช่น IP ภายนอกของออฟฟิศที่ DGX Spark ใช้ออกอินเทอร์เน็ต หรือ CIDR 203.0.113.0/24 คั่นด้วยจุลภาค เว้นว่าง = ทุกที่">
             <input className="form-input" value={ips} onChange={e => setIps(e.target.value)} placeholder="203.0.113.10, 198.51.100.0/24" />

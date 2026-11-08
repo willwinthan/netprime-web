@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { Env } from "./rbac";
 import { rateLimited } from "../utils/ratelimit";
 import { sha256Hex } from "../utils/secretbox";
+import { ASSERTION_HEADER, verifyAssertion } from "../utils/agentAssertion";
 
 /**
  * API-key authentication for the public REST API (/api/v1). Separate from rbac(): keys belong to
@@ -146,6 +147,7 @@ export function withinWindow(hours: string | null, days: string | null, now = ne
 interface KeyRow {
   id: string; name: string; kind: ApiKeyKind; scopes: string; rate_limit_per_minute: number; daily_limit: number | null;
   allowed_hours: string | null; allowed_days: string | null; allowed_ips: string | null; paused_at: string | null; last_used_at: string | null;
+  mcp_access: "off" | "read" | "write";
 }
 
 const clientAddress = (c: Context<ApiEnv>) => c.req.header("CF-Connecting-IP") || "local";
@@ -179,19 +181,28 @@ export interface ApiKeyOptions {
 export function apiKey(scope?: ApiScope, options: ApiKeyOptions = {}): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
     c.header("Cache-Control", "no-store");
-    const raw = presentedKey(c.req.header("Authorization"), c.req.header("X-API-Key"));
-    if (!raw || !API_KEY_RE.test(raw)) return c.json({ error: "ต้องส่ง API key ที่ถูกต้อง (Authorization: Bearer npk_…)", code: "unauthorized" }, 401);
-    const row = await c.env.DB.prepare(`SELECT id, name, kind, scopes, rate_limit_per_minute, daily_limit, allowed_hours, allowed_days, allowed_ips,
-        paused_at, last_used_at FROM api_keys
-      WHERE key_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`)
-      .bind(await sha256Hex(raw), new Date().toISOString()).first<KeyRow>();
+    // In-process call from the MCP endpoint (utils/agentAssertion.ts), or a raw key.
+    const assertion = await verifyAssertion(c.env.JWT_SECRET, c.req.header(ASSERTION_HEADER));
+    let row: KeyRow | null;
+    const columns = `id, name, kind, scopes, rate_limit_per_minute, daily_limit, allowed_hours, allowed_days, allowed_ips, paused_at, last_used_at, mcp_access
+      FROM api_keys WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`;
+    if (assertion) {
+      row = await c.env.DB.prepare(`SELECT ${columns} AND id = ?`).bind(new Date().toISOString(), assertion.keyId).first<KeyRow>();
+    } else {
+      const raw = presentedKey(c.req.header("Authorization"), c.req.header("X-API-Key"));
+      if (!raw || !API_KEY_RE.test(raw)) return c.json({ error: "ต้องส่ง API key ที่ถูกต้อง (Authorization: Bearer npk_…)", code: "unauthorized" }, 401);
+      row = await c.env.DB.prepare(`SELECT ${columns} AND key_hash = ?`).bind(new Date().toISOString(), await sha256Hex(raw)).first<KeyRow>();
+    }
     if (!row) return c.json({ error: "API key ไม่ถูกต้อง ถูกเพิกถอน หรือหมดอายุ", code: "unauthorized" }, 401);
     const agent = row.kind === "agent";
-    const ip = clientAddress(c);
+    const ip = assertion ? assertion.ip : clientAddress(c);
 
     // From here on, every answer an agent key gets is logged, refusals included.
     const respond = async (): Promise<Response | void> => {
       if (row.paused_at) return c.json({ error: "key นี้ถูกหยุดใช้งานชั่วคราวโดยผู้ดูแล", code: "key_paused" }, 403);
+      if (assertion && (row.mcp_access === "off" || (assertion.mode === "read" && c.req.method !== "GET"))) {
+        return c.json({ error: row.mcp_access === "off" ? "key นี้ไม่ได้เปิดใช้ผ่าน MCP" : "key นี้ใช้ผ่าน MCP ได้เฉพาะอ่านข้อมูล", code: "mcp_not_allowed" }, 403);
+      }
       if (!ipAllowed(row.allowed_ips, ip)) return c.json({ error: "ไม่อนุญาตให้ใช้ key นี้จาก IP นี้", code: "ip_not_allowed" }, 403);
       if (!withinWindow(row.allowed_hours, row.allowed_days)) {
         return c.json({ error: "อยู่นอกช่วงเวลาที่อนุญาตให้ key นี้ทำงาน (เวลาไทย)", code: "outside_allowed_hours",
@@ -229,7 +240,7 @@ export function apiKey(scope?: ApiScope, options: ApiKeyOptions = {}): Middlewar
       const status = refused ? refused.status : c.res.status;
       const actionId = c.res.headers.get("X-Agent-Action-Id");
       later(c, c.env.DB.prepare("INSERT INTO agent_activity (api_key_id, method, path, status, ip, action_id) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(row.id, c.req.method, (url.pathname + url.search).slice(0, 500), status, ip.slice(0, 64), refused ? null : actionId).run());
+        .bind(row.id, assertion ? `MCP ${c.req.method}` : c.req.method, (url.pathname + url.search).slice(0, 500), status, ip.slice(0, 64), refused ? null : actionId).run());
     }
     if (refused) return refused;
   };

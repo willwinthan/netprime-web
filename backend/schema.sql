@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS course_live_sessions;
 DROP TABLE IF EXISTS session_meetings;
 DROP TABLE IF EXISTS sso_identities;
 DROP TABLE IF EXISTS sso_providers;
+DROP TABLE IF EXISTS agent_autonomy_rules;
 DROP TABLE IF EXISTS agent_activity;
 DROP TABLE IF EXISTS agent_actions;
 DROP TABLE IF EXISTS api_keys;
@@ -2121,7 +2122,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     allowed_hours TEXT,  -- "HH:MM-HH:MM" Asia/Bangkok; NULL = any time
     allowed_days TEXT,   -- ISO weekdays "1,2,3,4,5" (1 = Monday); NULL = every day
     allowed_ips TEXT,    -- comma-separated IPs or IPv4 CIDRs; NULL = anywhere
-    paused_at TEXT
+    paused_at TEXT,
+    -- MCP access (migration 0038): off, read tools only, or read + draft/act tools
+    mcp_access TEXT NOT NULL DEFAULT 'read' CHECK(mcp_access IN ('off', 'read', 'write'))
 );
 
 -- Work an agent asked for. "act" tools wait here for a person to approve; "draft" tools run at once
@@ -2146,7 +2149,8 @@ CREATE TABLE IF NOT EXISTS agent_actions (
     executed_at TEXT,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    auto_rule_id TEXT                   -- rule that approved it (migration 0038); NULL = a person decided
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_actions_idempotency ON agent_actions (api_key_id, idempotency_key); -- NULL keys never collide
 CREATE INDEX IF NOT EXISTS idx_agent_actions_status ON agent_actions (status, created_at);
@@ -2165,6 +2169,22 @@ CREATE TABLE IF NOT EXISTS agent_activity (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_activity_key ON agent_activity (api_key_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_activity_created ON agent_activity (created_at);
+
+-- Auto-approval rules: an act tool request from this key that meets the conditions runs at once,
+-- as the person who created the rule (their permissions still apply), up to max_per_day a day.
+CREATE TABLE IF NOT EXISTS agent_autonomy_rules (
+    id TEXT PRIMARY KEY,
+    api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    tool TEXT NOT NULL,
+    conditions_json TEXT NOT NULL DEFAULT '{}',
+    max_per_day INTEGER NOT NULL DEFAULT 20 CHECK(max_per_day BETWEEN 1 AND 1000),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    note TEXT,
+    created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_autonomy_rules_key ON agent_autonomy_rules (api_key_id, tool);
 
 -- Enterprise SSO identity providers (OIDC). partner_id maps an organization's own IdP.
 CREATE TABLE IF NOT EXISTS sso_providers (

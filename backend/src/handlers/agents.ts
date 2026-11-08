@@ -1,6 +1,7 @@
-import { Hono } from "hono";
+import { Hono, Context } from "hono";
 import { Env, rbac } from "../middleware/rbac";
 import { currentPermissions, permit } from "../utils/permissions";
+import { AUTONOMY, RuleRow, bangkokDayStart, parseConditions } from "../utils/agentTools";
 import {
   ACTION_SELECT, ActionRow, actionEvent, auditAgent, expireActions, isWriteTool, presentAction, runAction, toolByName, describeTool, TOOLS
 } from "../utils/agentTools";
@@ -146,4 +147,112 @@ agentsAdminRouter.post("/admin/agents/keys/:id/resume", async (c) => {
   if (!res.meta.changes) return c.json({ error: "ไม่พบ agent key ที่ถูกหยุดไว้" }, 404);
   await auditAgent(db, id, c.get("user").id, "resume", "api_key", id);
   return c.json({ message: "เปิดใช้ agent นี้อีกครั้งแล้ว" });
+});
+
+// ---------- Phase 4: auto-approval rules (integrations.manage) ----------
+
+const needsAdmin = async (c: Context<Env, any>) =>
+  (await currentPermissions(c)).has("integrations.manage") ? null : c.json({ error: "การตั้งกฎอนุมัติอัตโนมัติต้องมีสิทธิ์ integrations.manage" }, 403);
+
+const presentRule = (r: RuleRow & { agent_name?: string; created_by_name?: string; used_today?: number }) => {
+  let conditions: unknown = {};
+  try { conditions = JSON.parse(r.conditions_json); } catch { conditions = {}; }
+  return { id: r.id, api_key_id: r.api_key_id, agent_name: r.agent_name ?? null, tool: r.tool, tool_label: toolByName(r.tool)?.label ?? r.tool, conditions,
+    max_per_day: r.max_per_day, enabled: !!r.enabled, note: r.note, created_by_name: r.created_by_name ?? null, used_today: r.used_today ?? 0,
+    created_at: r.created_at, updated_at: r.updated_at };
+};
+
+const RULE_SELECT = `SELECT r.*, k.name AS agent_name, u.name AS created_by_name,
+    (SELECT COUNT(*) FROM agent_actions a WHERE a.auto_rule_id = r.id AND a.decided_at >= ?) AS used_today
+  FROM agent_autonomy_rules r JOIN api_keys k ON k.id = r.api_key_id LEFT JOIN users u ON u.id = r.created_by`;
+
+/**
+ * Rules, the condition catalog per tool, and a 30-day track record per agent and tool (how often
+ * people approved, rejected or saw a failure) to decide where more autonomy is earned.
+ */
+agentsAdminRouter.get("/admin/agents/rules", async (c) => {
+  const denied = await needsAdmin(c);
+  if (denied) return denied;
+  const db = c.env.DB;
+  const [rules, stats] = await Promise.all([
+    db.prepare(`${RULE_SELECT} ORDER BY k.name, r.tool`).bind(bangkokDayStart()).all<RuleRow & { agent_name: string; created_by_name: string; used_today: number }>(),
+    db.prepare(`SELECT a.api_key_id, k.name AS agent_name, a.tool,
+        SUM(CASE WHEN a.status = 'executed' AND a.auto_rule_id IS NULL THEN 1 ELSE 0 END) AS approved,
+        SUM(CASE WHEN a.status = 'executed' AND a.auto_rule_id IS NOT NULL THEN 1 ELSE 0 END) AS auto_approved,
+        SUM(CASE WHEN a.status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+        SUM(CASE WHEN a.status = 'failed' THEN 1 ELSE 0 END) AS failed,
+        SUM(CASE WHEN a.status = 'pending' THEN 1 ELSE 0 END) AS pending
+      FROM agent_actions a JOIN api_keys k ON k.id = a.api_key_id
+      WHERE a.tier = 'act' AND a.created_at >= ? GROUP BY a.api_key_id, a.tool ORDER BY k.name, a.tool`)
+      .bind(new Date(Date.now() - 30 * 86_400_000).toISOString()).all()
+  ]);
+  return c.json({
+    rules: rules.results.map(presentRule),
+    catalog: Object.entries(AUTONOMY).map(([tool, def]) => ({ tool, label: toolByName(tool)?.label ?? tool, conditions: def.conditions })),
+    stats: stats.results
+  });
+});
+
+agentsAdminRouter.post("/admin/agents/rules", async (c) => {
+  const denied = await needsAdmin(c);
+  if (denied) return denied;
+  const db = c.env.DB;
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  const keyId = typeof body?.api_key_id === "string" ? body.api_key_id : "";
+  const tool = typeof body?.tool === "string" ? body.tool : "";
+  const key = await db.prepare("SELECT id FROM api_keys WHERE id = ? AND kind = 'agent' AND revoked_at IS NULL").bind(keyId).first();
+  if (!key) return c.json({ error: "ไม่พบ agent key" }, 404);
+  const conditions = parseConditions(tool, body?.conditions);
+  if (typeof conditions === "string") return c.json({ error: conditions }, 400);
+  const maxPerDay = body?.max_per_day === undefined ? 20 : Number(body.max_per_day);
+  if (!Number.isInteger(maxPerDay) || maxPerDay < 1 || maxPerDay > 1000) return c.json({ error: "จำนวนต่อวันต้องเป็น 1–1,000" }, 400);
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 300) || null : null;
+  const id = `rul_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await db.prepare(`INSERT INTO agent_autonomy_rules (id, api_key_id, tool, conditions_json, max_per_day, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, keyId, tool, JSON.stringify(conditions), maxPerDay, note, c.get("user").id).run();
+  await auditAgent(db, keyId, c.get("user").id, "create", "agent_rule", id, { tool, conditions, max_per_day: maxPerDay });
+  const row = await db.prepare(`${RULE_SELECT} WHERE r.id = ?`).bind(bangkokDayStart(), id).first<any>();
+  return c.json({ rule: presentRule(row) }, 201);
+});
+
+agentsAdminRouter.patch("/admin/agents/rules/:id", async (c) => {
+  const denied = await needsAdmin(c);
+  if (denied) return denied;
+  const db = c.env.DB;
+  const id = c.req.param("id");
+  const existing = await db.prepare("SELECT * FROM agent_autonomy_rules WHERE id = ?").bind(id).first<RuleRow>();
+  if (!existing) return c.json({ error: "ไม่พบกฎนี้" }, 404);
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+  const values: Record<string, unknown> = {};
+  if (body?.conditions !== undefined) {
+    const conditions = parseConditions(existing.tool, body.conditions);
+    if (typeof conditions === "string") return c.json({ error: conditions }, 400);
+    values.conditions_json = JSON.stringify(conditions);
+  }
+  if (body?.max_per_day !== undefined) {
+    const n = Number(body.max_per_day);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) return c.json({ error: "จำนวนต่อวันต้องเป็น 1–1,000" }, 400);
+    values.max_per_day = n;
+  }
+  if (body?.enabled !== undefined) values.enabled = body.enabled ? 1 : 0;
+  if (body?.note !== undefined) values.note = typeof body.note === "string" ? body.note.trim().slice(0, 300) || null : null;
+  const keys = Object.keys(values);
+  if (!keys.length) return c.json({ error: "ไม่มีข้อมูลที่ต้องแก้ไข" }, 400);
+  // Whoever changes a rule becomes the person its actions run as.
+  await db.prepare(`UPDATE agent_autonomy_rules SET ${keys.map(k => `${k} = ?`).join(", ")}, created_by = ?, updated_at = ? WHERE id = ?`)
+    .bind(...keys.map(k => values[k]), c.get("user").id, nowIso(), id).run();
+  await auditAgent(db, existing.api_key_id, c.get("user").id, "update", "agent_rule", id, values);
+  const row = await db.prepare(`${RULE_SELECT} WHERE r.id = ?`).bind(bangkokDayStart(), id).first<any>();
+  return c.json({ rule: presentRule(row) });
+});
+
+agentsAdminRouter.delete("/admin/agents/rules/:id", async (c) => {
+  const denied = await needsAdmin(c);
+  if (denied) return denied;
+  const db = c.env.DB;
+  const existing = await db.prepare("SELECT api_key_id, tool FROM agent_autonomy_rules WHERE id = ?").bind(c.req.param("id")).first<{ api_key_id: string; tool: string }>();
+  if (!existing) return c.json({ error: "ไม่พบกฎนี้" }, 404);
+  await db.prepare("DELETE FROM agent_autonomy_rules WHERE id = ?").bind(c.req.param("id")).run();
+  await auditAgent(db, existing.api_key_id, c.get("user").id, "delete", "agent_rule", c.req.param("id"), { tool: existing.tool });
+  return c.json({ message: "ลบกฎแล้ว งานถัดไปจะกลับไปรอคนอนุมัติ" });
 });

@@ -17,11 +17,11 @@ export function setInternalDispatcher(fn: Dispatcher) {
 export interface InternalResponse { status: number; data: any }
 
 export async function dispatchInternal(env: Env["Bindings"], ctx: ExecutionContext | undefined, authorization: string,
-  method: string, path: string, body?: unknown): Promise<InternalResponse> {
+  method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<InternalResponse> {
   if (!dispatcher) throw new Error("Internal dispatcher is not registered");
   const request = new Request(`https://internal.invalid/api${path}`, {
     method,
-    headers: { Authorization: authorization, "Content-Type": "application/json" },
+    headers: { ...(authorization ? { Authorization: authorization } : {}), "Content-Type": "application/json", ...extraHeaders },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const response = await dispatcher(request, env, ctx);

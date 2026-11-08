@@ -5,6 +5,9 @@ import {
   ACTION_SELECT, ActionRow, TOOLS, describeTool, expireActions, inputHash, isFailure, isWriteTool, presentAction, toolByName, runAction, actionEvent
 } from "../utils/agentTools";
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_NAMES } from "../utils/webhooks";
+import { matchingRule, auditAgent, RuleRow, type WriteTool } from "../utils/agentTools";
+import { parseRoles, permissionsForRoles, primaryRole, rolesColumn } from "../utils/permissions";
+import jwt from "@tsndr/cloudflare-worker-jwt";
 
 /**
  * Agent-facing part of /api/v1 (mounted into publicApiRouter). Read endpoints for the coordinator's
@@ -283,8 +286,40 @@ agentApiRouter.post("/actions", apiKey(), async (c) => {
     row = (await loadOwnAction(c, id))!;
     return c.json({ data: presentAction(row) }, row.status === "executed" ? 201 : 422);
   }
+  const rule = await matchingRule(db, key.id, tool.name, value as Record<string, unknown>, preview);
+  if (rule) {
+    const done = await autoApprove(c, row, rule, tool);
+    if (done) return c.json({ data: presentAction(done), auto_approved: true, rule_id: rule.id }, done.status === "executed" ? 201 : 422);
+  }
   return c.json({ data: presentAction(row), requires_approval: true }, 202);
 });
+
+/**
+ * Phase 4: runs a queued action at once under an auto-approval rule, as the rule's creator. The
+ * creator must still be active and hold agents.approve plus the tool's permission; otherwise the
+ * action simply stays pending for a person. The staff route gets a two-minute token for the creator.
+ */
+async function autoApprove(c: Context<ApiEnv>, row: ActionRow, rule: RuleRow, tool: WriteTool): Promise<ActionRow | null> {
+  const db = c.env.DB;
+  const owner = await db.prepare(`SELECT u.id, u.email, u.name, u.status, u.partner_id, COALESCE(u.staff_role, u.role) AS primary_role, ${rolesColumn("u")} AS role_list
+    FROM users u WHERE u.id = ?`).bind(rule.created_by)
+    .first<{ id: string; email: string; name: string; status: string; partner_id: string | null; primary_role: string; role_list: string | null }>();
+  if (!owner || owner.status !== "active") return null;
+  const roles = parseRoles(owner.role_list, owner.primary_role);
+  const granted = new Set<string>(await permissionsForRoles(db, roles));
+  if (!granted.has("agents.approve") || (tool.approverPermission && !granted.has(tool.approverPermission))) return null;
+  const now = nowIso();
+  const claimed = await db.prepare(`UPDATE agent_actions SET status = 'executing', decided_by = ?, decided_at = ?, decision_note = ?, auto_rule_id = ?, updated_at = ?
+    WHERE id = ? AND status = 'pending'`).bind(owner.id, now, `อนุมัติอัตโนมัติตามกฎ${rule.note ? `: ${rule.note}` : ""}`.slice(0, 500), rule.id, now, row.id).run();
+  if (!claimed.meta.changes) return null;
+  await auditAgent(db, row.api_key_id, owner.id, "agent_auto_approve", "agent_action", row.id, { tool: row.tool, summary: row.summary, rule_id: rule.id });
+  const token = await jwt.sign({ id: owner.id, email: owner.email, name: owner.name, role: primaryRole(roles), roles, partner_id: owner.partner_id,
+    exp: Math.floor(Date.now() / 1000) + 120, iat_ms: Date.now(), jti: crypto.randomUUID(), auto_rule_id: rule.id } as any, c.env.JWT_SECRET);
+  const key = c.get("apiKey");
+  await runAction({ env: c.env, executionCtx: executionCtxOf(c), actionId: row.id, agent: { id: key.id, name: key.name },
+    approver: { id: owner.id, name: owner.name, authorization: `Bearer ${token}` } }, row);
+  return loadOwnAction(c, row.id);
+}
 
 function executionCtxOf(c: Context<ApiEnv>): ExecutionContext | undefined {
   try { return c.executionCtx; } catch { return undefined; }

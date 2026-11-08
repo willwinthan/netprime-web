@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Bot, Check, X, RefreshCw, Pause, AlertTriangle } from "lucide-react";
-import { useApi } from "../hooks/useApi";
+import { can, useApi } from "../hooks/useApi";
+import { AutonomyPanel } from "../components/agents/AutonomyPanel";
 import { Chip, Empty, ErrorBox, Modal, Field, tableStyle, thStyle, tdStyle, formatDateTime } from "../components/site-admin/ui";
 import { Notice } from "../components/settings/shared";
 
@@ -15,7 +16,7 @@ interface Action {
   id: string; tool: string; tool_label: string; tier: "draft" | "act"; status: string; summary: string; reason: string | null;
   input: Record<string, unknown> | null; preview: Preview | null; result: unknown; error: string | null;
   agent_name: string | null; api_key_id: string; decided_by_name: string | null; decided_at: string | null; decision_note: string | null;
-  executed_at: string | null; expires_at: string; created_at: string; updated_at: string; approver_permission?: string | null; can_approve?: boolean;
+  executed_at: string | null; expires_at: string; created_at: string; updated_at: string; approver_permission?: string | null; can_approve?: boolean; auto_approved?: boolean;
 }
 interface AgentRow {
   id: string; name: string; description: string | null; prefix: string; paused_at: string | null; revoked_at: string | null;
@@ -33,7 +34,7 @@ const STATUS: Record<string, { label: string; color: string; bg: string }> = {
   expired: { label: "หมดเวลา", color: "var(--text-muted)", bg: "rgba(100,116,139,0.1)" }
 };
 const statusChip = (status: string) => { const s = STATUS[status] ?? STATUS.pending; return <Chip label={s.label} color={s.color} bg={s.bg} />; };
-const TABS = [["pending", "รออนุมัติ"], ["history", "ประวัติ"], ["agents", "agent และบันทึกการเรียก"]] as const;
+const TABS = [["pending", "รออนุมัติ"], ["history", "ประวัติ"], ["agents", "agent และบันทึกการเรียก"], ["rules", "อนุมัติอัตโนมัติ"]] as const;
 type Tab = typeof TABS[number][0];
 
 export const AgentQueuePage: React.FC = () => {
@@ -50,6 +51,7 @@ export const AgentQueuePage: React.FC = () => {
   const load = async () => {
     try {
       setError(null);
+      if (tab === "rules") return;
       if (tab === "agents") {
         const d = await api.get<{ agents: AgentRow[]; activity: ActivityRow[] }>("/admin/agents/activity?limit=200");
         setAgents(d.agents); setActivity(d.activity);
@@ -79,7 +81,7 @@ export const AgentQueuePage: React.FC = () => {
         <button className="tech-button-outline" onClick={load}><RefreshCw size={16} />รีเฟรช</button>
       </div>
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
-        {TABS.map(([key, label]) => (
+        {TABS.filter(([key]) => key !== "rules" || can(api.user, "integrations.manage")).map(([key, label]) => (
           <button key={key} className={tab === key ? "tech-button-primary" : "tech-button-outline"} onClick={() => setTab(key)}>
             {label}{key === "pending" && counts.pending ? ` (${counts.pending})` : ""}
           </button>
@@ -123,13 +125,15 @@ export const AgentQueuePage: React.FC = () => {
                 <td style={tdStyle}><div><strong>{a.tool_label}</strong>{a.tier === "draft" && <span style={{ fontSize: "12px", color: "var(--text-muted)" }}> · ร่าง (ทำทันที)</span>}</div>
                   <div style={{ fontSize: "13px" }}>{a.summary}</div>
                   {a.error && <div style={{ fontSize: "12px", color: "var(--danger)" }}>{a.error}</div>}</td>
-                <td style={tdStyle}>{statusChip(a.status)}</td>
+                <td style={tdStyle}>{statusChip(a.status)}{a.auto_approved && <div style={{ marginTop: 4 }}><Chip label="อัตโนมัติ" color="#7c3aed" bg="rgba(124,58,237,0.1)" /></div>}</td>
                 <td style={{ ...tdStyle, fontSize: "13px" }}>{a.decided_by_name ?? "-"}{a.decision_note && <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{a.decision_note}</div>}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
       ))}
+
+      {tab === "rules" && <AutonomyPanel />}
 
       {tab === "agents" && (
         <div style={{ display: "grid", gap: "16px" }}>

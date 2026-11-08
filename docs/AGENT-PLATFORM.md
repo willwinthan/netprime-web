@@ -2,14 +2,14 @@
 
 ระบบนี้**ไม่ได้สร้าง agent เอง** แต่เปิดช่องให้ agent ภายนอกต่อเข้ามาได้ เช่น Claude, Hermes ที่รันบน DGX Spark ในออฟฟิศ หรือ agent ใดก็ได้ที่เรียก HTTP API ได้ ทุก agent ใช้ **agent key** ของตัวเอง ระบบจึงรู้เสมอว่าใครทำอะไร งานที่ส่งถึงคนหรือเกี่ยวกับเงินต้องรอคนกดอนุมัติก่อน
 
-สถานะ: **ระยะที่ 1 เสร็จแล้ว** (migration `0037_agent_platform.sql`)
+สถานะ: **ครบทั้ง 4 ระยะ** (migration `0037_agent_platform.sql` และ `0038_agent_mcp_autonomy.sql`)
 
 | ระยะ | เนื้อหา | สถานะ |
 |---|---|---|
-| 1 | agent key, คิวรออนุมัติ, API v1 ส่วนงานประสานงาน, ฟีดเหตุการณ์แบบดึงเอง | ✅ |
-| 2 | MCP server แบบอ่านอย่างเดียว (Agents SDK `createMcpHandler` + Workers OAuth Provider) โดยใช้ `GET /v1/tools` เป็นต้นแบบ | ⏳ |
-| 3 | เปิด tool ระดับร่าง/ลงมือผ่าน MCP โดยยังผ่านคิวเดิม | ⏳ |
-| 4 | ให้ agent ทำเองได้มากขึ้นทีละเรื่อง (เช่น อนุมัติอัตโนมัติตามเงื่อนไข) | ⏳ |
+| 1 | agent key, คิวรออนุมัติ, API v1 ส่วนงานประสานงาน, ฟีดเหตุการณ์แบบดึงเอง | ✅ (หัวข้อ 1–5) |
+| 2 | MCP server แบบอ่าน (Agents SDK `createMcpHandler` + Workers OAuth Provider) | ✅ (หัวข้อ 7) |
+| 3 | tool ระดับร่าง/ลงมือผ่าน MCP โดยยังผ่านคิวเดิม | ✅ (หัวข้อ 7) |
+| 4 | กฎอนุมัติอัตโนมัติ พร้อมสถิติผลงานของ agent | ✅ (หัวข้อ 8) |
 
 ## 1. ตัวตนของ agent (agent key)
 
@@ -123,6 +123,49 @@ GET /api/v1/events?since=1234&types=registration.created,inquiry.created,order.p
 
 ข้อแนะนำ: ตั้ง IP allowlist เป็น IP ขาออกของออฟฟิศ ตั้งช่วงเวลาให้ตรงเวลาทำงาน ให้ scope ระดับลงมือเฉพาะเรื่องที่ต้องใช้ และใช้ idempotency key ทุกครั้งที่ส่งงาน เพื่อให้ retry ได้ปลอดภัย
 
+## 7. MCP server (ระยะที่ 2–3)
+
+URL คือ **`<API origin>/mcp`** ไม่มี `/api` นำหน้า (เช่น `https://netprime-lms-api.<account>.workers.dev/mcp`) ใช้ Streamable HTTP แบบ stateless ผ่าน `createMcpHandler` ของ Agents SDK ทุกคำขอสร้าง MCP server ใหม่ที่มีเฉพาะ tool ที่ key นั้นใช้ได้
+
+ต่อได้ 2 แบบ ทั้งสองแบบผูกกับ agent key หนึ่งตัวเสมอ:
+
+| วิธี | ใช้กับ | ขั้นตอน |
+|---|---|---|
+| **Bearer agent key** | agent ที่ไม่มีหน้าจอ เช่น Hermes บน DGX Spark | ส่ง `Authorization: Bearer npk_…` ไปที่ `/mcp` |
+| **OAuth 2.1** | MCP client ที่เพิ่ม server ด้วย URL เช่น Claude (custom connector) | client ค้นหา `/.well-known/oauth-authorization-server` แล้วลงทะเบียนเองที่ `/oauth/register` เปิดหน้า `/oauth/authorize` ให้คนวาง agent key หนึ่งครั้ง แล้วรับ token ที่ `/oauth/token` (PKCE) token มีอายุ 1 ชั่วโมงและต่ออายุด้วย refresh token |
+
+ข้อมูล OAuth (client, grant, token) เก็บใน KV `SESSIONS` ตาม prefix ของ provider จึงไม่ต้องเพิ่ม binding ใหม่ ถ้าเพิกถอนหรือหยุด key การเชื่อมต่อ OAuth ก็ใช้ไม่ได้ทันทีเช่นกัน ถ้าในอนาคตผูก API กับ route แบบ `api.<โดเมน>/api/*` ต้องเพิ่ม `/mcp`, `/oauth/*` และ `/.well-known/oauth-*` ด้วย
+
+**การใช้ผ่าน MCP** (`api_keys.mcp_access` ตั้งในหน้า API keys):
+- `read` (ค่าเริ่มต้น): เห็นเฉพาะ tool อ่าน คือ `whoami`, `get_action`, `list_my_actions` และ tool อ่านตาม scope
+- `write`: เพิ่ม tool ร่าง/ลงมือตาม scope และ `cancel_action` ทุก tool รับ `dry_run`, `idempotency_key`, `reason`, `expires_in_hours` ได้ tool ระดับลงมือมี `destructiveHint` และยังเข้าคิวรออนุมัติเหมือนเดิม
+- `off`: ใช้ได้เฉพาะ REST API
+
+**ความปลอดภัย:** ทุก tool call ส่งต่อไปยัง route `/api/v1` เดิมภายใน Worker พร้อม assertion ที่เซ็น HMAC ด้วย `JWT_SECRET` (อายุ 60 วินาที, `utils/agentAssertion.ts`) การตรวจทุกอย่างในหัวข้อ 1 (pause, IP, ช่วงเวลา, scope, โควตา และบันทึก `agent_activity` ซึ่งขึ้นเป็น `MCP GET`/`MCP POST`) จึงทำงานเหมือนเรียก REST ตรง โหมด `read` ถูกบังคับซ้ำที่ฝั่ง v1 ด้วย (`mcp_not_allowed`)
+
+ตัวอย่างตั้งค่า client ที่รองรับ remote MCP พร้อม header:
+
+```json
+{ "mcpServers": { "netprime": { "url": "https://<API origin>/mcp", "headers": { "Authorization": "Bearer npk_…" } } } }
+```
+
+## 8. ปล่อยให้ agent ทำเองมากขึ้น (ระยะที่ 4)
+
+เมนู **คิวอนุมัติ AI agent → อนุมัติอัตโนมัติ** (สิทธิ์ `integrations.manage`):
+- **ผลงาน 30 วัน** แยกตาม agent และงาน: คนอนุมัติกี่ครั้ง (เป็น %) อนุมัติอัตโนมัติ ไม่อนุมัติ และไม่สำเร็จ ใช้ตัดสินว่างานไหนควรปล่อยให้ทำเอง
+- **กฎ** คือ agent หนึ่งตัวกับงานระดับลงมือหนึ่งงาน พร้อมเงื่อนไขและจำนวนสูงสุดต่อวัน (นับตามวันเวลาไทย) เมื่อ agent ส่งงานที่ตรงเงื่อนไข ระบบอนุมัติและทำทันที (ตอบ `201 auto_approved: true`) ในนามผู้ดูแลที่บันทึกกฎล่าสุด ผ่าน route เดิมด้วย token อายุ 2 นาที คนนั้นต้องยังใช้งานอยู่และมีสิทธิ์ของงานนั้น มิฉะนั้นงานจะรอคนอนุมัติตามปกติ
+
+| งาน | เงื่อนไขที่ตั้งได้ |
+|---|---|
+| `confirm_order` | ยอดคำสั่งซื้อสูงสุด (บังคับ), ต้องมีสลิป (ค่าเริ่มต้น ใช่), ยอดที่ได้รับต้องตรงพอดี (ค่าเริ่มต้น ใช่) |
+| `update_registration` | สถานะใหม่ที่อนุญาต (บังคับ), อนุญาตให้ส่งอีเมลแจ้งผู้สมัคร (ค่าเริ่มต้น ไม่), ที่นั่งต้องพอเสมอ |
+| `publish_session` | สถานะใหม่ที่อนุญาต (บังคับ) และต้องไม่มีคำเตือน |
+| `grant_enrollment` | คอร์สที่อนุญาต (บังคับ), เฉพาะผู้ที่ยังไม่เคยลงทะเบียน (ค่าเริ่มต้น ใช่) |
+| `send_email` | ประเภทผู้รับที่อนุญาต (ผู้ใช้/ผู้สมัคร/ข้อความติดต่อ/lead) และต้องไม่มีคำเตือน |
+| `publish_article`, `send_line` | ต้องไม่มีคำเตือนจากระบบ |
+
+ไม่มีกฎแบบ "อนุญาตทุกอย่าง" งานระดับร่างทำทันทีอยู่แล้วจึงไม่ต้องมีกฎ งานที่อนุมัติอัตโนมัติขึ้นป้าย "อัตโนมัติ" ในประวัติ และบันทึก audit `agent_auto_approve` ถ้าต้องการหยุดเร็วที่สุด ให้กด "หยุด" ที่ agent ซึ่งหยุดทั้งกฎและ MCP ทันที
+
 ## 6. ส่วนที่เกี่ยวข้องในโค้ด
 
 | ไฟล์ | หน้าที่ |
@@ -135,6 +178,11 @@ GET /api/v1/events?since=1234&types=registration.created,inquiry.created,order.p
 | `backend/src/handlers/agents.ts` | API ของคอนโซล `/api/admin/agents/*` |
 | `frontend-admin/src/pages/AgentQueuePage.tsx` | หน้าคิวอนุมัติ |
 | `frontend-admin/src/components/settings/ApiKeysPanel.tsx` | สร้างและแก้ agent key |
-| `tests/agents.test.mjs` | `pnpm run test:agents` |
+| `backend/migrations/0038_agent_mcp_autonomy.sql` | `api_keys.mcp_access`, ตาราง `agent_autonomy_rules`, `agent_actions.auto_rule_id` |
+| `backend/src/handlers/mcp.ts` | MCP server, OAuth provider และหน้าอนุญาต |
+| `backend/src/utils/agentAssertion.ts` | assertion ภายในที่ MCP ใช้เรียก v1 |
+| `frontend-admin/src/components/agents/AutonomyPanel.tsx` | แท็บอนุมัติอัตโนมัติ |
+| `tests/agents.test.mjs` | `pnpm run test:agents` (รวมกฎอนุมัติอัตโนมัติ) |
+| `tests/mcp.test.mjs` | `pnpm run test:mcp` (bearer key, OAuth, read/write) |
 
-ข้อควรรู้: ก่อน deploy backend รุ่นนี้ต้อง apply migration 0037 กับ D1 ก่อน (`pnpm run db:backup` แล้ว `wrangler d1 migrations apply`) เพราะ middleware อ่านคอลัมน์ใหม่ของ `api_keys` ถ้ายังไม่ได้ apply API key ทุกตัวรวม integration เดิมจะใช้ไม่ได้
+ข้อควรรู้: ก่อน deploy backend รุ่นนี้ต้อง apply migration 0037 และ 0038 กับ D1 ก่อน (`pnpm run db:backup` แล้ว `wrangler d1 migrations apply`) เพราะ middleware อ่านคอลัมน์ใหม่ของ `api_keys` ถ้ายังไม่ได้ apply API key ทุกตัวรวม integration เดิมจะใช้ไม่ได้

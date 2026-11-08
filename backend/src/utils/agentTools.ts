@@ -39,7 +39,7 @@ export interface ExecContext {
 }
 
 interface ToolBase { name: string; tier: ToolTier; scope: ApiScope; label: string; description: string }
-export interface ReadTool extends ToolBase { tier: "read"; endpoint: { method: "GET"; path: string } }
+export interface ReadTool extends ToolBase { tier: "read"; endpoint: { method: "GET"; path: string }; params: Record<string, ParamSpec> }
 export interface WriteTool<T = any> extends ToolBase {
   tier: "draft" | "act";
   /** Permission the approver needs on top of agents.approve (act tools). */
@@ -185,7 +185,7 @@ const updateRegistration: WriteTool<Parsed> = {
     if (notify && ["confirmed", "paid", "cancelled"].includes(String(v.status))) warnings.push(`ระบบจะส่งอีเมลแจ้ง ${reg.email}`);
     return {
       summary: `เปลี่ยนสถานะ ${reg.name} (${reg.session_title} ${reg.start_date}) จาก ${reg.status} เป็น ${v.status}`,
-      target: { registration_id: reg.id, session_id: reg.session_id, name: reg.name, email: reg.email, status: reg.status, attendees: reg.attendees, seats_left: Math.max(0, reg.capacity - reg.others) },
+      target: { registration_id: reg.id, session_id: reg.session_id, name: reg.name, email: reg.email, status: reg.status, attendees: reg.attendees, seats_left: Math.max(0, reg.capacity - reg.others), seats_ok: !holds || reg.others + reg.attendees <= reg.capacity },
       warnings
     };
   },
@@ -404,21 +404,37 @@ const updateInquiry: WriteTool<Parsed> = {
 
 // ---------- Read tools (discoverable GET endpoints) ----------
 
-const read = (name: string, scope: ApiScope, path: string, label: string, description: string): ReadTool =>
-  ({ name, tier: "read", scope, label, description, endpoint: { method: "GET", path } });
+const PAGE: Record<string, ParamSpec> = {
+  limit: { type: "number", description: "จำนวนต่อหน้า 1–200 (ค่าเริ่มต้น 50)" },
+  cursor: { type: "string", max: 200, description: "next_cursor จากหน้าก่อน" }
+};
+const SINCE: ParamSpec = { type: "string", max: 40, description: "เฉพาะรายการที่แก้ไขตั้งแต่เวลานี้ (ISO 8601)" };
+const DATE = (description: string): ParamSpec => ({ type: "string", max: 10, description });
+
+const read = (name: string, scope: ApiScope, path: string, label: string, description: string, params: Record<string, ParamSpec> = {}): ReadTool =>
+  ({ name, tier: "read", scope, label, description, endpoint: { method: "GET", path }, params });
 
 export const TOOLS: Tool[] = [
-  read("get_daily_ops_summary", "reports:read", "/ops/daily-summary", "สรุปงานประจำวัน", "งานที่ต้องทำวันนี้: รอบอบรมใกล้ถึง ผู้สมัครรอตรวจ สลิปรอยืนยัน ข้อความติดต่อใหม่ lead ใหม่ อีเมลส่งไม่สำเร็จ และงานของ agent ที่รออนุมัติ"),
-  read("get_report_summary", "reports:read", "/reports/summary", "รายงานสรุปช่วงเวลา", "ตัวเลขช่วงวันที่ ?from=YYYY-MM-DD&to=YYYY-MM-DD: ผู้ใช้ใหม่ การลงทะเบียนเรียน รายได้ ผู้สมัครอบรม lead และข้อความติดต่อ"),
-  read("list_training_sessions", "sessions:read", "/training-sessions", "รอบอบรม", "รอบอบรมพร้อมที่นั่งคงเหลือ กรอง ?status= ?from= ?to="),
-  read("list_registrations", "registrations:read", "/registrations", "ผู้สมัครรอบอบรม", "ผู้สมัคร กรอง ?session_id= ?status= ?since="),
-  read("list_leads", "leads:read", "/leads", "lead", "lead จากฟอร์ม กรอง ?status= ?form_id= ?since="),
-  read("list_inquiries", "inquiries:read", "/inquiries", "ข้อความติดต่อ", "ข้อความจากฟอร์มติดต่อ กรอง ?status= ?since="),
-  read("list_orders", "orders:read", "/orders", "คำสั่งซื้อ", "คำสั่งซื้อคอร์ส กรอง ?status="),
-  read("list_courses", "courses:read", "/courses", "คอร์ส", "คอร์สที่เผยแพร่แล้ว"),
-  read("list_users", "users:read", "/users", "ผู้ใช้", "ผู้ใช้ กรอง ?email="),
-  read("list_enrollments", "enrollments:read", "/enrollments", "การลงทะเบียนเรียน", "กรอง ?user_id= ?course_id= ?status="),
-  read("get_events", "events:read", "/events", "ฟีดเหตุการณ์", "เหตุการณ์ใหม่ตั้งแต่ ?since=<next_since> (agent ดึงเอง ไม่ต้องเปิดรับ webhook)"),
+  read("get_daily_ops_summary", "reports:read", "/ops/daily-summary", "สรุปงานประจำวัน", "งานที่ต้องทำวันนี้: รอบอบรมใกล้ถึง ผู้สมัครรอตรวจ สลิปรอยืนยัน ข้อความติดต่อใหม่ lead ใหม่ อีเมลส่งไม่สำเร็จ และงานของ agent ที่รออนุมัติ",
+    { date: DATE("วันที่ YYYY-MM-DD (เวลาไทย ค่าเริ่มต้นวันนี้)") }),
+  read("get_report_summary", "reports:read", "/reports/summary", "รายงานสรุปช่วงเวลา", "ตัวเลขช่วงวันที่: ผู้ใช้ใหม่ การลงทะเบียนเรียน รายได้ ผู้สมัครอบรม lead และข้อความติดต่อ",
+    { from: DATE("วันเริ่ม YYYY-MM-DD"), to: DATE("วันสิ้นสุด YYYY-MM-DD") }),
+  read("list_training_sessions", "sessions:read", "/training-sessions", "รอบอบรม", "รอบอบรมพร้อมที่นั่งคงเหลือ",
+    { status: { type: "string", enum: ["draft", "open", "closed", "cancelled"], description: "สถานะ" }, from: DATE("จบไม่ก่อนวันนี้ YYYY-MM-DD"), to: DATE("เริ่มไม่หลังวันนี้ YYYY-MM-DD"), ...PAGE }),
+  read("list_registrations", "registrations:read", "/registrations", "ผู้สมัครรอบอบรม", "ผู้สมัครรอบอบรม",
+    { session_id: { type: "string", max: 100, description: "id รอบอบรม" }, status: { type: "string", enum: REG_STATUSES, description: "สถานะ" }, since: SINCE, ...PAGE }),
+  read("list_leads", "leads:read", "/leads", "lead", "lead จากฟอร์มบนเว็บไซต์",
+    { status: { type: "string", enum: ["new", "contacted", "qualified", "converted", "lost"], description: "สถานะ" }, form_id: { type: "string", max: 100, description: "id ฟอร์ม" }, since: SINCE, ...PAGE }),
+  read("list_inquiries", "inquiries:read", "/inquiries", "ข้อความติดต่อ", "ข้อความจากฟอร์มติดต่อ",
+    { status: { type: "string", enum: ["new", "in_progress", "closed"], description: "สถานะ" }, since: SINCE, ...PAGE }),
+  read("list_orders", "orders:read", "/orders", "คำสั่งซื้อ", "คำสั่งซื้อคอร์ส",
+    { status: { type: "string", enum: ["pending", "partial", "paid", "rejected", "cancelled", "expired", "refunded"], description: "สถานะ" }, ...PAGE }),
+  read("list_courses", "courses:read", "/courses", "คอร์ส", "คอร์สที่เผยแพร่แล้ว", { ...PAGE }),
+  read("list_users", "users:read", "/users", "ผู้ใช้", "ผู้ใช้ในระบบ", { email: { type: "string", max: 254, description: "ค้นด้วยอีเมล" }, ...PAGE }),
+  read("list_enrollments", "enrollments:read", "/enrollments", "การลงทะเบียนเรียน", "การลงทะเบียนเรียนคอร์ส",
+    { user_id: { type: "string", max: 100, description: "id ผู้เรียน" }, course_id: { type: "string", max: 100, description: "id คอร์ส" }, status: { type: "string", enum: ["active", "suspended", "completed"], description: "สถานะ" }, ...PAGE }),
+  read("get_events", "events:read", "/events", "ฟีดเหตุการณ์", "เหตุการณ์ใหม่ตั้งแต่ since (ส่ง next_since จากครั้งก่อน) เช่น registration.created inquiry.created order.paid action.updated",
+    { since: { type: "string", max: 15, description: "next_since จากครั้งก่อน (ว่าง = 24 ชั่วโมงล่าสุด)" }, types: { type: "string", max: 300, description: "ชื่อเหตุการณ์คั่นด้วยจุลภาค" }, limit: { type: "number", description: "สูงสุด 500" } }),
   updateLead, updateInquiry,
   confirmOrder, updateRegistration, publishSession, publishArticle, grantEnrollment, sendEmailTool, sendLine
 ];
@@ -426,18 +442,22 @@ export const TOOLS: Tool[] = [
 export const toolByName = (name: unknown): Tool | undefined => typeof name === "string" ? TOOLS.find(t => t.name === name) : undefined;
 export const isWriteTool = (tool: Tool): tool is WriteTool => tool.tier !== "read";
 
-/** Catalog entry (GET /v1/tools): JSON Schema input, so MCP clients can use it as is later. */
-export function describeTool(tool: Tool) {
-  const base = { name: tool.name, tier: tool.tier, scope: tool.scope, label: tool.label, description: tool.description };
-  if (!isWriteTool(tool)) return { ...base, requires_approval: false, endpoint: tool.endpoint };
-  const properties = Object.fromEntries(Object.entries(tool.params).map(([key, p]) => [key, {
-    type: p.type, description: p.description, ...(p.enum ? { enum: p.enum } : {}), ...(p.max ? { maxLength: p.max } : {})
+/** JSON Schema for a parameter list (GET /v1/tools and the MCP tool list). */
+export function jsonSchemaFor(params: Record<string, ParamSpec>, extra: Record<string, unknown> = {}) {
+  const properties: Record<string, unknown> = Object.fromEntries(Object.entries(params).map(([key, p]) => [key, {
+    type: p.type, description: p.description, ...(p.enum ? { enum: [...p.enum] } : {}), ...(p.max && p.type === "string" ? { maxLength: p.max } : {})
   }]));
   return {
-    ...base, requires_approval: tool.tier === "act", approver_permission: tool.approverPermission ?? null,
-    endpoint: { method: "POST", path: "/actions" },
-    input_schema: { type: "object", additionalProperties: false, required: Object.entries(tool.params).filter(([, p]) => p.required).map(([k]) => k), properties }
+    type: "object" as const, additionalProperties: false, properties: { ...properties, ...extra },
+    required: Object.entries(params).filter(([, p]) => p.required).map(([k]) => k)
   };
+}
+
+/** Catalog entry (GET /v1/tools): JSON Schema input, used as is by the MCP server. */
+export function describeTool(tool: Tool) {
+  const base = { name: tool.name, tier: tool.tier, scope: tool.scope, label: tool.label, description: tool.description, input_schema: jsonSchemaFor(tool.params) };
+  if (!isWriteTool(tool)) return { ...base, requires_approval: false, endpoint: tool.endpoint };
+  return { ...base, requires_approval: tool.tier === "act", approver_permission: tool.approverPermission ?? null, endpoint: { method: "POST", path: "/actions" } };
 }
 
 // ---------- Queue ----------
@@ -446,7 +466,7 @@ export interface ActionRow {
   id: string; api_key_id: string; tool: string; tier: "draft" | "act"; input_json: string; input_hash: string; idempotency_key: string | null;
   summary: string; preview_json: string | null; reason: string | null; status: string; result_json: string | null; error: string | null;
   decided_by: string | null; decided_at: string | null; decision_note: string | null; executed_at: string | null; expires_at: string; created_at: string; updated_at: string;
-  api_key_name?: string; decided_by_name?: string | null;
+  auto_rule_id?: string | null; api_key_name?: string; decided_by_name?: string | null;
 }
 
 const safeJson = (text: string | null) => { try { return text ? JSON.parse(text) : null; } catch { return null; } };
@@ -455,7 +475,7 @@ export function presentAction(row: ActionRow, forStaff = false) {
   return {
     id: row.id, tool: row.tool, tier: row.tier, status: row.status, summary: row.summary, reason: row.reason,
     input: safeJson(row.input_json), preview: safeJson(row.preview_json), result: safeJson(row.result_json), error: row.error,
-    idempotency_key: row.idempotency_key, requires_approval: row.tier === "act",
+    idempotency_key: row.idempotency_key, requires_approval: row.tier === "act", auto_approved: !!row.auto_rule_id,
     decided_at: row.decided_at, decision_note: row.decision_note, executed_at: row.executed_at, expires_at: row.expires_at,
     created_at: row.created_at, updated_at: row.updated_at,
     ...(forStaff ? { api_key_id: row.api_key_id, agent_name: row.api_key_name ?? null, decided_by_name: row.decided_by_name ?? null } : {})
@@ -523,3 +543,131 @@ export async function runAgentJobs(env: { DB: D1Database }): Promise<void> {
 }
 
 export { isFailure };
+
+// ---------- Phase 4: auto-approval rules ----------
+
+/**
+ * Conditions an admin can set per act tool. A request from the rule's agent key that meets them
+ * (checked against the fresh preview) runs at once as the rule's creator, up to max_per_day a day.
+ * Anything else still waits for a person. There is deliberately no "anything goes" rule.
+ */
+export interface ConditionSpec { type: "boolean" | "number" | "list"; label: string; options?: readonly string[]; default?: unknown; required?: boolean }
+
+type Conditions = Record<string, unknown>;
+type Check = (c: Conditions, input: Record<string, unknown>, preview: Preview) => string | null;
+
+const listOf = (value: unknown) => Array.isArray(value) ? value.map(String) : [];
+
+export const AUTONOMY: Record<string, { conditions: Record<string, ConditionSpec>; check: Check }> = {
+  confirm_order: {
+    conditions: {
+      require_slip: { type: "boolean", label: "ต้องมีสลิปแนบแล้ว", default: true },
+      exact_amount: { type: "boolean", label: "ยอดที่ได้รับต้องเท่ากับยอดที่ต้องชำระพอดี", default: true },
+      max_amount: { type: "number", label: "ยอดคำสั่งซื้อสูงสุด (บาท)", required: true }
+    },
+    check: (c, input, p) => {
+      if (c.require_slip !== false && !p.target.slip_uploaded) return "ยังไม่มีสลิป";
+      if (c.exact_amount !== false && Number(input.amount_received) !== Number(p.target.amount)) return "ยอดไม่ตรง";
+      if (Number(p.target.amount) > Number(c.max_amount)) return "ยอดเกินที่กำหนด";
+      return null;
+    }
+  },
+  update_registration: {
+    conditions: {
+      statuses: { type: "list", label: "สถานะใหม่ที่อนุญาต", options: REG_STATUSES, required: true },
+      allow_notify: { type: "boolean", label: "อนุญาตให้ส่งอีเมลแจ้งผู้สมัคร", default: false }
+    },
+    check: (c, input, p) => {
+      if (!listOf(c.statuses).includes(String(input.status))) return "สถานะนี้ไม่อยู่ในกฎ";
+      if (p.target.seats_ok === false) return "ที่นั่งไม่พอ";
+      if (input.notify !== false && c.allow_notify !== true && ["confirmed", "paid", "cancelled"].includes(String(input.status))) return "กฎไม่อนุญาตให้ส่งอีเมล";
+      return null;
+    }
+  },
+  publish_session: {
+    conditions: { statuses: { type: "list", label: "สถานะใหม่ที่อนุญาต", options: ["open", "closed", "cancelled"], required: true } },
+    check: (c, input, p) => !listOf(c.statuses).includes(String(input.status)) ? "สถานะนี้ไม่อยู่ในกฎ" : p.warnings.length ? "มีคำเตือน" : null
+  },
+  publish_article: {
+    conditions: {},
+    check: (_c, _input, p) => p.warnings.length ? "มีคำเตือน" : null
+  },
+  grant_enrollment: {
+    conditions: {
+      course_ids: { type: "list", label: "คอร์สที่อนุญาต (id)", required: true },
+      new_only: { type: "boolean", label: "เฉพาะผู้ที่ยังไม่เคยลงทะเบียนคอร์สนี้", default: true }
+    },
+    check: (c, _input, p) => {
+      if (!listOf(c.course_ids).includes(String(p.target.course_id))) return "คอร์สนี้ไม่อยู่ในกฎ";
+      if (c.new_only !== false && p.target.existing_status) return "เคยลงทะเบียนแล้ว";
+      return null;
+    }
+  },
+  send_email: {
+    conditions: { contact_sources: { type: "list", label: "ผู้รับที่อนุญาต", options: ["user", "registration", "inquiry", "lead"], required: true } },
+    check: (c, _input, p) => !listOf(c.contact_sources).includes(String(p.target.contact_source)) ? "ผู้รับประเภทนี้ไม่อยู่ในกฎ" : p.warnings.length ? "มีคำเตือน" : null
+  },
+  send_line: {
+    conditions: {},
+    check: (_c, _input, p) => p.warnings.length ? "มีคำเตือน" : null
+  }
+};
+
+/** Validates and fills defaults; returns an error message or the normalized conditions. */
+export function parseConditions(tool: string, raw: unknown): Conditions | string {
+  const def = AUTONOMY[tool];
+  if (!def) return "เครื่องมือนี้ตั้งอนุมัติอัตโนมัติไม่ได้";
+  const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const unknown = Object.keys(input).filter(k => !(k in def.conditions));
+  if (unknown.length) return `ไม่รู้จักเงื่อนไข ${unknown.join(", ")}`;
+  const out: Conditions = {};
+  for (const [key, spec] of Object.entries(def.conditions)) {
+    const value = input[key] ?? spec.default;
+    if (value === undefined || value === null || value === "" || (spec.type === "list" && Array.isArray(value) && !value.length)) {
+      if (spec.required) return `ต้องระบุเงื่อนไข: ${spec.label}`;
+      continue;
+    }
+    if (spec.type === "boolean") {
+      if (typeof value !== "boolean") return `${spec.label} ต้องเป็น true/false`;
+      out[key] = value;
+    } else if (spec.type === "number") {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0 || n > 10_000_000) return `${spec.label} ต้องเป็นตัวเลข`;
+      out[key] = n;
+    } else {
+      if (!Array.isArray(value) || value.length > 50) return `${spec.label} ต้องเป็นรายการ (ไม่เกิน 50)`;
+      const items = [...new Set(value.map(v => String(v).trim()).filter(Boolean))];
+      if (spec.options && items.some(i => !spec.options!.includes(i))) return `${spec.label} ต้องเป็นค่าใน ${spec.options.join(", ")}`;
+      if (items.some(i => i.length > 100)) return `${spec.label} ยาวเกินไป`;
+      out[key] = items;
+    }
+  }
+  return out;
+}
+
+export interface RuleRow {
+  id: string; api_key_id: string; tool: string; conditions_json: string; max_per_day: number; enabled: number; note: string | null;
+  created_by: string; created_at: string; updated_at: string;
+}
+
+/** Start of today in Asia/Bangkok as an ISO instant (daily caps). */
+export function bangkokDayStart(now = new Date()): string {
+  const t = new Date(now.getTime() + 7 * 3_600_000);
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) - 7 * 3_600_000).toISOString();
+}
+
+/** First enabled rule of this key and tool whose conditions hold and whose daily cap has room. */
+export async function matchingRule(db: D1Database, apiKeyId: string, tool: string, input: Record<string, unknown>, preview: Preview): Promise<RuleRow | null> {
+  const def = AUTONOMY[tool];
+  if (!def) return null;
+  const rules = await db.prepare("SELECT * FROM agent_autonomy_rules WHERE api_key_id = ? AND tool = ? AND enabled = 1 ORDER BY created_at")
+    .bind(apiKeyId, tool).all<RuleRow>();
+  for (const rule of rules.results) {
+    const conditions = safeJson(rule.conditions_json) ?? {};
+    if (def.check(conditions, input, preview) !== null) continue;
+    const used = await db.prepare("SELECT COUNT(*) AS n FROM agent_actions WHERE auto_rule_id = ? AND decided_at >= ?")
+      .bind(rule.id, bangkokDayStart()).first<{ n: number }>();
+    if ((used?.n ?? 0) < rule.max_per_day) return rule;
+  }
+  return null;
+}

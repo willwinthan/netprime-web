@@ -388,7 +388,7 @@ platformRouter.post("/admin/platform/webhook-deliveries/:id/redeliver", async (c
 // ---------- API keys ----------
 
 const KEY_LIST_FIELDS = `k.id, k.name, k.kind, k.description, k.prefix, k.scopes, k.rate_limit_per_minute, k.daily_limit, k.allowed_hours, k.allowed_days,
-  k.allowed_ips, k.paused_at, k.created_at, k.last_used_at, k.revoked_at, k.expires_at, u.name AS created_by_name`;
+  k.allowed_ips, k.paused_at, k.mcp_access, k.created_at, k.last_used_at, k.revoked_at, k.expires_at, u.name AS created_by_name`;
 
 platformRouter.get("/admin/platform/api-keys", async (c) => {
   const rows = await c.env.DB.prepare(`SELECT ${KEY_LIST_FIELDS} FROM api_keys k LEFT JOIN users u ON u.id = k.created_by
@@ -401,7 +401,7 @@ platformRouter.get("/admin/platform/api-keys", async (c) => {
 
 type KeySettings = Partial<{
   description: string | null; daily_limit: number | null; allowed_hours: string | null; allowed_days: string | null; allowed_ips: string | null;
-  scopes: string[]; rate_limit_per_minute: number;
+  scopes: string[]; rate_limit_per_minute: number; mcp_access: string;
 }>;
 
 /** Validates the editable key settings present in `body` (create and PATCH share it). */
@@ -440,6 +440,10 @@ function parseKeySettings(body: Record<string, unknown>, requireScopes: boolean)
     if (days === false) return "วันที่อนุญาตต้องเป็นเลขวัน 1–7 (1 = จันทร์)";
     out.allowed_days = days;
   }
+  if (body.mcp_access !== undefined) {
+    if (!["off", "read", "write"].includes(String(body.mcp_access))) return "การใช้ผ่าน MCP ต้องเป็น off, read หรือ write";
+    out.mcp_access = String(body.mcp_access);
+  }
   if (body.allowed_ips !== undefined) {
     const ips = normalizeIps(body.allowed_ips);
     if (ips === false) return "IP ที่อนุญาตต้องเป็น IP หรือ IPv4 CIDR คั่นด้วยจุลภาค (ไม่เกิน 20 รายการ)";
@@ -456,7 +460,7 @@ platformRouter.post("/admin/platform/api-keys", async (c) => {
   if (kind !== "integration" && kind !== "agent") return c.json({ error: "ชนิดของ key ต้องเป็น integration หรือ agent" }, 400);
   const settings = parseKeySettings(body!, true);
   if (typeof settings === "string") return c.json({ error: settings }, 400);
-  if (kind === "integration" && (settings.daily_limit || settings.allowed_hours || settings.allowed_days || settings.allowed_ips)) {
+  if (kind === "integration" && (settings.daily_limit || settings.allowed_hours || settings.allowed_days || settings.allowed_ips || settings.mcp_access)) {
     return c.json({ error: "โควตารายวัน ช่วงเวลา และ IP ใช้ได้กับ agent key เท่านั้น" }, 400);
   }
   const limit = settings.rate_limit_per_minute ?? (kind === "agent" ? 60 : 120);
@@ -471,9 +475,10 @@ platformRouter.post("/admin/platform/api-keys", async (c) => {
   const secret = "npk_" + randomToken(32);
   const id = newId("key");
   await c.env.DB.prepare(`INSERT INTO api_keys (id, name, key_hash, prefix, scopes, rate_limit_per_minute, expires_at, created_by,
-      kind, description, daily_limit, allowed_hours, allowed_days, allowed_ips) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      kind, description, daily_limit, allowed_hours, allowed_days, allowed_ips, mcp_access) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(id, name, await sha256Hex(secret), secret.slice(0, 12), JSON.stringify(settings.scopes), limit, expiresAt, c.get("user").id,
-      kind, settings.description ?? null, settings.daily_limit ?? null, settings.allowed_hours ?? null, settings.allowed_days ?? null, settings.allowed_ips ?? null).run();
+      kind, settings.description ?? null, settings.daily_limit ?? null, settings.allowed_hours ?? null, settings.allowed_days ?? null, settings.allowed_ips ?? null,
+      kind === "agent" ? settings.mcp_access ?? "read" : "off").run();
   await audit(c, "create", "api_key", id, { name, kind, scopes: settings.scopes });
   const key = await c.env.DB.prepare(`SELECT ${KEY_LIST_FIELDS} FROM api_keys k LEFT JOIN users u ON u.id = k.created_by WHERE k.id = ?`).bind(id).first<Record<string, any>>();
   return c.json({ key: { ...key, scopes: settings.scopes }, secret, message: "คัดลอก API key เก็บไว้ ระบบจะไม่แสดงอีก" }, 201);
@@ -488,7 +493,7 @@ platformRouter.patch("/admin/platform/api-keys/:id", async (c) => {
   if (!row) return c.json({ error: "ไม่พบ API key หรือถูกเพิกถอนไปแล้ว" }, 404);
   const settings = parseKeySettings(body, false);
   if (typeof settings === "string") return c.json({ error: settings }, 400);
-  if (row.kind !== "agent" && ["daily_limit", "allowed_hours", "allowed_days", "allowed_ips"].some(k => (settings as Record<string, unknown>)[k] != null)) {
+  if (row.kind !== "agent" && ["daily_limit", "allowed_hours", "allowed_days", "allowed_ips", "mcp_access"].some(k => (settings as Record<string, unknown>)[k] != null)) {
     return c.json({ error: "โควตารายวัน ช่วงเวลา และ IP ใช้ได้กับ agent key เท่านั้น" }, 400);
   }
   if (typeof body.name === "string") {

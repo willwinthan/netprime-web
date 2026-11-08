@@ -371,3 +371,57 @@ test('time window, IP allowlist and daily quota', async () => {
   await expectStatus(`/api/admin/platform/api-keys/${agent.id}`, 400, { method: 'PATCH', token: admin, body: { allowed_hours: 'always' } });
   await expectStatus(`/api/admin/platform/api-keys/${agent.id}`, 403, { method: 'PATCH', token: coord, body: { daily_limit: 1 } });
 });
+
+// ==========================================
+// Phase 4: auto-approval rules
+// ==========================================
+
+test('auto-approval rules: validated, admin only, run within conditions and the daily cap', async () => {
+  await expectStatus('/api/admin/agents/rules', 403, { token: coord });
+  const rule = body => request('/api/admin/agents/rules', { method: 'POST', token: admin, body: { api_key_id: agent.id, ...body } });
+  assert.equal((await rule({ tool: 'update_inquiry', conditions: {} })).status, 400, 'draft tools need no rule');
+  assert.equal((await rule({ tool: 'confirm_order', conditions: {} })).status, 400, 'max_amount is required');
+  assert.equal((await rule({ tool: 'confirm_order', conditions: { max_amount: 1, anything: true } })).status, 400);
+  assert.equal((await rule({ tool: 'update_registration', conditions: { statuses: ['bogus'] } })).status, 400);
+  assert.equal((await rule({ api_key_id: 'key_nope', tool: 'confirm_order', conditions: { max_amount: 1 } })).status, 404);
+
+  const created = await rule({ tool: 'confirm_order', conditions: { max_amount: 100000, require_slip: false }, max_per_day: 1, note: 'ยอดตรงและไม่เกินแสน' });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const ruleId = created.data.rule.id;
+  assert.deepEqual(created.data.rule.conditions, { require_slip: false, exact_amount: true, max_amount: 100000 });
+
+  const order = async course => (await expectStatus('/api/student/orders', 201, { method: 'POST', token: student, body: { course_id: course } })).order;
+  const submit = (o, amount) => api('/api/v1/actions', agent.key, { method: 'POST', body: { tool: 'confirm_order', input: { order_id: o.id, amount_received: amount } } });
+
+  const first = await order('course_cf_d1_r2');
+  const wrong = await submit(first, 1);
+  assert.equal(wrong.status, 202, 'amount mismatch still waits for a person');
+  await api(`/api/v1/actions/${wrong.data.data.id}/cancel`, agent.key, { method: 'POST' });
+  const auto = await submit(first, first.amount);
+  assert.equal(auto.status, 201, JSON.stringify(auto.data));
+  assert.equal(auto.data.auto_approved, true);
+  assert.equal(auto.data.data.status, 'executed');
+  assert.match(auto.data.data.decision_note, /อนุมัติอัตโนมัติ/);
+  const paid = (await expectStatus(`/api/manage/orders?q=${first.reference}`, 200, { token: admin })).orders[0];
+  assert.equal(paid.status, 'paid');
+
+  const second = await order('course_nutanix_ncp');
+  const capped = await submit(second, second.amount);
+  assert.equal(capped.status, 202, 'daily cap of 1 reached');
+  await api(`/api/v1/actions/${capped.data.data.id}/cancel`, agent.key, { method: 'POST' });
+
+  await expectStatus(`/api/admin/agents/rules/${ruleId}`, 200, { method: 'PATCH', token: admin, body: { max_per_day: 5, enabled: false } });
+  assert.equal((await submit(second, second.amount)).status, 202, 'disabled rule does nothing');
+  const listed = await expectStatus('/api/admin/agents/rules', 200, { token: admin });
+  const row = listed.rules.find(r => r.id === ruleId);
+  assert.equal(row.used_today, 1);
+  assert.equal(row.enabled, false);
+  assert.ok(listed.catalog.some(t => t.tool === 'send_email'));
+  const stat = listed.stats.find(s => s.api_key_id === agent.id && s.tool === 'confirm_order');
+  assert.ok(stat.auto_approved >= 1 && stat.approved >= 1);
+
+  const audit = await expectStatus('/api/admin/site/audit?limit=100', 200, { token: admin });
+  assert.ok(audit.entries.some(e => e.action === 'agent_auto_approve' && e.entity_id === auto.data.data.id));
+  await expectStatus(`/api/admin/agents/rules/${ruleId}`, 200, { method: 'DELETE', token: admin });
+  await expectStatus(`/api/admin/agents/rules/${ruleId}`, 404, { method: 'DELETE', token: admin });
+});
