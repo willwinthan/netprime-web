@@ -9,8 +9,12 @@
     "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/server": "2.4.0",
     "@tsndr/cloudflare-worker-jwt": "^2.5.3",
-    "hono": "^4.4.2"
+    "agents": "0.33.0",
+    "hono": "^4.4.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240529.0",
