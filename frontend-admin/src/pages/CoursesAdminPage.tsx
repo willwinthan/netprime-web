@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { BookOpen, Search, CheckCircle2, Undo2, Archive, Eye, RefreshCw } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
+import { LESSON_TYPE_LABEL, LessonType } from "../components/course/types";
 import { Chip, Modal, Field, ErrorBox, Empty, tableStyle, thStyle, tdStyle, formatDateTime, formatBaht } from "../components/site-admin/ui";
 
 export type CourseStatus = "draft" | "review" | "published" | "archived";
@@ -22,7 +23,17 @@ interface AdminCourse {
 interface CourseList { courses: AdminCourse[]; instructors: Array<{ id: string; name: string }>; counts: Partial<Record<CourseStatus, number>> }
 interface Preview {
   course: AdminCourse & { cover_image_url?: string | null; access_duration_days?: number | null };
-  lessons: Array<{ id: string; title: string; video_provider: string; video_stream_uid: string | null; handout_r2_key: string | null; sort_order: number }>;
+  lessons: Array<{ id: string; title: string; type?: LessonType; video_provider: string; video_stream_uid: string | null; handout_r2_key: string | null; sort_order: number }>;
+}
+
+const VIDEO_PROVIDER_LABEL: Record<string, string> = { cloudflare: "อัปโหลด", youtube: "YouTube", vimeo: "Vimeo" };
+
+/** Lesson type for the preview list; only video lessons say whether the video is still missing. */
+function lessonSummary(lesson: Preview["lessons"][number]): string {
+  const type = lesson.type ?? "video";
+  if (type !== "video") return LESSON_TYPE_LABEL[type] ?? type;
+  const provider = VIDEO_PROVIDER_LABEL[lesson.video_provider] ?? lesson.video_provider;
+  return `วิดีโอ (${provider})${lesson.video_stream_uid ? "" : " • ยังไม่มีวิดีโอ"}`;
 }
 
 /** Course review queue and catalog control for holders of courses.approve (admins included). */
@@ -53,6 +64,9 @@ export const CoursesAdminPage: React.FC = () => {
   useEffect(() => { load(); }, [api.token, status, instructorId]);
 
   const act = async (course: AdminCourse, action: "approve" | "archive" | "send-back", body: unknown = {}) => {
+    if (action === "approve" && !window.confirm(course.status === "archived"
+      ? `เผยแพร่คอร์ส "${course.title}" อีกครั้ง? คอร์สจะกลับมาแสดงในแคตตาล็อกทันที`
+      : `อนุมัติและเผยแพร่คอร์ส "${course.title}"? คอร์สจะแสดงในแคตตาล็อกและเปิดให้ผู้เรียนซื้อได้ทันที`)) return;
     if (action === "archive" && !window.confirm(`นำคอร์ส "${course.title}" ออกจากแคตตาล็อก? ผู้เรียนที่ลงทะเบียนแล้วยังเรียนต่อได้`)) return;
     try {
       setBusy(course.id);
@@ -210,7 +224,7 @@ export const CoursesAdminPage: React.FC = () => {
                   <tr key={lesson.id}>
                     <td style={tdStyle}>{lesson.sort_order}. {lesson.title}</td>
                     <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-muted)" }}>
-                      {lesson.video_provider}{lesson.video_stream_uid ? "" : " (ยังไม่มีวิดีโอ)"}{lesson.handout_r2_key ? " • มีเอกสาร" : ""}
+                      {lessonSummary(lesson)}{lesson.handout_r2_key ? " • มีเอกสาร" : ""}
                     </td>
                   </tr>
                 ))}
