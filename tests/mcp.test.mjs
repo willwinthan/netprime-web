@@ -168,6 +168,8 @@ test('OAuth: discovery, dynamic registration, agent-key consent, PKCE token, MCP
   assert.match(html, /Claude Test/);
   assert.match(html, /agent key/);
   assert.equal(page.headers.get('x-frame-options'), 'DENY');
+  // Browsers check form-action against the redirect after the POST: the client's callback origin must be allowed.
+  assert.match(page.headers.get('content-security-policy') || '', /form-action 'self' https:\/\/client\.example[;\s]/);
 
   const post = body => fetch(`${base}/oauth/authorize`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
   assert.equal((await post({ oauth_query: query, agent_key: 'npk_wrong' })).status, 400);

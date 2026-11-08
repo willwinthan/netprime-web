@@ -148,16 +148,29 @@ async function serveMcp(request: Request, env: Bindings, ctx: ExecutionContext, 
 
 const SCOPES = ["agent"];
 
+/** CSP source for an OAuth redirect URI: its origin for http(s), its scheme for app links (claude:). */
+export function redirectSource(uri: string): string {
+  try {
+    const url = new URL(uri);
+    if (url.protocol === "https:" || url.protocol === "http:") return url.origin;
+    return /^[a-z][a-z0-9+.-]*:$/i.test(url.protocol) ? url.protocol : "";
+  } catch { return ""; }
+}
+
 /** GET shows the consent form; POST checks the pasted agent key and completes the grant. */
 async function authorizePage(request: Request, env: Bindings & { OAUTH_PROVIDER: any }): Promise<Response> {
   const url = new URL(request.url);
   const headers = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY",
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'", "Referrer-Policy": "no-referrer" };
+    "Referrer-Policy": "no-referrer" };
+  // Browsers apply form-action to the redirect after the POST too, so the client's redirect target
+  // (claude.ai, or a desktop app's custom scheme) must be allowed or the grant never arrives.
+  let formAction = "'self'";
+  const csp = () => `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'`;
   const page = (body: string, status = 200) => new Response(`<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>เชื่อมต่อ AI agent กับ NetPrime LMS</title><style>body{font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;color:#1e293b}
 .box{border:1px solid #e2e8f0;border-radius:12px;padding:20px}input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-family:monospace}
 button{margin-top:14px;background:#c2541a;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:15px;cursor:pointer}.muted{color:#64748b;font-size:13px}.err{color:#b91c1c}</style></head>
-<body><div class="box">${body}</div></body></html>`, { status, headers });
+<body><div class="box">${body}</div></body></html>`, { status, headers: { ...headers, "Content-Security-Policy": csp() } });
 
   let authRequest;
   const source = request.method === "POST" ? await request.formData() : null;
@@ -167,6 +180,7 @@ button{margin-top:14px;background:#c2541a;color:#fff;border:0;border-radius:8px;
   } catch (error) {
     return page(`<h2>คำขอเชื่อมต่อไม่ถูกต้อง</h2><p class="muted">${escapeHtml(error instanceof Error ? error.message : "")}</p>`, 400);
   }
+  formAction = `'self' ${redirectSource(authRequest.redirectUri)}`.trim();
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   const clientName = escapeHtml(client?.clientName || authRequest.clientId);
   const redirectHost = (() => { try { return escapeHtml(new URL(authRequest.redirectUri).host); } catch { return ""; } })();
