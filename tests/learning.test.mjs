@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
+import { expectStatus, login, request, watchVideoLesson, verifyEmail } from './helpers.mjs';
 
 let learner;
 before(async () => { learner = await login('student1@netprime.com', 'stud123'); });
@@ -50,6 +50,7 @@ async function account(admin, tag, roles) {
     body: { email, name: `บัญชี ${tag}`, roles, password: PASSWORD } });
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const session = await login(email, PASSWORD);
+  await verifyEmail(session.token);
   // DEMO-FREE100 opens the paid Workers course for this account.
   const order = await request('/api/student/orders', { method: 'POST', token: session.token,
     body: { course_id: 'course_cf_workers', voucher_code: 'DEMO-FREE100' } });

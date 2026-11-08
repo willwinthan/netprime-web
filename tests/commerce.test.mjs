@@ -2,7 +2,7 @@
 // organization quotes, abandoned-order reminders and sales reports. All payments are bank transfers confirmed by staff.
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { dangerCode, expectStatus, login, request } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request, verifyEmail } from './helpers.mjs';
 
 let admin, coord, student;
 let baseline;
@@ -35,7 +35,9 @@ async function freshLearner(tag, name = `ผู้เรียน ${tag}`) {
   const created = await request('/api/admin/accounts', { method: 'POST', token: admin.token,
     body: { email, name, role: 'student', password: 'commerce-test-pass-1' } });
   assert.equal(created.status, 201, JSON.stringify(created.data));
-  return login(email, 'commerce-test-pass-1');
+  const session = await login(email, 'commerce-test-pass-1');
+  await verifyEmail(session.token);
+  return session;
 }
 
 const order = (token, body) => request('/api/student/orders', { method: 'POST', token, body });

@@ -59,3 +59,15 @@ export async function watchVideoLesson(token, lessonId) {
   assert.equal(done.completed, 1, `video lesson ${lessonId} did not complete: ${JSON.stringify(done)}`);
   return done;
 }
+
+/**
+ * Confirms the account's email through the emailed-link flow (the local Worker returns the link as
+ * debug_url). Needed before a new learner can order or upload a slip: see
+ * signup.require_email_verification_for_payment in backend/src/utils/school.ts.
+ */
+export async function verifyEmail(token) {
+  const sent = await expectStatus('/api/auth/resend-verification', 200, { method: 'POST', token });
+  if (sent.email_verified) return;
+  const link = new URL(sent.debug_url).searchParams.get('token');
+  await expectStatus('/api/auth/verify-email', 200, { method: 'POST', body: { token: link } });
+}

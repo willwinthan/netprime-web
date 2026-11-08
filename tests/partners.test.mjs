@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, verifyEmail } from './helpers.mjs';
 
 let admin, acme, mit;
 before(async () => {
@@ -138,6 +138,7 @@ test('HR export is an Excel-friendly CSV with neutralised formulas', async () =>
 test('a course the employee paid for personally is not the organization\'s, even when it also sponsors it', async () => {
   const { student } = await addEmployee(acme.token, 'self-payer@example.invalid', { name: 'Self Payer' });
   const session = await login('self-payer@example.invalid', strong);
+  await verifyEmail(session.token);
   // Acme sponsors course_cf_d1_r2, but this learner buys it by bank transfer.
   const order = await request('/api/student/orders', { method: 'POST', token: session.token, body: { course_id: 'course_cf_d1_r2' } });
   assert.equal(order.status, 201, JSON.stringify(order.data));

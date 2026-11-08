@@ -1,7 +1,8 @@
 import { createPortal } from "react-dom";
 import React, { useEffect, useState } from "react";
 import { AlertCircle, Check, Copy, Tag, Upload, X } from "lucide-react";
-import { useApi } from "../../hooks/useApi";
+import { API_BASE_URL, hasRole, useApi } from "../../hooks/useApi";
+import { VerifyEmailNotice } from "../../pages/ProfilePage";
 
 // ==========================================
 // Bank-transfer orders for learners (replaces card checkout)
@@ -121,10 +122,31 @@ export const TransferInstructions: React.FC<{ order: CourseOrder; instructions: 
   </div>
 );
 
+// The school setting signup.require_email_verification_for_payment (on unless an admin turns it off).
+// Read once per page load; the server enforces the same rule, so a failed read just leaves it to the API.
+let paymentRule: Promise<boolean> | null = null;
+
+/** True while this learner must confirm their email before ordering or uploading a slip. */
+function usePaymentEmailGate(): boolean {
+  const api = useApi();
+  const [required, setRequired] = useState(false);
+  useEffect(() => {
+    paymentRule ??= fetch(`${API_BASE_URL}/public/platform`).then(r => r.ok ? r.json() : null)
+      .then(d => !!d && d.signup?.require_email_verification_for_payment !== false).catch(() => false);
+    paymentRule.then(setRequired);
+    // The cached session may predate a link opened in another tab.
+    if (api.user?.email_verified === false) api.refreshUser().catch(() => undefined);
+  }, []);
+  return required && api.user?.email_verified === false && !hasRole(api.user, "admin", "coordinator", "instructor");
+}
+
+const PAYMENT_EMAIL_TEXT = "ยืนยันอีเมลก่อนสั่งซื้อหรือแนบสลิป ใบเสร็จและการแจ้งเตือนการชำระเงินจะส่งไปที่";
+
 /** Slip upload for a pending order (PNG/JPG/WEBP/PDF ≤ 5 MB). */
 export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: CourseOrder) => void; installment?: OrderInstallment }> = ({ order, onUploaded, installment }) => {
   const target = installment ?? order;
   const api = useApi();
+  const mustVerify = usePaymentEmailGate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,6 +168,7 @@ export const SlipUpload: React.FC<{ order: CourseOrder; onUploaded: (order: Cour
     }
   };
 
+  if (mustVerify) return <VerifyEmailNotice text={PAYMENT_EMAIL_TEXT} />;
   return (
     <div style={{ ...box, borderStyle: "dashed" }}>
       <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: busy ? "wait" : "pointer", fontWeight: 600 }}>
@@ -185,6 +208,7 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
   const [buyer, setBuyer] = useState<BuyerTax>(EMPTY_BUYER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mustVerify = usePaymentEmailGate();
 
   // Reopen an existing open order instead of asking for a second one.
   useEffect(() => {
@@ -299,9 +323,10 @@ export const CourseOrderModal: React.FC<{ course: OrderCourse; onClose: () => vo
             )}
             <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>ชำระด้วยการโอนเงินผ่านธนาคารหรือพร้อมเพย์ ไม่มีการเก็บข้อมูลบัตร</p>
             {error && <p role="alert" style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</p>}
+            {mustVerify ? <VerifyEmailNotice text={PAYMENT_EMAIL_TEXT} /> :
             <button type="button" className="tech-button-primary" onClick={createOrder} disabled={busy || (wantTax && !buyerReady(buyer))} style={{ width: "100%" }}>
               {busy ? "กำลังสร้างคำสั่งซื้อ..." : voucher?.final_price === 0 ? "ลงทะเบียนเรียน" : "สร้างคำสั่งซื้อและดูวิธีโอนเงิน"}
-            </button>
+            </button>}
           </>
         )}
       </div>

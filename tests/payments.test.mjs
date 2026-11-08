@@ -1,7 +1,7 @@
 // Manual bank-transfer orders, staff confirmation, receipts, refunds and certificate revocation.
 import assert from 'node:assert/strict';
 import { test, before } from 'node:test';
-import { expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
+import { expectStatus, login, request, watchVideoLesson, verifyEmail } from './helpers.mjs';
 
 let admin, coord, student, other;
 before(async () => {
@@ -26,6 +26,37 @@ const createOrder = (token, course_id, voucher_code) =>
   request('/api/student/orders', { method: 'POST', token, body: { course_id, ...(voucher_code ? { voucher_code } : {}) } });
 
 const enrollmentOf = async (token, courseId) => (await expectStatus(`/api/courses/${courseId}`, 200, { token })).enrollment;
+
+test('ordering and slip upload need a confirmed email while the school setting is on (default)', async () => {
+  const pub = await expectStatus('/api/public/platform', 200);
+  assert.equal(pub.signup.require_email_verification_for_payment, true);
+  const email = `unverified-buyer-${Date.now()}@example.com`;
+  const reg = await expectStatus('/api/auth/register', 201, { method: 'POST', body: { email, name: 'ยังไม่ยืนยัน', password: 'buyer-password-123' } });
+  const token = reg.token;
+
+  const blocked = await createOrder(token, 'course_aws_net');
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.data.code, 'email_unverified');
+
+  // With the setting off the order goes through; turning it back on blocks the slip of that order.
+  const setPayment = on => expectStatus('/api/admin/platform/settings', 200, { token: admin.token, method: 'PUT', body: { signup: { require_email_verification_for_payment: on } } });
+  try {
+    await setPayment(false);
+    const created = await createOrder(token, 'course_aws_net');
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    await setPayment(true);
+    const slip = await uploadSlip(token, created.data.order.id);
+    assert.equal(slip.status, 403);
+    assert.equal(slip.data.code, 'email_unverified');
+
+    await expectStatus('/api/auth/verify-email', 200, { method: 'POST', body: { token: new URL(reg.debug_url).searchParams.get('token') } });
+    const after = await uploadSlip(token, created.data.order.id);
+    assert.equal(after.status, 200, JSON.stringify(after.data));
+    await expectStatus(`/api/student/orders/${created.data.order.id}/cancel`, 200, { method: 'POST', token });
+  } finally {
+    await setPayment(true);
+  }
+});
 
 test('card checkout is closed and the old webhook cannot activate anything', async () => {
   const session = await request('/api/student/checkout/session', { method: 'POST', token: student.token, body: { course_id: 'course_aws_net' } });
@@ -196,7 +227,9 @@ async function freshLearner(tag) {
   const created = await request('/api/admin/accounts', { method: 'POST', token: admin.token,
     body: { email, name: `ผู้เรียน ${tag}`, role: 'student', password: 'payments-test-pass-1' } });
   assert.equal(created.status, 201, JSON.stringify(created.data));
-  return login(email, 'payments-test-pass-1');
+  const session = await login(email, 'payments-test-pass-1');
+  await verifyEmail(session.token);
+  return session;
 }
 
 test('double confirmation issues one receipt and one enrollment', async () => {
