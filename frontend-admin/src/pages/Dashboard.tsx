@@ -149,6 +149,8 @@ export const Dashboard: React.FC = () => {
   // Certificate claims state
   const [certificate, setCertificate] = useState<any | null>(null);
   const [isClaimingCertificate, setIsClaimingCertificate] = useState(false);
+  const [certificateError, setCertificateError] = useState<string | null>(null);
+  const [finalExamRequired, setFinalExamRequired] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
   const certDialogRef = React.useRef<HTMLDialogElement>(null);
 
@@ -561,6 +563,7 @@ export const Dashboard: React.FC = () => {
   const selectCourse = async (courseId: string) => {
     try {
       setError(null);
+      setCertificateError(null);
       setSelectedCourseId(courseId);
       const data = await api.get<{
         course: Course;
@@ -595,6 +598,11 @@ export const Dashboard: React.FC = () => {
         // Old per-lesson practice quizzes: instructors now use "การวัดผล"; the tab shows only for courses that still have some.
         fetchQuizzes(courseId);
         
+        // The certificate box lists the final-exam rule only for courses that enforce one (finalExamBlock in assessments.ts).
+        api.get<{ requires_final_exam: boolean; exams: { is_final: number | boolean }[] }>(`/student/courses/${courseId}/assessments`)
+          .then(res => setFinalExamRequired(!!res.requires_final_exam && res.exams.some(e => !!e.is_final)))
+          .catch(() => setFinalExamRequired(false));
+
         // Fetch certificate if exists
         try {
           const certData = await api.get<any>(`/student/courses/${courseId}/certificate`);
@@ -604,6 +612,7 @@ export const Dashboard: React.FC = () => {
         }
       } else {
         setCertificate(null);
+        setFinalExamRequired(false);
         setNotes([]);
         setQuizAttempts([]);
       }
@@ -735,12 +744,13 @@ export const Dashboard: React.FC = () => {
     if (!selectedCourseId) return;
     try {
       setIsClaimingCertificate(true);
+      setCertificateError(null);
       const res = await api.post<{ certificate: any }>(`/student/courses/${selectedCourseId}/certificate`, {});
       setCertificate(res.certificate);
       setShowCertificateModal(true);
       fetchDashboardStats();
     } catch (err: any) {
-      alert(err.message || "รับใบประกาศนียบัตรไม่สำเร็จ");
+      setCertificateError(err.message || "รับใบประกาศนียบัตรไม่สำเร็จ");
     } finally {
       setIsClaimingCertificate(false);
     }
@@ -3428,7 +3438,9 @@ export const Dashboard: React.FC = () => {
                         borderRadius: "0.75rem"
                       }}>
                         <p style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "8px", lineHeight: "1.4" }}>
-                          🏆 <strong>เรียนครบทุกบทเรียนแล้ว</strong> ใบประกาศนียบัตรต้องเรียนครบทุกบทเรียนและตอบแบบทดสอบถูกอย่างน้อย 80%
+                          🏆 <strong>เรียนครบทุกบทเรียนแล้ว</strong> ใบประกาศนียบัตรต้องเรียนครบทุกบทเรียน
+                          {quizzes.length > 0 && " ตอบแบบทดสอบท้ายบทถูกอย่างน้อย 80%"}
+                          {finalExamRequired && " และสอบผ่านข้อสอบปลายภาค (ทำได้ที่แท็บ \"ข้อสอบและงาน\")"}
                         </p>
                         {certificate ? (
                           <button
@@ -3465,6 +3477,9 @@ export const Dashboard: React.FC = () => {
                           >
                             {isClaimingCertificate ? "กำลังสร้าง..." : "รับใบประกาศนียบัตร"}
                           </button>
+                        )}
+                        {certificateError && !certificate && (
+                          <p role="alert" style={{ fontSize: "11px", color: "var(--danger)", marginTop: "8px", lineHeight: "1.4" }}>{certificateError}</p>
                         )}
                       </div>
                     )}

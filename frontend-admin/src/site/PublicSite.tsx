@@ -174,9 +174,10 @@ export const PublicSite: React.FC<{ loggedIn: boolean; onLogin: (token: string, 
   const courseSlug = /^\/courses\/([^/]+)$/.exec(path)?.[1];
   // Re-render every page when the visitor switches TH/EN (page components read t() while rendering).
   useI18n();
-  // A signed-out visit to the console (an old bookmark, an expired session) asks to sign in.
-  const consolePath = !loggedIn && path === "/dashboard";
-  useEffect(() => { if (consolePath) setAuth("login"); }, [consolePath]);
+  // A signed-out visit to the console (an old bookmark, an expired session) or to a shared
+  // /login or /register link shows the home page with the sign-in dialog open.
+  const consolePath = !loggedIn && (path === "/dashboard" || path === "/login" || path === "/register");
+  useEffect(() => { if (consolePath) setAuth(path === "/register" ? "register" : "login"); }, [consolePath, path]);
 
   let page: React.ReactNode;
   // While the console takes over (the site animates out), render nothing rather than a 404.
