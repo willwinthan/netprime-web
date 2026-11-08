@@ -7,11 +7,13 @@ import { lineConfigured, linePushText, LineEnv } from "./line";
 import { checkEnrollment, enrollLearner, parseEnrollmentInput, EnrollmentInput } from "./enrollment";
 import { trackEvent } from "./events";
 import { sha256Hex } from "./secretbox";
+import { checkAgentSession, insertAgentArticle, insertAgentSession, parseAgentArticle, parseAgentSession } from "../handlers/site";
 
 /**
  * Agent tools, in three tiers:
  *   read   GET endpoints of /api/v1, listed here so an agent (or a future MCP server) can discover them
- *   draft  internal-only changes nobody outside sees (lead/inquiry status and notes); run at once
+ *   draft  internal-only changes nobody outside sees (lead/inquiry status and notes, draft training
+ *          sessions and articles that are not public until publish_session / publish_article); run at once
  *   act    anything that reaches people or money (email, LINE, payment confirmation, publishing,
  *          course access); queued in agent_actions until a person with the tool's permission approves
  *
@@ -402,6 +404,102 @@ const updateInquiry: WriteTool<Parsed> = {
   }
 };
 
+type Values = Record<string, any>;
+const present = (v: Parsed, skip: string[] = []) => Object.fromEntries(Object.entries(v).filter(([k, value]) => value !== null && !skip.includes(k)));
+/** Field rules of the console forms (handlers/site.ts). The stored input stays in tool-param form, so it re-parses. */
+const sessionValues = (v: Parsed) => parseAgentSession(present(v));
+const articleValues = (v: Parsed) => parseAgentArticle(present(v, ["submit_for_review"]), v.submit_for_review !== false);
+const DATE_PARAM = (description: string, required = false): ParamSpec => ({ type: "string", required, max: 10, description });
+
+const draftSession: WriteTool<Parsed> = {
+  name: "draft_session", tier: "draft", scope: "sessions:write",
+  label: "ร่างรอบอบรมใหม่", description: "สร้างรอบอบรมใหม่เป็นฉบับร่าง (ยังไม่แสดงบนเว็บ) เพื่อให้เจ้าหน้าที่ตรวจ แล้วเปิดรับสมัครด้วย publish_session",
+  params: {
+    title: { type: "string", required: true, max: 160, description: "ชื่อหลักสูตร" },
+    start_date: DATE_PARAM("วันเริ่ม YYYY-MM-DD", true),
+    end_date: DATE_PARAM("วันสิ้นสุด YYYY-MM-DD", true),
+    capacity: { type: "number", required: true, description: "จำนวนที่นั่ง 1–1000" },
+    price: { type: "number", description: "ราคาต่อคน (บาท) ค่าเริ่มต้น 0" },
+    mode: { type: "string", enum: ["classroom", "online", "hybrid"], description: "รูปแบบ (ค่าเริ่มต้น classroom)" },
+    vendor: { type: "string", max: 40, description: "แบรนด์/หมวด เช่น Cisco" },
+    description: { type: "string", max: 2000, description: "รายละเอียด" },
+    session_dates: { type: "string", max: 700, description: "วันอบรมเมื่อไม่ต่อเนื่อง คั่นด้วยจุลภาค เช่น 2027-03-01,2027-03-08 (วันแรก/วันสุดท้ายต้องตรงกับวันเริ่ม/วันสิ้นสุด)" },
+    time_text: { type: "string", max: 80, description: "เวลาอบรม เช่น 09:00–16:00" },
+    location: { type: "string", max: 200, description: "สถานที่" },
+    instructor_name: { type: "string", max: 120, description: "ชื่อวิทยากรที่แสดง" },
+    instructor_id: { type: "string", max: 80, description: "id บัญชีวิทยากร (ถ้ามี)" },
+    course_id: { type: "string", max: 80, description: "id คอร์สออนไลน์ที่เผยแพร่แล้วที่จะเชื่อม" },
+    registration_deadline: DATE_PARAM("วันปิดรับสมัคร YYYY-MM-DD")
+  },
+  parse(raw) {
+    const v = parseParams(this.params, raw);
+    if ("error" in v) return v;
+    const parsed = sessionValues(v);
+    return "error" in parsed ? parsed : v;
+  },
+  async preview(env, input) {
+    const parsed = sessionValues(input);
+    if ("error" in parsed) return fail(422, "invalid_input", parsed.error);
+    const v = parsed.values;
+    const checked = await checkAgentSession(env.DB, v);
+    if ("error" in checked) return fail(422, "invalid_input", checked.error);
+    const dates = v.start_date === v.end_date ? v.start_date : `${v.start_date} ถึง ${v.end_date}`;
+    return { summary: `ร่างรอบอบรม "${v.title}" ${dates} ${v.capacity} ที่นั่ง ราคา ${baht(v.price)} (ฉบับร่าง ยังไม่แสดงบนเว็บ)`,
+      target: { title: v.title, start_date: v.start_date, end_date: v.end_date, status: "draft" }, warnings: checked.warnings };
+  },
+  async execute(ctx, input) {
+    const parsed = sessionValues(input);
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    const v = parsed.values;
+    const session = await insertAgentSession(ctx.env.DB, v);
+    const id = String(session?.id ?? "");
+    await auditAgent(ctx.env.DB, ctx.agent.id, null, "create", "session", id, { title: v.title, start_date: v.start_date, status: "draft", action_id: ctx.actionId });
+    return { ok: true, result: { session } };
+  }
+};
+
+const draftArticle: WriteTool<Parsed> = {
+  name: "draft_article", tier: "draft", scope: "articles:write",
+  label: "ร่างบทความ", description: "สร้างบทความใหม่ (เนื้อหา Markdown) เป็นฉบับร่างหรือส่งตรวจ ไม่แสดงบนเว็บจนกว่าจะเผยแพร่ด้วย publish_article หรือเจ้าหน้าที่กดเผยแพร่",
+  params: {
+    title: { type: "string", required: true, max: 200, description: "หัวข้อ" },
+    body: { type: "string", required: true, max: 200_000, description: "เนื้อหาแบบ Markdown (ไม่ต้องใส่ชื่อเรื่องเป็น # หัวข้อซ้ำ เพราะหน้าเว็บแสดงชื่อเรื่องให้แล้ว)" },
+    excerpt: { type: "string", max: 300, description: "คำโปรย" },
+    category: { type: "string", max: 40, description: "หมวด" },
+    slug: { type: "string", max: 80, description: "ลิงก์บทความ a-z 0-9 และ - (เว้นว่างให้ระบบตั้งให้)" },
+    cover_url: { type: "string", max: 500, description: "URL รูปปก (https)" },
+    submit_for_review: { type: "boolean", description: "ส่งเข้าคิวตรวจของเจ้าหน้าที่ (ค่าเริ่มต้น true) หรือเก็บเป็นฉบับร่าง" }
+  },
+  parse(raw) {
+    const v = parseParams(this.params, raw);
+    if ("error" in v) return v;
+    const parsed = articleValues(v);
+    return "error" in parsed ? parsed : v;
+  },
+  async preview(env, input) {
+    const parsed = articleValues(input);
+    if ("error" in parsed) return fail(422, "invalid_input", parsed.error);
+    const v = parsed.values;
+    // Without a slug one is generated when the article is created (random suffix, never taken)
+    const taken = input.slug ? await env.DB.prepare("SELECT id FROM articles WHERE slug = ?").bind(v.slug).first<{ id: string }>() : null;
+    if (taken) return fail(409, "slug_taken", `ลิงก์บทความ ${v.slug} ถูกใช้แล้ว (${taken.id})`);
+    const warnings: string[] = [];
+    if (String(v.body).length < 300) warnings.push("เนื้อหาสั้นกว่า 300 ตัวอักษร");
+    if (!v.excerpt) warnings.push("ยังไม่มีคำโปรย");
+    return { summary: `ร่างบทความ "${v.title}"${input.slug ? ` (/blog/${v.slug})` : ""} ${v.status === "review" ? "ส่งเข้าคิวตรวจ" : "เก็บเป็นฉบับร่าง"} ยังไม่เผยแพร่`,
+      target: { slug: input.slug ?? null, status: v.status }, warnings };
+  },
+  async execute(ctx, input) {
+    const parsed = articleValues(input);
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    const v = parsed.values;
+    const article = await insertAgentArticle(ctx.env.DB, v);
+    if (article === "slug_taken") return { ok: false, error: `ลิงก์บทความ ${v.slug} ถูกใช้แล้ว` };
+    await auditAgent(ctx.env.DB, ctx.agent.id, null, "create", "article", String(article.id), { title: v.title, status: v.status, action_id: ctx.actionId });
+    return { ok: true, result: { article } };
+  }
+};
+
 // ---------- Read tools (discoverable GET endpoints) ----------
 
 const PAGE: Record<string, ParamSpec> = {
@@ -435,7 +533,7 @@ export const TOOLS: Tool[] = [
     { user_id: { type: "string", max: 100, description: "id ผู้เรียน" }, course_id: { type: "string", max: 100, description: "id คอร์ส" }, status: { type: "string", enum: ["active", "suspended", "completed"], description: "สถานะ" }, ...PAGE }),
   read("get_events", "events:read", "/events", "ฟีดเหตุการณ์", "เหตุการณ์ใหม่ตั้งแต่ since (ส่ง next_since จากครั้งก่อน) เช่น registration.created inquiry.created order.paid action.updated",
     { since: { type: "string", max: 15, description: "next_since จากครั้งก่อน (ว่าง = 24 ชั่วโมงล่าสุด)" }, types: { type: "string", max: 300, description: "ชื่อเหตุการณ์คั่นด้วยจุลภาค" }, limit: { type: "number", description: "สูงสุด 500" } }),
-  updateLead, updateInquiry,
+  updateLead, updateInquiry, draftSession, draftArticle,
   confirmOrder, updateRegistration, publishSession, publishArticle, grantEnrollment, sendEmailTool, sendLine
 ];
 

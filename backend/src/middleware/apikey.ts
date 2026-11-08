@@ -17,7 +17,7 @@ import { ASSERTION_HEADER, verifyAssertion } from "../utils/agentAssertion";
 export const API_SCOPES = [
   "users:read", "users:write", "courses:read", "enrollments:read", "enrollments:write", "orders:read",
   "sessions:read", "registrations:read", "leads:read", "inquiries:read", "reports:read", "events:read",
-  "leads:write", "inquiries:write",
+  "leads:write", "inquiries:write", "sessions:write", "articles:write",
   "orders:confirm", "registrations:write", "sessions:publish", "articles:publish", "messages:send"
 ] as const;
 export type ApiScope = typeof API_SCOPES[number];
@@ -36,6 +36,8 @@ export const API_SCOPE_LABELS: Record<ApiScope, string> = {
   "events:read": "ดึงฟีดเหตุการณ์ (GET /v1/events)",
   "leads:write": "ร่าง: เปลี่ยนสถานะและเพิ่มบันทึกของ lead",
   "inquiries:write": "ร่าง: เปลี่ยนสถานะและเพิ่มบันทึกของข้อความติดต่อ",
+  "sessions:write": "ร่าง: สร้างรอบอบรมใหม่เป็นฉบับร่าง (ยังไม่แสดงบนเว็บ)",
+  "articles:write": "ร่าง: เขียนบทความใหม่เป็นฉบับร่างหรือส่งตรวจ (ยังไม่เผยแพร่)",
   "orders:confirm": "ลงมือ: ขอยืนยันการชำระเงิน (ต้องมีคนอนุมัติ)",
   "registrations:write": "ลงมือ: ขอเปลี่ยนสถานะผู้สมัครและแจ้งผู้สมัคร (ต้องมีคนอนุมัติ)",
   "sessions:publish": "ลงมือ: ขอเปิด/ปิดรับสมัครรอบอบรม (ต้องมีคนอนุมัติ)",
