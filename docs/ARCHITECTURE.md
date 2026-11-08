@@ -175,7 +175,7 @@ erDiagram
 
 **ซื้อคอร์ส** — `POST /student/checkout/session` (ต้องมี `omise_token`) → server คิดราคา + voucher → สร้าง `payments` pending → สร้าง charge ที่ Omise → Omise เรียก webhook → server **อ่าน charge จาก Omise ซ้ำ** ตรวจ status/amount/currency/เจ้าของ → batch: payment completed + enrollment
 
-**เรียนจบและใบประกาศ** — progress คำนวณบน server จาก `lesson_progress` + `quiz_answers` เกณฑ์: เรียนครบทุกบท และตอบ quiz ถูก ≥ 80% → ออก `certificates` รหัส `NP-…` → ตรวจได้ที่ `/verify-certificates?code=…`
+**เรียนจบและใบประกาศ** — progress คำนวณบน server จาก `lesson_progress` + `quiz_answers` เกณฑ์: เรียนครบทุกบท และถ้าคอร์สเปิด `requires_final_exam` ต้องสอบผ่านข้อสอบปลายภาค (quiz ท้ายบทแบบเดิมไม่นับแล้ว) → ออก `certificates` รหัส `NP-…` → ตรวจได้ที่ `/verify-certificates?code=…`
 
 **ลงทะเบียนรอบอบรม** — ฟอร์มหน้าเว็บ → honeypot/rate limit/Turnstile → `INSERT … SELECT` ที่ตรวจที่นั่งในคำสั่งเดียว (กันจองเกิน) → ถ้าเต็มบันทึกเป็น `waitlist` → อีเมลผู้สมัครและเจ้าหน้าที่ผ่าน `waitUntil` → เจ้าหน้าที่เปลี่ยนสถานะใน console (ตรวจที่นั่งซ้ำตอนเปลี่ยน)
 

@@ -570,113 +570,14 @@ instructorRouter.get("/instructor/lessons/:id/quizzes", rbac(["instructor", "adm
 });
 
 /**
- * Add Quiz Question
- * POST /api/instructor/quizzes
+ * Old per-lesson practice quizzes are retired: they no longer count toward certificates and new ones
+ * are not created. Existing questions stay readable (GET above, learner practice tab); instructors use
+ * the question bank and exams ("การวัดผล", handlers/assessments.ts) instead.
+ * POST /api/instructor/quizzes, DELETE /api/instructor/quizzes/:id
  */
-instructorRouter.post("/instructor/quizzes", rbac(["instructor", "admin"]), async (c: Context<Env>) => {
-  const user = c.get("user");
-  const db = c.env.DB;
-  const { lesson_id, question, options_json, correct_option_index } = await c.req.json<{
-    lesson_id: string;
-    question: string;
-    options_json: string | string[];
-    correct_option_index: number;
-  }>();
-
-  if (!lesson_id || !question || options_json === undefined || correct_option_index === undefined) {
-    return c.json({ error: "ต้องระบุ lesson_id, question, options_json และ correct_option_index" }, 400);
-  }
-
-  try {
-    const lesson = await db
-      .prepare(
-        `SELECT c.instructor_id
-         FROM lessons l
-         INNER JOIN courses c ON l.course_id = c.id
-         WHERE l.id = ?`
-      )
-      .bind(lesson_id)
-      .first<{ instructor_id: string }>();
-
-    if (!lesson) {
-      return c.json({ error: "ไม่พบบทเรียน" }, 404);
-    }
-
-    if (!user.roles.includes("admin") && lesson.instructor_id !== user.id) {
-      return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: คุณไม่ได้เป็นผู้สอนคอร์สของบทเรียนนี้" }, 403);
-    }
-
-    let optionsStr = "";
-    if (typeof options_json === "string") {
-      // validate
-      JSON.parse(options_json);
-      optionsStr = options_json;
-    } else if (Array.isArray(options_json)) {
-      optionsStr = JSON.stringify(options_json);
-    } else {
-      return c.json({ error: "options_json ต้องเป็นอาร์เรย์ JSON หรือสตริงอาร์เรย์ JSON ที่ถูกต้อง" }, 400);
-    }
-
-    const quizId = "quiz_" + crypto.randomUUID().substring(0, 8);
-
-    await db
-      .prepare("INSERT INTO quizzes (id, lesson_id, question, options_json, correct_option_index) VALUES (?, ?, ?, ?, ?)")
-      .bind(quizId, lesson_id, question, optionsStr, Number(correct_option_index))
-      .run();
-
-    return c.json({
-      message: "สร้างคำถามแบบทดสอบเรียบร้อยแล้ว",
-      quiz: {
-        id: quizId,
-        lesson_id,
-        question,
-        options_json: optionsStr,
-        correct_option_index: Number(correct_option_index)
-      }
-    }, 201);
-  } catch (error) {
-    console.error("Add quiz question failed:", error);
-    return c.json({ error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์ขณะเพิ่มคำถามแบบทดสอบ" }, 500);
-  }
-});
-
-/**
- * Delete Quiz Question
- * DELETE /api/instructor/quizzes/:id
- */
-instructorRouter.delete("/instructor/quizzes/:id", rbac(["instructor", "admin"]), async (c: Context<Env>) => {
-  const quizId = c.req.param("id");
-  const user = c.get("user");
-  const db = c.env.DB;
-
-  try {
-    const quiz = await db
-      .prepare(
-        `SELECT q.lesson_id, c.instructor_id
-         FROM quizzes q
-         INNER JOIN lessons l ON q.lesson_id = l.id
-         INNER JOIN courses c ON l.course_id = c.id
-         WHERE q.id = ?`
-      )
-      .bind(quizId)
-      .first<{ lesson_id: string; instructor_id: string }>();
-
-    if (!quiz) {
-      return c.json({ error: "ไม่พบคำถามแบบทดสอบ" }, 404);
-    }
-
-    if (!user.roles.includes("admin") && quiz.instructor_id !== user.id) {
-      return c.json({ error: "ไม่มีสิทธิ์เข้าถึง: คุณไม่ได้เป็นผู้สอนคอร์สของแบบทดสอบนี้" }, 403);
-    }
-
-    await db.prepare("DELETE FROM quizzes WHERE id = ?").bind(quizId).run();
-
-    return c.json({ message: "ลบคำถามแบบทดสอบเรียบร้อยแล้ว" });
-  } catch (error) {
-    console.error("Delete quiz question failed:", error);
-    return c.json({ error: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์ขณะลบคำถามแบบทดสอบ" }, 500);
-  }
-});
+const LEGACY_QUIZ_GONE = "แบบทดสอบท้ายบทแบบเดิมเลิกใช้แล้ว กรุณาสร้างคำถามและข้อสอบที่เมนู \"การวัดผลและสอบ\" แทน";
+instructorRouter.post("/instructor/quizzes", rbac(["instructor", "admin"]), (c) => c.json({ error: LEGACY_QUIZ_GONE, code: "legacy_quiz_retired" }, 410));
+instructorRouter.delete("/instructor/quizzes/:id", rbac(["instructor", "admin"]), (c) => c.json({ error: LEGACY_QUIZ_GONE, code: "legacy_quiz_retired" }, 410));
 
 /**
  * Assign course access to student, B2B partner, or student group
