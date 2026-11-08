@@ -20,7 +20,8 @@ export const WEBHOOK_EVENTS = {
   "exam.submitted": { label: "ส่งข้อสอบ", types: ["exam_submit"] },
   "quiz.submitted": { label: "ส่งแบบทดสอบ", types: ["quiz_submit"] },
   "assignment.submitted": { label: "ส่งงาน", types: ["assignment_submit"] },
-  "lead.created": { label: "มี lead ใหม่จากฟอร์ม", types: ["lead_created", "lead_submit"] },
+  "lead.created": { label: "มี lead ใหม่จากฟอร์ม", types: ["lead_created", "lead_submit", "lead_submitted"] },
+  "inquiry.created": { label: "มีข้อความติดต่อใหม่จากเว็บไซต์", types: ["inquiry_created"] },
   "registration.created": { label: "สมัครรอบอบรม", types: ["session_register", "registration_created"] }
 } as const;
 

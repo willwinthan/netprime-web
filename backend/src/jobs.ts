@@ -6,6 +6,7 @@ import { runWebhookRetries } from "./handlers/platform";
 import { syncAffiliateConversions } from "./handlers/marketing";
 import { runCommerceJobs } from "./handlers/commerce";
 import { runEmailLogJobs } from "./utils/email";
+import { runAgentJobs } from "./utils/agentTools";
 
 export interface DailyJobResult {
   reminders: { sent: number; registration_ids: string[] };
@@ -23,6 +24,7 @@ export async function runDailyJobs(env: Env["Bindings"]): Promise<DailyJobResult
   try { await runWebhookRetries(env); } catch (error) { console.error("Webhook retries failed:", error); }
   try { await runCommerceJobs(env); } catch (error) { console.error("Commerce jobs failed:", error); }
   try { await runEmailLogJobs(env); } catch (error) { console.error("Email retries failed:", error); }
+  try { await runAgentJobs(env); } catch (error) { console.error("Agent jobs failed:", error); }
   return result;
 }
 

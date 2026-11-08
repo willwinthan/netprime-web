@@ -1,8 +1,11 @@
 import { Hono, Context } from "hono";
 import { apiKey, ApiEnv, API_SCOPES } from "../middleware/apikey";
+import { listResponse, page } from "../utils/apiPaging";
 import { issueAccountToken } from "../utils/tokens";
 import { appUrl, sendInvitationEmail } from "../utils/email";
 import { trackEvent } from "../utils/events";
+import { ENROLLMENT_FIELDS, enrollLearner, parseEnrollmentInput } from "../utils/enrollment";
+import { agentApiRouter, agentOpenApiPaths } from "./agentApi";
 
 /**
  * Public REST API v1 (/api/v1) for integrations (Zapier, Make, HR systems).
@@ -13,29 +16,6 @@ import { trackEvent } from "../utils/events";
 export const publicApiRouter = new Hono<ApiEnv>();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function encodeCursor(value: string): string {
-  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-function decodeCursor(value: string | undefined): string | null | false {
-  if (!value) return null;
-  if (value.length > 200 || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
-  try { return atob(value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4)); } catch { return false; }
-}
-
-/** Cursor = the last row's id (all v1 lists are ordered by id). */
-function page(c: Context<ApiEnv>): { limit: number; after: string } | Response {
-  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10) || 50, 1), 200);
-  const cursor = decodeCursor(c.req.query("cursor"));
-  if (cursor === false) return c.json({ error: "cursor ไม่ถูกต้อง", code: "invalid_cursor" }, 400);
-  return { limit, after: cursor ?? "" };
-}
-
-function listResponse<T extends { id: string }>(c: Context<ApiEnv>, rows: T[], limit: number) {
-  const more = rows.length > limit;
-  const data = more ? rows.slice(0, limit) : rows;
-  return c.json({ data, next_cursor: more ? encodeCursor(data[data.length - 1].id) : null });
-}
 
 const USER_FIELDS = `u.id, u.email, u.name, COALESCE(u.staff_role, u.role) AS role,
   (SELECT GROUP_CONCAT(role) FROM user_roles WHERE user_id = u.id) AS roles, u.status, u.partner_id,
@@ -68,7 +48,7 @@ publicApiRouter.get("/users/:id", apiKey("users:read"), async (c) => {
 });
 
 /** Creates a student account and emails an invitation link to set a password. */
-publicApiRouter.post("/users", apiKey("users:write"), async (c) => {
+publicApiRouter.post("/users", apiKey("users:write", { directWrite: {} }), async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -120,7 +100,6 @@ publicApiRouter.get("/courses", apiKey("courses:read"), async (c) => {
 
 // ---------- Enrollments ----------
 
-const ENROLLMENT_FIELDS = "e.id, e.user_id, e.course_id, e.status, e.progress_percent, e.enrolled_at, e.completed_at, e.expires_at, e.partner_id";
 
 publicApiRouter.get("/enrollments", apiKey("enrollments:read"), async (c) => {
   const p = page(c);
@@ -141,38 +120,13 @@ publicApiRouter.get("/enrollments", apiKey("enrollments:read"), async (c) => {
  * learner and course (UNIQUE index); an existing suspended enrollment is re-activated.
  * 201 when created, 200 when it already existed.
  */
-publicApiRouter.post("/enrollments", apiKey("enrollments:write"), async (c) => {
+publicApiRouter.post("/enrollments", apiKey("enrollments:write", { directWrite: { tool: "grant_enrollment" } }), async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
-  const courseId = typeof body?.course_id === "string" ? body.course_id.trim() : "";
-  const userId = typeof body?.user_id === "string" ? body.user_id.trim() : "";
-  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-  if (!courseId || (!userId && !email)) return c.json({ error: "ต้องระบุ course_id และ user_id หรือ email", code: "invalid_request" }, 400);
-  let expiresAt: string | null = null;
-  if (body?.expires_at != null) {
-    const ms = typeof body.expires_at === "string" ? Date.parse(body.expires_at) : NaN;
-    if (!Number.isFinite(ms) || ms < Date.now()) return c.json({ error: "expires_at ต้องเป็นวันเวลา ISO ในอนาคต", code: "invalid_request" }, 400);
-    expiresAt = new Date(ms).toISOString();
-  }
-  const db = c.env.DB;
-  const course = await db.prepare("SELECT id, status, access_duration_days FROM courses WHERE id = ?").bind(courseId).first<{ id: string; status: string; access_duration_days: number | null }>();
-  if (!course) return c.json({ error: "ไม่พบคอร์ส", code: "not_found" }, 404);
-  if (course.status !== "published") return c.json({ error: "ลงทะเบียนได้เฉพาะคอร์สที่เผยแพร่แล้ว", code: "course_not_published" }, 422);
-  const user = await db.prepare(`SELECT id, status, partner_id FROM users WHERE ${userId ? "id" : "email"} = ?`).bind(userId || email)
-    .first<{ id: string; status: string; partner_id: string | null }>();
-  if (!user) return c.json({ error: "ไม่พบผู้ใช้", code: "not_found" }, 404);
-  if (user.status !== "active") return c.json({ error: "บัญชีผู้ใช้นี้ถูกระงับ", code: "user_suspended" }, 422);
-  if (!expiresAt && course.access_duration_days) expiresAt = new Date(Date.now() + course.access_duration_days * 86_400_000).toISOString();
-  const existing = await db.prepare("SELECT id FROM enrollments WHERE user_id = ? AND course_id = ?").bind(user.id, course.id).first<{ id: string }>();
-  await db.prepare(`INSERT INTO enrollments (id, user_id, course_id, progress_percent, status, expires_at, partner_id)
-      VALUES (?, ?, ?, 0, 'active', ?, NULL)
-      ON CONFLICT(user_id, course_id) DO UPDATE SET
-        status = CASE WHEN enrollments.status = 'suspended' THEN 'active' ELSE enrollments.status END,
-        expires_at = CASE WHEN excluded.expires_at IS NOT NULL AND (enrollments.expires_at IS NULL OR enrollments.expires_at < excluded.expires_at)
-          THEN excluded.expires_at ELSE enrollments.expires_at END`)
-    .bind("enr_" + crypto.randomUUID(), user.id, course.id, expiresAt).run();
-  if (!existing) await trackEvent(db, user.id, "enroll", { courseId: course.id, data: { method: "api", api_key_id: c.get("apiKey").id } });
-  const row = await db.prepare(`SELECT ${ENROLLMENT_FIELDS} FROM enrollments e WHERE e.user_id = ? AND e.course_id = ?`).bind(user.id, course.id).first();
-  return c.json({ data: row, created: !existing }, existing ? 200 : 201);
+  const input = parseEnrollmentInput(body);
+  if ("error" in input) return c.json({ error: input.error, code: "invalid_request" }, 400);
+  const done = await enrollLearner(c.env.DB, input, { method: "api", api_key_id: c.get("apiKey").id });
+  if ("error" in done) return c.json({ error: done.error, code: done.code }, done.status);
+  return c.json({ data: done.enrollment, created: done.created }, done.created ? 201 : 200);
 });
 
 // ---------- Orders ----------
@@ -187,6 +141,9 @@ publicApiRouter.get("/orders", apiKey("orders:read"), async (c) => {
     .bind(...[p.after, ...(status ? [status.slice(0, 20)] : []), p.limit + 1]).all<{ id: string }>();
   return listResponse(c, rows.results, p.limit);
 });
+
+// Agent platform: training rounds, leads, reports, the action queue and the event feed.
+publicApiRouter.route("/", agentApiRouter);
 
 publicApiRouter.notFound(c => c.json({ error: "ไม่พบ endpoint นี้ใน API v1", code: "not_found" }, 404));
 
@@ -209,7 +166,7 @@ function openApiDocument(origin: string) {
   const op = (summary: string, scope: string, extra: Record<string, unknown>) => ({ summary, security: [{ apiKey: [] }], "x-required-scope": scope, ...extra, responses: { ...(extra.responses as object), ...errors } });
   return {
     openapi: "3.0.3",
-    info: { title: "NetPrime LMS API", version: "1.0.0", description: "REST API สำหรับเชื่อมต่อระบบภายนอก ใช้ API key ที่สร้างในหน้า ตั้งค่า → API keys" },
+    info: { title: "NetPrime LMS API", version: "1.1.0", description: "REST API สำหรับเชื่อมต่อระบบภายนอกและ AI agent ใช้ API key ที่สร้างในหน้า ตั้งค่า → API keys งานที่เปลี่ยนข้อมูลของ agent ส่งผ่าน POST /actions (ดู GET /tools)" },
     servers: [{ url: `${origin}/api/v1` }],
     components: {
       securitySchemes: { apiKey: { type: "http", scheme: "bearer", description: "Authorization: Bearer npk_…" } },
@@ -239,7 +196,8 @@ function openApiDocument(origin: string) {
           responses: { "201": { description: "ลงทะเบียนใหม่" }, "200": { description: "มีอยู่แล้ว" }, "422": { description: "คอร์สยังไม่เผยแพร่" } }
         })
       },
-      "/orders": { get: op("คำสั่งซื้อคอร์ส", "orders:read", { parameters: [...paging, { name: "status", in: "query", schema: { type: "string" } }], responses: { "200": { description: "OK", content: { "application/json": { schema: list("Order") } } } } }) }
+      "/orders": { get: op("คำสั่งซื้อคอร์ส", "orders:read", { parameters: [...paging, { name: "status", in: "query", schema: { type: "string" } }], responses: { "200": { description: "OK", content: { "application/json": { schema: list("Order") } } } } }) },
+      ...agentOpenApiPaths(op, paging)
     }
   };
 }

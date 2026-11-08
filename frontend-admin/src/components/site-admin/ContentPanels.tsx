@@ -332,7 +332,7 @@ const ENTITY_LABEL: Record<string, string> = {
 
 export const AuditPanel: React.FC = () => {
   const api = useApi();
-  const [entries, setEntries] = useState<Array<{ id: string; user_name: string | null; action: string; entity: string; entity_id: string | null; detail: string | null; created_at: string }>>([]);
+  const [entries, setEntries] = useState<Array<{ id: string; user_name: string | null; agent_name?: string | null; action: string; entity: string; entity_id: string | null; detail: string | null; created_at: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api.get<{ entries: typeof entries }>("/admin/site/audit?limit=200").then(d => setEntries(d.entries)).catch(err => setError(err.message));
@@ -347,7 +347,7 @@ export const AuditPanel: React.FC = () => {
             {entries.map(e => (
               <tr key={e.id}>
                 <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateTime(e.created_at)}</td>
-                <td style={tdStyle}>{e.user_name || "-"}</td>
+                <td style={tdStyle}>{e.user_name || (e.agent_name ? "" : "-")}{e.agent_name && <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>AI agent: {e.agent_name}</div>}</td>
                 <td style={tdStyle}>{ACTION_LABEL[e.action] || e.action} {ENTITY_LABEL[e.entity] || e.entity}</td>
                 <td style={{ ...tdStyle, fontSize: "12px", color: "var(--text-muted)", maxWidth: "420px", wordBreak: "break-word" }}>{e.detail || e.entity_id}</td>
               </tr>

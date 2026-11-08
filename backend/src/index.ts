@@ -34,6 +34,9 @@ import { Env } from "./middleware/rbac";
 import { allowedOrigins } from "./utils/origins";
 import { runScheduledJobs } from "./jobs";
 import { configureEmail } from "./utils/email";
+import { setInternalDispatcher } from "./utils/dispatch";
+import { agentsAdminRouter } from "./handlers/agents";
+import { isMcpPath, mcpFetch } from "./handlers/mcp";
 
 const app = new Hono<Env>();
 
@@ -94,6 +97,10 @@ app.route("/api", emailAdminRouter);
 app.route("/api", siteDraftsRouter);
 app.route("/api", analyticsRouter);
 app.route("/api", commerceRouter);
+app.route("/api", agentsAdminRouter);
+
+// Approved agent actions call the staff routes in-process (utils/dispatch.ts).
+setInternalDispatcher((request, env, ctx) => app.fetch(request, env, ctx));
 
 // Global Error Handler
 app.onError((err, c) => {
@@ -107,8 +114,12 @@ app.notFound((c) => {
   return c.json({ error: "ไม่พบเส้นทางที่ร้องขอ" }, 404);
 });
 
+const appHandler: ExportedHandler<Env["Bindings"]> = { fetch: (request, env, ctx) => app.fetch(request as Request, env, ctx) };
+
 export default {
-  fetch: app.fetch,
+  // /mcp and the OAuth endpoints for MCP clients go through the MCP gateway (handlers/mcp.ts).
+  fetch: (request: Request, env: Env["Bindings"], ctx: ExecutionContext) =>
+    isMcpPath(new URL(request.url).pathname) ? mcpFetch(request, env, ctx, appHandler) : app.fetch(request, env, ctx),
   scheduled: (_event: ScheduledEvent, env: Env["Bindings"], ctx: ExecutionContext) => {
     configureEmail(env);
     ctx.waitUntil(runScheduledJobs(env, ctx));

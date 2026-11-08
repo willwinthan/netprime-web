@@ -10,6 +10,7 @@ import { importNotionPage, notionPageId, NotionError } from "../utils/notion";
 import { checkSlip, loadBankTransfer, putSlip, serveSlip } from "./orders";
 import { IMAGE_TYPES, saveSiteImage, siteImageUrl } from "../utils/images";
 import { recordPublished } from "../utils/siteVersions";
+import { trackEvent } from "../utils/events";
 
 /**
  * Website content managed by coordinators (admin role):
@@ -480,6 +481,8 @@ publicSiteRouter.post("/sessions/:id/register", async (c) => {
       .bind(key, slip.type, created!.id).run();
   }
 
+  await trackEvent(db, null, "session_register", { courseId: row.course_id ?? null, data: { registration_id: created!.id, session_id: row.id, status: created!.status, attendees: values.attendees, slip: slipSaved } });
+
   const settings = await loadSettings(db);
   const details: Array<[string, unknown]> = [
     ["หลักสูตร", row.title], ["วันที่", `${row.start_date} ถึง ${row.end_date}`], ["เวลา", row.time_text],
@@ -557,6 +560,7 @@ publicSiteRouter.post("/inquiries", async (c) => {
   const id = newId("inq");
   await c.env.DB.prepare("INSERT INTO inquiries (id, name, email, phone, company, topic, message) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(id, values.name, values.email, values.phone, values.company, values.topic, values.message).run();
+  await trackEvent(c.env.DB, null, "inquiry_created", { data: { inquiry_id: id, topic: values.topic ?? null } });
 
   const settings = await loadSettings(c.env.DB);
   deliverLater(c, sendEmail(notifyRecipients(settings), `[ติดต่อใหม่] ${values.topic || values.name}`,
@@ -1907,7 +1911,8 @@ adminSiteRouter.post("/images", async (c) => {
 
 adminSiteRouter.get("/audit", async (c) => {
   const { limit, offset } = pageParams(c, 50, 200);
-  const rows = await c.env.DB.prepare(`SELECT l.*, u.name AS user_name FROM admin_audit_log l LEFT JOIN users u ON u.id = l.user_id
+  const rows = await c.env.DB.prepare(`SELECT l.*, u.name AS user_name, k.name AS agent_name FROM admin_audit_log l LEFT JOIN users u ON u.id = l.user_id
+    LEFT JOIN api_keys k ON k.id = l.api_key_id
     ORDER BY l.created_at DESC LIMIT ? OFFSET ?`).bind(limit, offset).all();
   return c.json({ entries: rows.results });
 });
