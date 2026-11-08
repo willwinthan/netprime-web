@@ -27,7 +27,8 @@ type Bindings = Env["Bindings"];
 
 export interface ParamSpec { type: "string" | "number" | "boolean"; required?: boolean; enum?: readonly string[]; max?: number; description: string }
 
-export interface Preview { summary: string; target: Record<string, unknown>; warnings: string[] }
+/** excerpts: text the approver should read in full before deciding (shown as quotes in the queue). */
+export interface Preview { summary: string; target: Record<string, unknown>; warnings: string[]; excerpts?: { label: string; text: string }[] }
 export interface Failure { error: string; code: string; status: 400 | 404 | 409 | 422 }
 export interface Outcome { ok: boolean; result?: unknown; error?: string }
 
@@ -242,6 +243,45 @@ const publishArticle: WriteTool<Parsed> = {
   },
   async execute(ctx, v) {
     return viaStaffRoute(ctx, "PATCH", `/admin/site/articles/${encodeURIComponent(String(v.article_id))}`, { status: "published" });
+  }
+};
+
+const answerLessonQuestion: WriteTool<Parsed> = {
+  name: "answer_lesson_question", tier: "act", scope: "qa:answer", approverPermission: "community.moderate",
+  label: "ตอบคำถามในบทเรียน",
+  description: "ร่างคำตอบคำถามของผู้เรียนใต้บทเรียน (ดูคำถามจาก list_lesson_questions) ผู้อนุมัติต้องเป็นผู้สอนของคอร์สหรือผู้ดูแลระบบ คำตอบจะโพสต์ในชื่อผู้อนุมัติ ผู้อนุมัติแก้ข้อความไม่ได้ ถ้าต้องแก้ให้ปฏิเสธพร้อมหมายเหตุ",
+  params: {
+    question_id: { type: "string", required: true, max: 100, description: "id คำถาม (qa_…) ต้องเป็นคำถามหลัก ไม่ใช่คำตอบ" },
+    answer: { type: "string", required: true, max: 5000, description: "คำตอบที่จะโพสต์ อ้างอิงเนื้อหาบทเรียนหรือคำตอบเดิมของผู้สอน ถ้าไม่แน่ใจให้บอกว่าจะส่งต่อผู้สอน" }
+  },
+  parse(raw) { return parseParams(this.params, raw); },
+  async preview(env, v) {
+    const q = await env.DB.prepare(`SELECT q.id, q.parent_id, q.lesson_id, q.content, u.name AS asker_name, l.title AS lesson_title,
+        co.title AS course_title, co.instructor_id, iu.name AS instructor_name,
+        (SELECT COUNT(*) FROM lesson_qa r WHERE r.parent_id = q.id AND r.user_id <> q.user_id AND (r.user_id = co.instructor_id OR
+          EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = r.user_id AND ur.role IN ('admin', 'coordinator', 'instructor'))))
+          AS staff_replies
+      FROM lesson_qa q JOIN users u ON u.id = q.user_id JOIN lessons l ON l.id = q.lesson_id JOIN courses co ON co.id = l.course_id
+      LEFT JOIN users iu ON iu.id = co.instructor_id WHERE q.id = ?`).bind(v.question_id)
+      .first<{ id: string; parent_id: string | null; lesson_id: string; content: string; asker_name: string; lesson_title: string;
+        course_title: string; instructor_id: string | null; instructor_name: string | null; staff_replies: number }>();
+    if (!q) return fail(404, "not_found", "ไม่พบคำถาม");
+    if (q.parent_id) return fail(422, "not_a_question", "id นี้เป็นคำตอบ ให้ส่ง id ของคำถามหลัก");
+    const warnings = ["คำตอบจะแสดงในชื่อผู้อนุมัติ ผู้อนุมัติต้องเป็นผู้สอนของคอร์สนี้หรือผู้ดูแลระบบ"];
+    if (q.staff_replies > 0) warnings.push(`คำถามนี้มีคำตอบจากผู้สอนหรือเจ้าหน้าที่แล้ว ${q.staff_replies} ข้อความ`);
+    return {
+      summary: `ตอบคำถามของ ${q.asker_name} ในบทเรียน "${q.lesson_title}" (${q.course_title})`,
+      target: { question_id: q.id, lesson_id: q.lesson_id, course_title: q.course_title, lesson_title: q.lesson_title,
+        instructor_name: q.instructor_name },
+      excerpts: [{ label: `คำถามของ ${q.asker_name}`, text: q.content.slice(0, 2000) }, { label: "คำตอบที่ agent ร่าง (จะโพสต์ตามนี้)", text: String(v.answer) }],
+      warnings
+    };
+  },
+  async execute(ctx, v, preview) {
+    const lessonId = String(preview.target.lesson_id);
+    const out = await viaStaffRoute(ctx, "POST", `/lessons/${encodeURIComponent(lessonId)}/qa`, { content: v.answer, parent_id: v.question_id });
+    if (!out.ok && out.error?.startsWith("403")) return { ...out, error: "ผู้อนุมัติต้องเป็นผู้สอนของคอร์สนี้หรือผู้ดูแลระบบจึงโพสต์คำตอบได้" };
+    return out;
   }
 };
 
@@ -531,10 +571,14 @@ export const TOOLS: Tool[] = [
   read("list_users", "users:read", "/users", "ผู้ใช้", "ผู้ใช้ในระบบ", { email: { type: "string", max: 254, description: "ค้นด้วยอีเมล" }, ...PAGE }),
   read("list_enrollments", "enrollments:read", "/enrollments", "การลงทะเบียนเรียน", "การลงทะเบียนเรียนคอร์ส",
     { user_id: { type: "string", max: 100, description: "id ผู้เรียน" }, course_id: { type: "string", max: 100, description: "id คอร์ส" }, status: { type: "string", enum: ["active", "suspended", "completed"], description: "สถานะ" }, ...PAGE }),
+  read("list_lesson_questions", "qa:read", "/lesson-questions", "คำถามในบทเรียน",
+    "คำถามของผู้เรียนใต้บทเรียน พร้อมคำตอบเดิม (author_type: instructor / staff / learner) และเนื้อหาบทเรียนแบบข้อความ (lesson_text, เฉพาะบทเรียนข้อความ) ใช้ status=unanswered หาคำถามที่ยังไม่มีผู้สอนตอบ",
+    { status: { type: "string", enum: ["unanswered", "answered"], description: "unanswered = ยังไม่มีผู้สอนหรือเจ้าหน้าที่ตอบ" }, course_id: { type: "string", max: 100, description: "id คอร์ส" },
+      lesson_id: { type: "string", max: 100, description: "id บทเรียน" }, since: { type: "string", max: 40, description: "เฉพาะคำถามที่ถามตั้งแต่เวลานี้ (ISO 8601)" }, ...PAGE }),
   read("get_events", "events:read", "/events", "ฟีดเหตุการณ์", "เหตุการณ์ใหม่ตั้งแต่ since (ส่ง next_since จากครั้งก่อน) เช่น registration.created inquiry.created order.paid action.updated",
     { since: { type: "string", max: 15, description: "next_since จากครั้งก่อน (ว่าง = 24 ชั่วโมงล่าสุด)" }, types: { type: "string", max: 300, description: "ชื่อเหตุการณ์คั่นด้วยจุลภาค" }, limit: { type: "number", description: "สูงสุด 500" } }),
   updateLead, updateInquiry, draftSession, draftArticle,
-  confirmOrder, updateRegistration, publishSession, publishArticle, grantEnrollment, sendEmailTool, sendLine
+  confirmOrder, updateRegistration, publishSession, publishArticle, grantEnrollment, answerLessonQuestion, sendEmailTool, sendLine
 ];
 
 export const toolByName = (name: unknown): Tool | undefined => typeof name === "string" ? TOOLS.find(t => t.name === name) : undefined;

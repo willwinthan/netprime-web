@@ -132,6 +132,46 @@ agentApiRouter.get("/inquiries", apiKey("inquiries:read"), async (c) => {
   return listResponse(c, rows.results, p.limit);
 });
 
+// ---------- Lesson Q&A ----------
+
+/** A reply counts as an answer when staff wrote it: the course's instructor, an admin, coordinator or instructor. */
+const STAFF_REPLY_SQL = `EXISTS (SELECT 1 FROM lesson_qa r WHERE r.parent_id = q.id AND r.user_id <> q.user_id AND (r.user_id = co.instructor_id OR
+  EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = r.user_id AND ur.role IN ('admin', 'coordinator', 'instructor'))))`;
+
+/**
+ * Learners' questions under lessons, with the thread so far and the lesson's text (text lessons) so an
+ * agent can draft an answer grounded in the course. Asker emails are not exposed, only names.
+ */
+agentApiRouter.get("/lesson-questions", apiKey("qa:read"), async (c) => {
+  const p = page(c);
+  if (p instanceof Response) return p;
+  const since = sinceParam(c);
+  if (since === false) return badSince(c);
+  const status = c.req.query("status");
+  if (status && status !== "unanswered" && status !== "answered") return c.json({ error: "status ต้องเป็น unanswered หรือ answered", code: "invalid_request" }, 400);
+  const courseId = short(c.req.query("course_id")), lessonId = short(c.req.query("lesson_id"));
+  const rows = await c.env.DB.prepare(`SELECT q.id, q.content AS question, q.created_at, u.name AS asker_name,
+      q.lesson_id, l.title AS lesson_title, COALESCE(l.type, 'video') AS lesson_type, SUBSTR(l.content_md, 1, 4000) AS lesson_text,
+      co.id AS course_id, co.title AS course_title, ${STAFF_REPLY_SQL} AS answered
+    FROM lesson_qa q JOIN users u ON u.id = q.user_id JOIN lessons l ON l.id = q.lesson_id JOIN courses co ON co.id = l.course_id
+    WHERE q.parent_id IS NULL AND q.id > ? AND (? IS NULL OR co.id = ?) AND (? IS NULL OR q.lesson_id = ?) AND (? IS NULL OR q.created_at >= ?)
+      AND (? IS NULL OR ${STAFF_REPLY_SQL} = (CASE ? WHEN 'answered' THEN 1 ELSE 0 END))
+    ORDER BY q.id LIMIT ?`)
+    .bind(p.after, courseId, courseId, lessonId, lessonId, since, since, status ?? null, status ?? null, p.limit + 1)
+    .all<Record<string, any> & { id: string }>();
+  const ids = rows.results.slice(0, p.limit).map(r => r.id);
+  const replies = ids.length ? (await c.env.DB.prepare(`SELECT r.id, r.parent_id, r.content, r.created_at, u.name AS author_name,
+      CASE WHEN r.user_id = co.instructor_id THEN 'instructor'
+           WHEN EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = r.user_id AND ur.role IN ('admin', 'coordinator', 'instructor')) THEN 'staff'
+           ELSE 'learner' END AS author_type
+    FROM lesson_qa r JOIN users u ON u.id = r.user_id JOIN lessons l ON l.id = r.lesson_id JOIN courses co ON co.id = l.course_id
+    WHERE r.parent_id IN (${ids.map(() => "?").join(", ")}) ORDER BY r.created_at`).bind(...ids).all<Record<string, any>>()).results : [];
+  return listResponse(c, rows.results.map(r => ({
+    ...r, answered: !!r.answered,
+    replies: replies.filter(x => x.parent_id === r.id).map(({ parent_id, ...x }) => x)
+  })) as any, p.limit);
+});
+
 // ---------- Reports ----------
 
 /** Bangkok calendar day [from, to] → UTC bounds in both timestamp formats used by the schema. */
@@ -415,6 +455,7 @@ export function agentOpenApiPaths(op: (summary: string, scope: string, extra: Re
     "/registrations": { get: op("ผู้สมัครรอบอบรม", "registrations:read", { parameters: [...paging, q("session_id"), q("status"), q("since", "ISO 8601 (updated_at)")], responses: ok }) },
     "/leads": { get: op("lead จากฟอร์ม", "leads:read", { parameters: [...paging, q("status"), q("form_id"), q("since", "ISO 8601 (updated_at)")], responses: ok }) },
     "/inquiries": { get: op("ข้อความติดต่อ", "inquiries:read", { parameters: [...paging, q("status"), q("since", "ISO 8601 (updated_at)")], responses: ok }) },
+    "/lesson-questions": { get: op("คำถามของผู้เรียนใต้บทเรียน พร้อมคำตอบเดิมและเนื้อหาบทเรียนแบบข้อความ", "qa:read", { parameters: [...paging, q("status", "unanswered | answered"), q("course_id"), q("lesson_id"), q("since", "ISO 8601 (created_at)")], responses: ok }) },
     "/reports/summary": { get: op("รายงานสรุปช่วงวันที่ (เวลาไทย)", "reports:read", { parameters: [q("from", "YYYY-MM-DD"), q("to", "YYYY-MM-DD")], responses: ok }) },
     "/ops/daily-summary": { get: op("สรุปงานประจำวัน (get_daily_ops_summary)", "reports:read", { parameters: [q("date", "YYYY-MM-DD")], responses: ok }) },
     "/actions": {

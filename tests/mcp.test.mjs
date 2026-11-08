@@ -55,7 +55,7 @@ test('setup: agent keys with read and write MCP access', async () => {
   const reader = await make('MCP reader', { scopes: ['reports:read', 'sessions:read', 'inquiries:read', 'events:read', 'orders:confirm'], mcp_access: 'read' });
   keys.reader = reader.secret; keys.readerId = reader.key.id;
   assert.equal(reader.key.mcp_access, 'read');
-  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'sessions:write', 'articles:write', 'orders:confirm', 'orders:read'], mcp_access: 'write' });
+  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'sessions:write', 'articles:write', 'orders:confirm', 'orders:read', 'qa:read', 'qa:answer'], mcp_access: 'write' });
   keys.writer = writer.secret; keys.writerId = writer.key.id;
   const off = await make('No MCP', { scopes: ['reports:read'], mcp_access: 'off' });
   keys.off = off.secret;
@@ -131,6 +131,11 @@ test('write access: draft runs at once, act goes to the approval queue', async (
   const roundTool = (await mcp(keys.writer, 'tools/list')).body.result.tools.find(t => t.name === 'draft_session');
   assert.equal(roundTool.annotations.destructiveHint, false);
   assert.deepEqual(roundTool.inputSchema.required.sort(), ['capacity', 'end_date', 'start_date', 'title']);
+  const questions = await callTool(keys.writer, 'list_lesson_questions', { status: 'unanswered' });
+  assert.equal(questions.isError, false, questions.text);
+  assert.ok(Array.isArray(questions.data.data));
+  const answerTool = (await mcp(keys.writer, 'tools/list')).body.result.tools.find(t => t.name === 'answer_lesson_question');
+  assert.deepEqual(answerTool.inputSchema.required.sort(), ['answer', 'question_id']);
 
   const order = (await expectStatus('/api/student/orders', 201, { method: 'POST', token: student, body: { course_id: 'course_aws_net' } })).order;
   const dry = await callTool(keys.writer, 'confirm_order', { order_id: order.reference, amount_received: order.amount, dry_run: true });

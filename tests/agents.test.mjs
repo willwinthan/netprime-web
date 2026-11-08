@@ -10,7 +10,7 @@ const agent = {};
 const api = (path, key, options = {}) => request(path, { ...options, headers: { Authorization: `Bearer ${key}`, ...(options.headers || {}) } });
 const day = n => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 const AGENT_SCOPES = ['sessions:read', 'registrations:read', 'leads:read', 'inquiries:read', 'reports:read', 'events:read', 'orders:read',
-  'inquiries:write', 'leads:write', 'sessions:write', 'articles:write', 'orders:confirm', 'registrations:write', 'sessions:publish', 'messages:send', 'enrollments:write', 'users:write'];
+  'inquiries:write', 'leads:write', 'sessions:write', 'articles:write', 'orders:confirm', 'registrations:write', 'sessions:publish', 'messages:send', 'enrollments:write', 'users:write', 'qa:read', 'qa:answer'];
 const fixtures = {};
 
 test('setup: sign in and create website activity', async () => {
@@ -328,6 +328,69 @@ test('draft tools: new training rounds and articles stay private until published
   const audit = await expectStatus('/api/admin/site/audit?limit=100', 200, { token: admin });
   assert.ok(audit.entries.some(e => e.entity === 'article' && e.entity_id === article.id && e.api_key_id === agent.id));
   assert.ok(audit.entries.some(e => e.entity === 'session' && e.entity_id === session.id && e.api_key_id === agent.id));
+});
+
+test('lesson Q&A: agents read open questions and draft answers that the course instructor approves', async () => {
+  const instructor = (await login('instructor@netprime.com', 'inst123')).token;
+  const ask = (lesson, content, token = student, parent_id) =>
+    expectStatus(`/api/lessons/${lesson}/qa`, 201, { method: 'POST', token, body: { content, parent_id } });
+  const open = await ask('lesson_cisco_ccna_vlan', 'Trunk กับ Access port ต่างกันยังไงครับ');
+  const done = await ask('lesson_cisco_ccna_cli', 'startup-config เก็บไว้ที่ไหน');
+  await ask('lesson_cisco_ccna_cli', 'เก็บใน NVRAM ครับ', instructor, done.id);
+  await ask('lesson_cisco_ccna_vlan', 'ขอบคุณครับ ขอถามเพิ่ม', student, open.id); // the asker's own follow-up is not an answer
+
+  const unanswered = await api('/api/v1/lesson-questions?status=unanswered&course_id=course_cisco_ccna', agent.key);
+  assert.equal(unanswered.status, 200, JSON.stringify(unanswered.data));
+  const row = unanswered.data.data.find(q => q.id === open.id);
+  assert.ok(row, 'the open question is listed');
+  assert.ok(!unanswered.data.data.some(q => q.id === done.id), 'answered questions are filtered out');
+  assert.equal(row.lesson_title, 'การตั้งค่า Access และ Trunk VLAN บนสวิตช์ Catalyst');
+  assert.equal(row.answered, false);
+  assert.equal(row.replies[0].author_type, 'learner');
+  assert.ok(!JSON.stringify(unanswered.data).includes('@'), 'no email addresses');
+  const answered = await api('/api/v1/lesson-questions?status=answered&lesson_id=lesson_cisco_ccna_cli', agent.key);
+  const doneRow = answered.data.data.find(q => q.id === done.id);
+  assert.equal(doneRow.replies[0].author_type, 'instructor');
+  assert.equal((await api('/api/v1/lesson-questions?status=maybe', agent.key)).status, 400);
+
+  const run = body => api('/api/v1/actions', agent.key, { method: 'POST', body });
+  const reply = doneRow.replies[0].id;
+  const notQuestion = await run({ tool: 'answer_lesson_question', dry_run: true, input: { question_id: reply, answer: 'x' } });
+  assert.equal(notQuestion.status, 422);
+  assert.equal(notQuestion.data.code, 'not_a_question');
+  const again = await run({ tool: 'answer_lesson_question', dry_run: true, input: { question_id: done.id, answer: 'NVRAM' } });
+  assert.ok(again.data.preview.warnings.some(w => w.includes('มีคำตอบ')), JSON.stringify(again.data));
+
+  const answer = 'Access port รับได้ VLAN เดียว ส่วน Trunk ส่งได้หลาย VLAN โดยติด tag 802.1Q';
+  const queued = await run({ tool: 'answer_lesson_question', input: { question_id: open.id, answer }, idempotency_key: 'qa-answer-1' });
+  assert.equal(queued.status, 202, JSON.stringify(queued.data));
+  assert.equal(queued.data.data.status, 'pending');
+  assert.deepEqual(queued.data.data.preview.excerpts.map(e => e.text), ['Trunk กับ Access port ต่างกันยังไงครับ', answer], 'the approver reads the question and the full answer');
+
+  // The course instructor approves (given agents.approve); the answer is posted in their name.
+  const roles = await expectStatus('/api/admin/roles', 200, { token: admin });
+  const perms = role => roles.roles.find(r => r.key === role).permissions;
+  const put = (role, permissions) => expectStatus(`/api/admin/roles/${role}`, 200, { method: 'PUT', token: admin, body: { permissions } });
+  await put('instructor', [...perms('instructor'), 'agents.approve']);
+  await put('coordinator', [...perms('coordinator'), 'agents.approve']);
+  try {
+    const approved = await expectStatus(`/api/admin/agents/actions/${queued.data.data.id}/approve`, 200, { method: 'POST', token: instructor, body: {} });
+    assert.equal(approved.action.status, 'executed', JSON.stringify(approved.action));
+    const thread = await expectStatus('/api/lessons/lesson_cisco_ccna_vlan/qa', 200, { token: student });
+    const posted = thread.find(q => q.id === open.id).replies.find(r => r.content === answer);
+    assert.equal(posted?.user_name, 'Prof. Alice Smith');
+    const now = await api('/api/v1/lesson-questions?status=answered&lesson_id=lesson_cisco_ccna_vlan', agent.key);
+    assert.ok(now.data.data.some(q => q.id === open.id), 'now counted as answered');
+
+    // A coordinator may approve agent work but cannot post in a course they do not teach.
+    const other = await run({ tool: 'answer_lesson_question', input: { question_id: done.id, answer: 'เก็บใน NVRAM และโหลดตอนบูต' } });
+    const failed = await expectStatus(`/api/admin/agents/actions/${other.data.data.id}/approve`, 200, { method: 'POST', token: coord, body: {} });
+    assert.equal(failed.action.status, 'failed');
+    assert.match(failed.action.error, /ผู้สอนของคอร์สนี้/);
+  } finally {
+    await put('instructor', perms('instructor'));
+    await put('coordinator', perms('coordinator'));
+  }
 });
 
 test('state changes after submission fail the action instead of acting on stale data', async () => {
