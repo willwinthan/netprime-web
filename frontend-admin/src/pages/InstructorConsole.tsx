@@ -5,6 +5,7 @@ import { COURSE_STATUS, CourseStatus } from "./CoursesAdminPage";
 import { MetricsCard } from "../components/MetricsCard";
 import { CourseWorkspace } from "../components/instructor/CourseWorkspace";
 import { StudentEmailLookup } from "../components/instructor/StudentEmailLookup";
+import { ImageField } from "../components/instructor/CourseBasicsForm";
 import { InstructorCourse, WorkspaceTab, isWorkspaceTab } from "../components/instructor/types";
 import { navigate, useLocation } from "../site/router";
 import { CourseBuilder } from "../components/course/CourseBuilder";
@@ -118,7 +119,6 @@ export const InstructorConsole: React.FC = () => {
   // Add Course state
   const [courseTitle, setCourseTitle] = useState("");
   const [courseDesc, setCourseDesc] = useState("");
-  const [courseThumb, setCourseThumb] = useState("");
 
   // Course CRUD state
 
@@ -333,7 +333,6 @@ export const InstructorConsole: React.FC = () => {
       const created = await api.post<{ course: { id: string } }>("/instructor/courses", {
         title: courseTitle,
         description: courseDesc,
-        thumbnail_url: courseThumb || undefined,
         price: Number(coursePrice),
         cover_image_url: courseCover || undefined,
         access_duration_days: courseDuration ? Number(courseDuration) : null
@@ -342,7 +341,6 @@ export const InstructorConsole: React.FC = () => {
       // Reset fields and return
       setCourseTitle("");
       setCourseDesc("");
-      setCourseThumb("");
       setCoursePrice(0);
       setCourseCover("");
       setCourseDuration("");
@@ -475,7 +473,6 @@ export const InstructorConsole: React.FC = () => {
                 setModalError(null);
                 setCourseTitle("");
                 setCourseDesc("");
-                setCourseThumb("");
                 setCoursePrice(0);
                 setCourseCover("");
                 setCourseDuration("");
@@ -767,27 +764,9 @@ export const InstructorConsole: React.FC = () => {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label">URL รูปปก (ไม่บังคับ)</label>
-            <input
-              type="url"
-              placeholder="https://images.unsplash.com/... (URL รูปภาพ)"
-              value={courseThumb}
-              onChange={(e) => setCourseThumb(e.target.value)}
-              className="form-input"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">URL แบนเนอร์หน้าปก (ไม่บังคับ)</label>
-            <input
-              type="url"
-              placeholder="https://images.unsplash.com/... (URL รูปแบนเนอร์ขนาดใหญ่)"
-              value={courseCover}
-              onChange={(e) => setCourseCover(e.target.value)}
-              className="form-input"
-            />
-          </div>
+          {/* One picture per course (courses.cover_image_url): the catalogue card and the course page banner. */}
+          <ImageField label="รูปปกคอร์ส (ไม่บังคับ)" hint="แสดงบนการ์ดคอร์สและแบนเนอร์หน้าคอร์ส แนะนำ 1280×720 px (16:9) ไม่เกิน 5 MB" wide
+            value={courseCover} onChange={setCourseCover} />
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
             <div className="form-group">

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { BookOpen, Search, CheckCircle2, Undo2, Archive, Eye, RefreshCw } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { LESSON_TYPE_LABEL, LessonType } from "../components/course/types";
+import { ReviewAssessments, ReviewLessonView } from "../components/course/ReviewPreview";
 import { Chip, Modal, Field, ErrorBox, Empty, tableStyle, thStyle, tdStyle, formatDateTime, formatBaht } from "../components/site-admin/ui";
 
 export type CourseStatus = "draft" | "review" | "published" | "archived";
@@ -48,6 +49,8 @@ export const CoursesAdminPage: React.FC = () => {
   const [sendBack, setSendBack] = useState<AdminCourse | null>(null);
   const [note, setNote] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
+  // Lesson opened inside the preview so the reviewer can watch or read it.
+  const [openLesson, setOpenLesson] = useState<string | null>(null);
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -84,6 +87,7 @@ export const CoursesAdminPage: React.FC = () => {
 
   const openPreview = async (course: AdminCourse) => {
     try {
+      setOpenLesson(null);
       setPreview(await api.get<Preview>(`/courses/${course.id}`));
     } catch (err: any) {
       setError(err.message);
@@ -221,16 +225,29 @@ export const CoursesAdminPage: React.FC = () => {
             <table style={tableStyle}>
               <tbody>
                 {preview.lessons.map(lesson => (
-                  <tr key={lesson.id}>
-                    <td style={tdStyle}>{lesson.sort_order}. {lesson.title}</td>
-                    <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-muted)" }}>
-                      {lessonSummary(lesson)}{lesson.handout_r2_key ? " • มีเอกสาร" : ""}
-                    </td>
-                  </tr>
+                  <React.Fragment key={lesson.id}>
+                    <tr>
+                      <td style={tdStyle}>{lesson.sort_order}. {lesson.title}</td>
+                      <td style={{ ...tdStyle, fontSize: 12, color: "var(--text-muted)" }}>
+                        {lessonSummary(lesson)}{lesson.handout_r2_key ? " • มีเอกสาร" : ""}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        <button type="button" className="tech-button-outline" style={{ padding: "4px 10px", fontSize: 12 }}
+                          aria-expanded={openLesson === lesson.id} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)}>
+                          {openLesson === lesson.id ? "ปิด" : "เปิดดู"}
+                        </button>
+                      </td>
+                    </tr>
+                    {openLesson === lesson.id && (
+                      <tr><td colSpan={3} style={{ ...tdStyle, background: "rgba(0,0,0,0.02)" }}><ReviewLessonView lesson={lesson} /></td></tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
           )}
+          <h3 style={{ fontSize: 15, margin: "20px 0 8px" }}>ข้อสอบและงาน</h3>
+          <ReviewAssessments courseId={preview.course.id} />
         </Modal>
       )}
     </div>
