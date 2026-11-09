@@ -554,8 +554,9 @@ studentRouter.post("/student/courses/:courseId/certificate", rbac(["student", "a
     }
 
     const progress = await learningProgress(db, user.id, courseId);
-    if (progress.totalLessons === 0 || progress.completedLessons !== progress.totalLessons || progress.quizPercent < 80) {
-      return c.json({ error: "ต้องเรียนจบทุกบทเรียนและได้คะแนนแบบทดสอบอย่างน้อย 80% ก่อนรับใบประกาศนียบัตร", progress }, 400);
+    // Old per-lesson practice quizzes no longer count; courses that need a test use the final exam below.
+    if (progress.totalLessons === 0 || progress.completedLessons !== progress.totalLessons) {
+      return c.json({ error: "ต้องเรียนจบทุกบทเรียนก่อนรับใบประกาศนียบัตร", progress }, 400);
     }
     // Courses flagged requires_final_exam also need a passed final exam (handlers/assessments.ts).
     const finalExamError = await finalExamBlock(db, user.id, courseId);

@@ -103,7 +103,7 @@ cd backend && npx wrangler d1 execute netprime-db-staging --remote --env staging
 | U06 | ผู้เรียน: video pause/resume/seek, progress, notes, quiz | บันทึกตรงผู้ใช้; ข้ามการเรียนด้วย request ตรงไม่ได้; quiz ไม่มีเฉลยรั่วก่อนประเมิน |
 | U07 | ผู้เรียน: ขอใบประกาศก่อน/หลังผ่านเกณฑ์, ขอซ้ำ | ออกได้หลัง server ตรวจครบ; ไม่มีใบซ้ำ |
 | U08 | เปิดลิงก์ใบประกาศในหน้าต่างที่ยังไม่ login | เปิดหน้าตรวจใบประกาศ ไม่เข้า OAuth; URL ใช้ host ของ staging |
-| U09 | Instructor: เพิ่ม/แก้/ลบ course, lesson, quiz, upload | ข้อมูลบันทึกและแสดงตรงกัน; upload PUT ผ่าน; อีก instructor แก้ไม่ได้ |
+| U09 | Instructor: เพิ่ม/แก้/ลบ course, lesson, ข้อสอบ (การวัดผล), upload | ข้อมูลบันทึกและแสดงตรงกัน; upload PUT ผ่าน; อีก instructor แก้ไม่ได้ |
 | U10 | Partner: เพิ่ม seat จนเต็ม และเพิ่มพร้อมกันสองคำขอ | ไม่เกิน capacity; duplicate email ไม่เพิ่มตัวนับ; เห็น roster องค์กรตัวเอง |
 | U11 | Internship: สมัคร → company approve → daily log → university approve | ข้อมูลและสถานะถูกต้อง; อีกองค์กร/อีกนักศึกษาเข้าถึงไม่ได้ |
 | U12 | Outsource: สร้าง project → bid → accept → milestone → approve | ทุกขั้นอ้าง schema จริงและตรวจเจ้าของ; notification ถูกผู้รับ |

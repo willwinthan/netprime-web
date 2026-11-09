@@ -36,7 +36,7 @@
 
 1. Public signup เป็น student เท่านั้น การเป็น instructor/admin/partner และการเข้าองค์กรต้องผ่านผู้มีสิทธิ์
 2. ไม่ใช้ mock identity หรือ passwordless quick switch ในหน้าใช้งานจริง ทดสอบ local ด้วยบัญชี fixture และรหัสผ่านจริง
-3. ผู้ใช้ยืนยัน completion policy: เรียนครบทุกบทเรียนและตอบแบบทดสอบถูกอย่างน้อย 80% ของคำถามในคอร์ส
+3. Completion policy (ปรับ 8 พ.ย. 2569): เรียนครบทุกบทเรียน และสอบผ่านข้อสอบปลายภาคเมื่อคอร์สกำหนด แบบทดสอบท้ายบทแบบเดิม (เกณฑ์ 80%) เลิกนับแล้ว
 4. OAuth/payment/email/Stream/AI จริงต้องมี staging credentials และ domain ที่ผู้ใช้กำหนด งานโค้ดและ provider stubs ทำได้ก่อน; ยังไม่ deploy หรือเรียกเก็บเงินจริง
 5. ยังไม่มี Git repository ใน workspace: ต้องจัด source control/remote ก่อนทำ CI และ release history
 6. ส่งมอบเป็น phase ที่ตรวจซ้ำได้ รายงานสถานะแยก implemented / locally verified / provider verified / UAT accepted

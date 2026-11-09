@@ -13,8 +13,7 @@ test('certificate requires every lesson and at least 80% server-graded answers',
   await expectStatus('/api/student/lessons/lesson_cf_workers_intro/quiz-attempts', 403, {
     method: 'POST', token: learner.token, body: { score: 100, total_questions: 100 } });
 
-  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(learner.token, id)));
-  await expectStatus(cert, 400, { method: 'POST', token: learner.token });
+  // Old per-lesson practice quizzes still answer (without leaking the key) but no longer gate the certificate.
   const correct = await expectStatus('/api/student/quizzes/quiz_workers_intro_1/submit', 200,
     { method: 'POST', token: learner.token, body: { answer_index: 0 } });
   assert.equal(correct.correct, true);
@@ -22,8 +21,7 @@ test('certificate requires every lesson and at least 80% server-graded answers',
   await expectStatus('/api/student/quizzes/quiz_workers_hono_1/submit', 200,
     { method: 'POST', token: learner.token, body: { answer_index: 1 } });
   await expectStatus(cert, 400, { method: 'POST', token: learner.token });
-  await expectStatus('/api/student/quizzes/quiz_workers_hono_1/submit', 200,
-    { method: 'POST', token: learner.token, body: { answer_index: 0 } });
+  await Promise.all(['lesson_cf_workers_intro', 'lesson_cf_workers_hono'].map(id => watchVideoLesson(learner.token, id)));
   const issued = await expectStatus(cert, 201, { method: 'POST', token: learner.token });
   assert.ok(issued.certificate.certificate_code);
 });
@@ -83,4 +81,15 @@ test('suspended accounts lose video links and optional sign-in', async () => {
   await expectStatus(video, 401);
   const anonymous = await expectStatus('/api/courses', 200, { token: session.token });
   assert.equal(anonymous.find(c => c.id === 'course_cf_workers').progress_percent, null);
+});
+
+test('old per-lesson quizzes are read-only: instructors use exams instead', async () => {
+  const teacher = await login('instructor@netprime.com', 'inst123');
+  const created = await request('/api/instructor/quizzes', { method: 'POST', token: teacher.token,
+    body: { lesson_id: 'lesson_cf_workers_intro', question: 'ใหม่?', options_json: ['ก', 'ข'], correct_option_index: 0 } });
+  assert.equal(created.status, 410);
+  assert.equal(created.data.code, 'legacy_quiz_retired');
+  assert.equal((await request('/api/instructor/quizzes/quiz_workers_intro_1', { method: 'DELETE', token: teacher.token })).status, 410);
+  const existing = await expectStatus('/api/instructor/lessons/lesson_cf_workers_intro/quizzes', 200, { token: teacher.token });
+  assert.ok(existing.some(q => q.id === 'quiz_workers_intro_1'));
 });

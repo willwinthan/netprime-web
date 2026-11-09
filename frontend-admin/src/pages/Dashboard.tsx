@@ -2625,6 +2625,7 @@ export const Dashboard: React.FC = () => {
                         <FileText size={18} color="var(--primary)" />
                         <h4 style={{ fontSize: "16px", color: "var(--text-primary)" }}>แบบทดสอบฝึกหัด</h4>
                       </div>
+                      <p style={{ fontSize: "12px", color: "var(--text-secondary)", margin: "-8px 0 16px" }}>ทำเพื่อทบทวนความเข้าใจ คะแนนส่วนนี้ไม่นับในเงื่อนไขรับใบประกาศนียบัตร</p>
 
                       {!enrollment ? (
                         <div style={{ background: "rgba(0,0,0,0.02)", border: "1px dashed var(--border-active)", padding: "32px", borderRadius: "1.5rem", textAlign: "center" }}>
@@ -3439,7 +3440,6 @@ export const Dashboard: React.FC = () => {
                       }}>
                         <p style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "8px", lineHeight: "1.4" }}>
                           🏆 <strong>เรียนครบทุกบทเรียนแล้ว</strong> ใบประกาศนียบัตรต้องเรียนครบทุกบทเรียน
-                          {quizzes.length > 0 && " ตอบแบบทดสอบท้ายบทถูกอย่างน้อย 80%"}
                           {finalExamRequired && " และสอบผ่านข้อสอบปลายภาค (ทำได้ที่แท็บ \"ข้อสอบและงาน\")"}
                         </p>
                         {certificate ? (
