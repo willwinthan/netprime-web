@@ -2451,7 +2451,7 @@ export const HRConsole: React.FC = () => {
 
                 {inviteMode === "password" && (
                   <div className="form-group">
-                    <label className="form-label">รหัสผ่านเริ่มต้น (อย่างน้อย 12 ตัวอักษร)</label>
+                    <label className="form-label">รหัสผ่านชั่วคราว (อย่างน้อย 12 ตัวอักษร พนักงานต้องเปลี่ยนตอนเข้าสู่ระบบครั้งแรก)</label>
                     <input
                       type="password"
                       autoComplete="new-password"

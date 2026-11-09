@@ -106,7 +106,7 @@ export const ImportUsersDialog: React.FC<{ fields: ProfileField[]; onClose: () =
           <fieldset style={{ border: 0, padding: 0, margin: 0, fontSize: 14, display: "grid", gap: 4 }}>
             <legend className="form-label">บัญชีใหม่</legend>
             <label><input type="radio" checked={setup === "invite"} onChange={() => { setSetup("invite"); setPreview(null); }} /> ส่งลิงก์เชิญทางอีเมล (แนะนำ)</label>
-            <label><input type="radio" checked={setup === "password"} onChange={() => { setSetup("password"); setPreview(null); }} /> ใช้รหัสผ่านชั่วคราวจากคอลัมน์ password</label>
+            <label><input type="radio" checked={setup === "password"} onChange={() => { setSetup("password"); setPreview(null); }} /> ใช้รหัสผ่านชั่วคราวจากคอลัมน์ password (ผู้ใช้ต้องเปลี่ยนตอนเข้าสู่ระบบครั้งแรก)</label>
           </fieldset>
           <button type="button" className="tech-button-primary" disabled={!file || busy} onClick={runPreview} style={{ marginLeft: "auto" }}>{busy && !preview ? "กำลังตรวจ…" : "ตรวจสอบไฟล์"}</button>
         </div>

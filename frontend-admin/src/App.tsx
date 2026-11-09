@@ -8,6 +8,7 @@ import { GlobalSearch } from "./components/search/GlobalSearch";
 import { usePresenceHeartbeat } from "./hooks/usePresence";
 import { sendSignupAttribution } from "./components/marketing/runtime";
 import { SsoCompletePage } from "./components/settings/SsoLogin";
+import { ForcePasswordChange } from "./components/settings/ForcePasswordChange";
 import { MaintenanceBanner } from "./components/settings/MaintenanceBanner";
 import { InstallAppButton } from "./pwa/pwa";
 import logo from "../logo/NetPrimeLogo.png";
@@ -357,6 +358,11 @@ export const App: React.FC = () => {
             style={{ width: "100%" }}
           >
             <PublicSite loggedIn={!!api.token} onLogin={handleLoginSuccess} />
+          </m.div>
+        ) : api.user?.must_change_password ? (
+          // A password chosen by staff must be replaced before the console opens (middleware/rbac.ts).
+          <m.div key="force-password" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ width: "100%" }}>
+            <ForcePasswordChange />
           </m.div>
         ) : (
           // Authenticated Workspace Layout

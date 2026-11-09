@@ -63,6 +63,9 @@ export type Env = {
   };
 };
 
+/** Routes an account flagged must_change_password may still call (migrations/0040_must_change_password.sql). */
+const PASSWORD_CHANGE_PATHS = new Set(["/api/auth/me", "/api/auth/change-password", "/api/auth/logout"]);
+
 /**
  * RBAC Protection Middleware
  * - Verifies Bearer JWT tokens.
@@ -106,8 +109,8 @@ export function rbac(allowedRoles?: Array<UserPayload["role"]>): MiddlewareHandl
 
       // Reload identity so changed roles, organizations and deleted users take effect.
       const account = await c.env.DB.prepare(`SELECT u.id, u.email, u.name, COALESCE(u.staff_role, u.role) AS primary_role, ${rolesColumn("u")} AS role_list,
-        u.partner_id, u.status, u.sessions_revoked_at FROM users u WHERE u.id = ?`).bind(payload.id)
-        .first<{ id: string; email: string; name: string; primary_role: string; role_list: string | null; partner_id: string | null; status: string; sessions_revoked_at: string | null }>();
+        u.partner_id, u.status, u.sessions_revoked_at, u.must_change_password FROM users u WHERE u.id = ?`).bind(payload.id)
+        .first<{ id: string; email: string; name: string; primary_role: string; role_list: string | null; partner_id: string | null; status: string; sessions_revoked_at: string | null; must_change_password: number | null }>();
       if (!account) return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ: ไม่พบบัญชีผู้ใช้นี้แล้ว" }, 401);
       if (account.status !== "active") return c.json({ error: "บัญชีนี้ถูกระงับ กรุณาติดต่อผู้ดูแลระบบ" }, 401);
       // "Sign out everywhere": tokens issued before the revocation time stop working.
@@ -116,6 +119,10 @@ export function rbac(allowedRoles?: Array<UserPayload["role"]>): MiddlewareHandl
         if (!Number.isFinite(payload.iat_ms) || payload.iat_ms! <= revokedAt) {
           return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ: เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่" }, 401);
         }
+      }
+      // A password chosen by someone else must be replaced before anything else works.
+      if (account.must_change_password && !PASSWORD_CHANGE_PATHS.has(c.req.path.replace(/\/+$/, ""))) {
+        return c.json({ error: "กรุณาตั้งรหัสผ่านใหม่ของคุณก่อนใช้งานระบบ", code: "password_change_required" }, 403);
       }
       const roles = parseRoles(account.role_list, account.primary_role);
 
