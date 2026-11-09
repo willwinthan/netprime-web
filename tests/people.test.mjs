@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, verifyEmail } from './helpers.mjs';
 
 const run = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const mail = label => `${label}.${run}@example.invalid`;
@@ -282,6 +282,7 @@ test('segment rules match the right users for every rule type', async () => {
 
   // Activity: A signs in and buys a free course; B never signs in.
   const a = await login(mail('sa'), 'segment-pass-123');
+  await verifyEmail(a.token);
   same(await segmentIds({ tags: [t1], last_active_after: new Date(Date.now() - 600000).toISOString() }), [A]);
   same(await segmentIds({ tags: [t1], last_active_before: new Date(Date.now() - 600000).toISOString() }), [B]);
   const order = await request('/api/student/orders', { method: 'POST', token: a.token, body: { course_id: 'course_nutanix_ncp', voucher_code: 'DEMO-FREE100' } });

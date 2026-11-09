@@ -210,7 +210,8 @@ platformRouter.get("/public/platform", async (c) => {
   return c.json({
     school_name: s.school_name, contact_email: s.contact_email, contact_phone: s.contact_phone, support_email: s.support_email,
     timezone: s.timezone, default_language: s.default_language,
-    signup: { open: s.signup.open, allowed_domains: s.signup.allowed_domains, require_email_verification: s.signup.require_email_verification },
+    signup: { open: s.signup.open, allowed_domains: s.signup.allowed_domains, require_email_verification: s.signup.require_email_verification,
+      require_email_verification_for_payment: s.signup.require_email_verification_for_payment },
     maintenance: s.maintenance.active ? { active: true, message: s.maintenance.message, level: s.maintenance.level } : { active: false }
   });
 });

@@ -11,7 +11,7 @@ export interface SchoolSettings {
   support_email: string | null;
   timezone: string;
   default_language: "th" | "en";
-  signup: { open: boolean; allowed_domains: string[]; require_email_verification: boolean };
+  signup: { open: boolean; allowed_domains: string[]; require_email_verification: boolean; require_email_verification_for_payment: boolean };
   maintenance: { active: boolean; message: string | null; level: "info" | "warning" };
 }
 
@@ -83,6 +83,8 @@ export const SchoolSettingsPanel: React.FC<{ onOpenBranding?: () => void }> = ({
           </Field>
           <Toggle checked={form.signup.require_email_verification} onChange={v => set("signup", { ...form.signup, require_email_verification: v })}
             label="ต้องยืนยันอีเมลก่อนเริ่มเรียน" hint="ผู้เรียนที่ยังไม่ยืนยันอีเมลจะเข้าเรียนสดและบทเรียนที่เปิดใช้การตรวจนี้ไม่ได้ (ผู้สอนและเจ้าหน้าที่ไม่ถูกจำกัด)" />
+          <Toggle checked={form.signup.require_email_verification_for_payment} onChange={v => set("signup", { ...form.signup, require_email_verification_for_payment: v })}
+            label="ต้องยืนยันอีเมลก่อนชำระเงิน" hint="ผู้เรียนที่ยังไม่ยืนยันอีเมลจะสร้างคำสั่งซื้อและแนบสลิปไม่ได้ เพราะใบเสร็จและการแจ้งเตือนส่งทางอีเมล ปิดได้ชั่วคราวเมื่อระบบยังส่งอีเมลจริงไม่ได้" />
         </div>
       </Card>
 

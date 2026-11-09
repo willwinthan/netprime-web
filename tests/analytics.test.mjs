@@ -1,7 +1,7 @@
 // Analytics: presence heartbeats, school dashboard KPIs, reports, events log, CSV export and global search.
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, verifyEmail } from './helpers.mjs';
 
 let admin, coord, instructor, student1, student3;
 const post = (path, token, body) => request(path, { method: 'POST', token, body });
@@ -67,6 +67,7 @@ test('dashboard KPIs follow new signups, enrollments and paid orders; refunds ar
   const signup = await post('/api/auth/register', null, { email, password: 'analytics-pass-123', name: 'Analytics Learner' });
   assert.equal(signup.status, 201, JSON.stringify(signup.data));
   const learner = signup.data;
+  await verifyEmail(learner.token);
 
   // Paid order counts toward sales and revenue.
   const order = await post('/api/student/orders', learner.token, { course_id: 'course_aws_sec' });
@@ -233,6 +234,7 @@ test('instructor learner report shows activity in their own courses only, not pl
   const created = await post('/api/admin/accounts', admin.token, { email, name: 'Scoped Activity', roles: ['student'], password: 'analytics-pass-123' });
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const learner = await login(email, 'analytics-pass-123');
+  await verifyEmail(learner.token);
   const order = await post('/api/student/orders', learner.token, { course_id: 'course_cf_workers', voucher_code: 'DEMO-FREE100' });
   assert.equal(order.status, 201, JSON.stringify(order.data));
   await new Promise(resolve => setTimeout(resolve, 50));

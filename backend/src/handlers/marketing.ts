@@ -245,7 +245,8 @@ async function approvedReviews(db: D1Database, courseId: string, limit: number, 
 
 /**
  * Sales page data: course facts, sales fields when present, curriculum outline (titles only),
- * instructor, rating + approved reviews, and upcoming training sessions for the course.
+ * instructor, the final exam and certificate rule, rating + approved reviews, and upcoming
+ * training sessions for the course.
  * GET /api/public/marketing/courses/:id   (id or slug)
  */
 marketingRouter.get("/public/marketing/courses/:id", async (c) => {
@@ -277,6 +278,10 @@ marketingRouter.get("/public/marketing/courses/:id", async (c) => {
     FROM training_sessions s WHERE s.course_id = ? AND s.status = 'open' AND s.end_date >= ? ORDER BY s.start_date LIMIT 6`)
     .bind(row.id, today).all<Row>();
 
+  // The same rule as finalExamBlock (assessments.ts): only a published final exam on a course that requires it gates the certificate.
+  const finalExam = await db.prepare(`SELECT pass_percent, time_limit_minutes FROM exams WHERE course_id = ? AND is_final = 1 AND status = 'published'
+    ORDER BY created_at LIMIT 1`).bind(row.id).first<{ pass_percent: number; time_limit_minutes: number | null }>();
+
   const rating = await courseRating(db, row.id);
   c.header("Cache-Control", "public, max-age=60");
   return c.json({
@@ -284,6 +289,8 @@ marketingRouter.get("/public/marketing/courses/:id", async (c) => {
       id: row.id, title: row.title, description: row.description, price: row.price, cover_image_url: row.cover_image_url,
       access_duration_days: row.access_duration_days, published_at: row.published_at, lesson_count: lessons.results.length,
       category, instructor: { name: row.instructor_name || "ทีมผู้สอน NetPrime" },
+      final_exam: finalExam ? { pass_percent: finalExam.pass_percent, time_limit_minutes: finalExam.time_limit_minutes } : null,
+      certificate: { requires_final_exam: !!finalExam && !!row.requires_final_exam },
       ...salesFields(row)
     },
     outline,

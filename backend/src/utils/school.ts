@@ -10,6 +10,9 @@ import type { Env } from "../middleware/rbac";
  *  - requireVerifiedEmail(): middleware placed after rbac() on learner routes; when the school
  *    requires verification, students and partner learners with an unconfirmed email get 403
  *    { code: "email_unverified" }. Staff roles (admin, coordinator, instructor) always pass.
+ *  - requireVerifiedEmailForPayment(): the same gate for buying a course and uploading a transfer
+ *    slip, driven by signup.require_email_verification_for_payment (on by default), so receipts
+ *    and payment notices only go to an address the buyer has confirmed.
  */
 export interface SchoolSettings {
   school_name: string;
@@ -18,7 +21,7 @@ export interface SchoolSettings {
   support_email: string | null;
   timezone: string;
   default_language: "th" | "en";
-  signup: { open: boolean; allowed_domains: string[]; require_email_verification: boolean };
+  signup: { open: boolean; allowed_domains: string[]; require_email_verification: boolean; require_email_verification_for_payment: boolean };
   maintenance: { active: boolean; message: string | null; level: "info" | "warning" };
 }
 
@@ -29,7 +32,7 @@ export const DEFAULT_SCHOOL: SchoolSettings = {
   support_email: null,
   timezone: "Asia/Bangkok",
   default_language: "th",
-  signup: { open: true, allowed_domains: [], require_email_verification: false },
+  signup: { open: true, allowed_domains: [], require_email_verification: false, require_email_verification_for_payment: true },
   maintenance: { active: false, message: null, level: "info" }
 };
 
@@ -88,7 +91,7 @@ export function parseSchoolSettings(body: unknown, current: SchoolSettings = DEF
   if (b.signup !== undefined) {
     if (!b.signup || typeof b.signup !== "object") return { error: "เงื่อนไขการสมัครไม่ถูกต้อง" };
     const s = b.signup;
-    for (const key of ["open", "require_email_verification"] as const) {
+    for (const key of ["open", "require_email_verification", "require_email_verification_for_payment"] as const) {
       if (s[key] === undefined) continue;
       if (typeof s[key] !== "boolean") return { error: "ค่าเปิด/ปิดต้องเป็น true หรือ false" };
       next.signup[key] = s[key];
@@ -152,19 +155,32 @@ export async function signupPolicyError(db: D1Database, email: string): Promise<
 
 const STAFF_ROLES = ["admin", "coordinator", "instructor"];
 
+async function emailUnverified(c: Parameters<MiddlewareHandler<Env>>[0], rule: (signup: SchoolSettings["signup"]) => boolean): Promise<boolean> {
+  const user = c.get("user");
+  if (user.roles.some(r => STAFF_ROLES.includes(r))) return false;
+  const { signup } = await loadSchoolSettings(c.env.DB);
+  if (!rule(signup)) return false;
+  const row = await c.env.DB.prepare("SELECT email_verified_at FROM users WHERE id = ?").bind(user.id).first<{ email_verified_at: string | null }>();
+  return !row?.email_verified_at;
+}
+
 /** Use after rbac() on learner endpoints; see the module comment. */
 export function requireVerifiedEmail(): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ" }, 401);
-    if (!user.roles.some(r => STAFF_ROLES.includes(r))) {
-      const { signup } = await loadSchoolSettings(c.env.DB);
-      if (signup.require_email_verification) {
-        const row = await c.env.DB.prepare("SELECT email_verified_at FROM users WHERE id = ?").bind(user.id).first<{ email_verified_at: string | null }>();
-        if (!row?.email_verified_at) {
-          return c.json({ error: "กรุณายืนยันอีเมลก่อนเริ่มเรียน (ส่งลิงก์ยืนยันใหม่ได้จากหน้าโปรไฟล์)", code: "email_unverified" }, 403);
-        }
-      }
+    if (!c.get("user")) return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ" }, 401);
+    if (await emailUnverified(c, s => s.require_email_verification)) {
+      return c.json({ error: "กรุณายืนยันอีเมลก่อนเริ่มเรียน (ส่งลิงก์ยืนยันใหม่ได้จากหน้าโปรไฟล์)", code: "email_unverified" }, 403);
+    }
+    await next();
+  };
+}
+
+/** Use after rbac() on order and slip endpoints; see the module comment. */
+export function requireVerifiedEmailForPayment(): MiddlewareHandler<Env> {
+  return async (c, next) => {
+    if (!c.get("user")) return c.json({ error: "ยังไม่ได้เข้าสู่ระบบ" }, 401);
+    if (await emailUnverified(c, s => s.require_email_verification_for_payment)) {
+      return c.json({ error: "กรุณายืนยันอีเมลก่อนสั่งซื้อหรือแนบสลิป ใบเสร็จและการแจ้งเตือนการชำระเงินจะส่งไปที่อีเมลนี้", code: "email_unverified" }, 403);
     }
     await next();
   };

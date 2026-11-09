@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { dangerCode, expectStatus, login, request, watchVideoLesson } from './helpers.mjs';
+import { dangerCode, expectStatus, login, request, watchVideoLesson, verifyEmail } from './helpers.mjs';
 
 const COURSE = 'course_cf_workers';
 const LESSON = 'lesson_cf_workers_intro';
@@ -14,6 +14,7 @@ async function account(tag, roles, { enroll = true } = {}) {
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const session = await login(email, PASSWORD);
   if (enroll) {
+    await verifyEmail(session.token);
     // DEMO-FREE100 opens the paid Workers course for this account.
     const order = await request('/api/student/orders', { method: 'POST', token: session.token,
       body: { course_id: COURSE, voucher_code: 'DEMO-FREE100' } });
@@ -317,6 +318,10 @@ test('requires_final_exam gates the certificate until the final exam is passed',
   const final = await createExam({ title: 'ปลายภาค', question_ids: [qid], is_final: true, pass_percent: 100 });
   await expectStatus(`/api/instructor/courses/${COURSE}/assessment-settings`, 403, { method: 'PATCH', token: otherTeacher.token, body: { requires_final_exam: true } });
   await expectStatus(`/api/instructor/courses/${COURSE}/assessment-settings`, 200, { method: 'PATCH', token: teacher.token, body: { requires_final_exam: true } });
+  // The public sales page tells buyers about the final exam and that it gates the certificate.
+  const sales = (await expectStatus(`/api/public/marketing/courses/${COURSE}`, 200)).course;
+  assert.equal(sales.final_exam.pass_percent, 100);
+  assert.equal(sales.certificate.requires_final_exam, true);
 
   const cert = `/api/student/courses/${COURSE}/certificate`;
   const blocked = await expectStatus(cert, 400, { method: 'POST', token: student.token });
@@ -329,6 +334,9 @@ test('requires_final_exam gates the certificate until the final exam is passed',
   const issued = await expectStatus(cert, 201, { method: 'POST', token: student.token });
   assert.ok(issued.certificate.certificate_code);
   await expectStatus(`/api/instructor/courses/${COURSE}/assessment-settings`, 200, { method: 'PATCH', token: teacher.token, body: { requires_final_exam: false } });
+  const ungated = (await expectStatus(`/api/public/marketing/courses/${COURSE}`, 200)).course;
+  assert.ok(ungated.final_exam, 'the exam is still listed');
+  assert.equal(ungated.certificate.requires_final_exam, false);
 });
 
 test('assignments: private uploads, late penalty, return for resubmission and grading', async () => {

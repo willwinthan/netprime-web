@@ -20,6 +20,8 @@ interface SalesCourse {
   slug: string | null; subtitle: string | null; learning_outcomes: string[]; requirements: string[]; audience: string[];
   level: string | null; language: string | null; duration_hours: number | null; promo_video_url: string | null;
   faq: Array<{ question: string; answer: string }>;
+  final_exam: { pass_percent: number; time_limit_minutes: number | null } | null;
+  certificate: { requires_final_exam: boolean };
 }
 interface SalesSession {
   id: string; title: string; start_date: string; end_date: string; time_text: string | null; mode: SessionMode; location: string | null;
@@ -165,7 +167,19 @@ export const CoursePage: React.FC<{ courseId: string }> = ({ courseId }) => {
     ...(course.duration_hours ? [["ความยาว", `${course.duration_hours} ชั่วโมง`] as [string, string]] : []),
     ...(course.level ? [["ระดับ", LEVEL_LABEL[course.level] || course.level] as [string, string]] : []),
     ...(course.language ? [["ภาษา", course.language] as [string, string]] : []),
-    ["ระยะเวลาเข้าถึง", course.access_duration_days ? `${course.access_duration_days} วัน` : "ตลอดชีพ"]
+    ["ระยะเวลาเข้าถึง", course.access_duration_days ? `${course.access_duration_days} วัน` : "ตลอดชีพ"],
+    ...(course.final_exam ? [["ข้อสอบปลายภาค", `มี · ผ่านที่ ${course.final_exam.pass_percent}%`] as [string, string]] : []),
+    ["ใบประกาศนียบัตร", "มี · ตรวจสอบได้ออนไลน์"]
+  ];
+  const finalExamLine = course.final_exam
+    ? `ข้อสอบปลายภาค เกณฑ์ผ่าน ${course.final_exam.pass_percent}%${course.final_exam.time_limit_minutes ? ` เวลาทำ ${course.final_exam.time_limit_minutes} นาที` : ""}`
+    : null;
+  const assessmentItems = [
+    ...(finalExamLine ? [finalExamLine] : []),
+    course.certificate.requires_final_exam
+      ? "ใบประกาศนียบัตรเมื่อเรียนครบทุกบทและสอบผ่านข้อสอบปลายภาค"
+      : "ใบประกาศนียบัตรเมื่อผ่านเงื่อนไขของคอร์ส",
+    "ทุกใบมีรหัสและลิงก์ให้ผู้อื่นตรวจสอบได้ เพิ่มลงโปรไฟล์ LinkedIn ได้"
   ];
 
   const cta = enrolled
@@ -240,6 +254,10 @@ export const CoursePage: React.FC<{ courseId: string }> = ({ courseId }) => {
               ))}
             </div>
           )}
+        </Section>
+
+        <Section id="assessment" title="การวัดผลและใบประกาศนียบัตร">
+          <div className="ps-card" style={{ padding: 22 }}><Checklist items={assessmentItems} /></div>
         </Section>
 
         {course.requirements.length > 0 && <Section id="requirements" title="พื้นฐานที่ควรมี"><ul style={{ margin: 0, paddingLeft: 22, display: "grid", gap: 6 }}>{course.requirements.map((r, i) => <li key={i}>{r}</li>)}</ul></Section>}

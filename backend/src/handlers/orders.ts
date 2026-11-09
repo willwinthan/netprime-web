@@ -8,6 +8,7 @@ import { trackEvent } from "../utils/events";
 import { checkCoursePrerequisites, prerequisiteMessage } from "../utils/courseContent";
 import { currentVatRate, loadTaxProfile, parseBuyerTaxDetails, vatBreakdown } from "../utils/tax";
 import { recordAffiliateConversion, reverseAffiliateConversion } from "./marketing";
+import { requireVerifiedEmailForPayment } from "../utils/school";
 
 /**
  * Manual bank-transfer orders. Card payments (Omise) are switched off: a learner creates an order,
@@ -608,7 +609,7 @@ ordersRouter.get("/student/payment-instructions", rbac(), async (c) => {
  * Create a bank-transfer order (or enroll at once when a voucher makes it free)
  * POST /api/student/orders { course_id | product_id, voucher_code?, installments?, tax_invoice? }
  */
-ordersRouter.post("/student/orders", rbac(["student", "admin"]), async (c) => {
+ordersRouter.post("/student/orders", rbac(["student", "admin"]), requireVerifiedEmailForPayment(), async (c) => {
   const user = c.get("user");
   const db = c.env.DB;
   const body = await c.req.json<{ course_id?: unknown; product_id?: unknown; voucher_code?: unknown; installments?: unknown; tax_invoice?: unknown }>().catch(() => null);
@@ -765,7 +766,7 @@ ordersRouter.get("/student/orders/:id", rbac(["student", "admin"]), async (c) =>
  * Upload the transfer slip (PNG/JPG/WEBP/PDF up to 5 MB), stored privately in R2 under slips/
  * POST /api/student/orders/:id/slip  (multipart field "file")
  */
-ordersRouter.post("/student/orders/:id/slip", rbac(["student", "admin"]), async (c) => {
+ordersRouter.post("/student/orders/:id/slip", rbac(["student", "admin"]), requireVerifiedEmailForPayment(), async (c) => {
   const user = c.get("user");
   const db = c.env.DB;
   await expireStale(db, user.id);
@@ -797,7 +798,7 @@ ordersRouter.post("/student/orders/:id/slip", rbac(["student", "admin"]), async 
  * Slip for one installment
  * POST /api/student/orders/:id/installments/:seq/slip  (multipart field "file")
  */
-ordersRouter.post("/student/orders/:id/installments/:seq/slip", rbac(["student", "admin"]), async (c) => {
+ordersRouter.post("/student/orders/:id/installments/:seq/slip", rbac(["student", "admin"]), requireVerifiedEmailForPayment(), async (c) => {
   const user = c.get("user");
   const db = c.env.DB;
   await expireStale(db, user.id);

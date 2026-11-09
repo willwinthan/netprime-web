@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, test } from 'node:test';
-import { expectStatus, login, request } from './helpers.mjs';
+import { expectStatus, login, request, verifyEmail } from './helpers.mjs';
 import { coursePageMeta, headTags, missingCourseMeta, sitemapEntries } from '../frontend-admin/worker/meta.ts';
 
 let admin, coord, student, instructor;
@@ -18,6 +18,7 @@ async function register(tag) {
     email: `mkt-${tag}-${stamp}@example.invalid`, password: 'Marketing-Pass-123', name: `Marketing ${tag} Tester`
   } });
   assert.ok([200, 201].includes(res.status), JSON.stringify(res.data));
+  await verifyEmail(res.data.token);
   return res.data;
 }
 

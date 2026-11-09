@@ -193,3 +193,29 @@ export const VerifyEmailBanner: React.FC<{ onOpenProfile?: () => void }> = ({ on
     </div>
   );
 };
+
+/**
+ * Inline notice for flows that need a confirmed email (buying a course, uploading a slip).
+ * "ยืนยันแล้ว" reloads the account so a link opened in another tab unlocks the flow at once.
+ */
+export const VerifyEmailNotice: React.FC<{ text: string }> = ({ text }) => {
+  const api = useApi();
+  const { busy, message, error, resend } = useResendVerification();
+  const [checking, setChecking] = useState(false);
+  const recheck = async () => {
+    setChecking(true);
+    try { await api.refreshUser(); } catch { /* the notice stays */ } finally { setChecking(false); }
+  };
+  if (!api.user) return null;
+  return (
+    <div role="alert" style={{ display: "grid", gap: 10, padding: "12px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.5,
+      background: "#fff4dc", color: "#7a4b00", border: "1px solid rgba(245,158,11,0.3)" }}>
+      <div style={{ display: "flex", gap: 8 }}><Mail size={16} style={{ flexShrink: 0, marginTop: 2 }} /><span>{text} <strong>{api.user.email}</strong></span></div>
+      {(error || message) && <span>{error || message}</span>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" className="tech-button-outline" style={{ padding: "4px 12px", fontSize: 13 }} disabled={busy || !!message} onClick={resend}>{busy ? "กำลังส่ง…" : "ส่งลิงก์ยืนยันอีกครั้ง"}</button>
+        <button type="button" className="tech-button-outline" style={{ padding: "4px 12px", fontSize: 13 }} disabled={checking} onClick={recheck}>{checking ? "กำลังตรวจสอบ…" : "ยืนยันแล้ว ตรวจสอบอีกครั้ง"}</button>
+      </div>
+    </div>
+  );
+};
