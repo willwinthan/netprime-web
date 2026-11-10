@@ -5,7 +5,7 @@ import { COURSE_STATUS, CourseStatus } from "./CoursesAdminPage";
 import { MetricsCard } from "../components/MetricsCard";
 import { CourseWorkspace } from "../components/instructor/CourseWorkspace";
 import { StudentEmailLookup } from "../components/instructor/StudentEmailLookup";
-import { ImageField } from "../components/instructor/CourseBasicsForm";
+import { CoverPicker } from "../components/instructor/CoverPicker";
 import { InstructorCourse, WorkspaceTab, isWorkspaceTab } from "../components/instructor/types";
 import { navigate, useLocation } from "../site/router";
 import { CourseBuilder } from "../components/course/CourseBuilder";
@@ -765,8 +765,7 @@ export const InstructorConsole: React.FC = () => {
           </div>
 
           {/* One picture per course (courses.cover_image_url): the catalogue card and the course page banner. */}
-          <ImageField label="รูปปกคอร์ส (ไม่บังคับ)" hint="แสดงบนการ์ดคอร์สและแบนเนอร์หน้าคอร์ส แนะนำ 1280×720 px (16:9) ไม่เกิน 5 MB" wide
-            value={courseCover} onChange={setCourseCover} />
+          <CoverPicker value={courseCover} onChange={setCourseCover} courseTitle={courseTitle} />
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
             <div className="form-group">

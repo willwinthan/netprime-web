@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { ErrorBox, Field, grid2 } from "../site-admin/ui";
 import type { InstructorCourse } from "./types";
+import { CoverPicker } from "./CoverPicker";
 
 /** Picture field: upload a file (stored by POST /instructor/images) or paste a link. */
 export const ImageField: React.FC<{ label: string; hint: string; value: string; onChange: (url: string) => void; wide?: boolean }> = ({ label, hint, value, onChange, wide }) => {
@@ -107,8 +108,7 @@ export const CourseBasicsForm: React.FC<{ course: InstructorCourse; onSaved: () 
         <textarea className="form-input" rows={5} value={form.description} onChange={set("description")} required
           style={{ resize: "vertical", fontFamily: "inherit", borderRadius: "1rem" }} />
       </Field>
-      <ImageField label="รูปปกคอร์ส" hint="แสดงบนการ์ดคอร์สและหน้ารายละเอียดคอร์ส แนะนำ 1280×720 px (16:9) ไม่เกิน 5 MB" wide
-        value={form.cover_image_url} onChange={url => setForm(f => ({ ...f, cover_image_url: url }))} />
+      <CoverPicker value={form.cover_image_url} courseTitle={form.title} onChange={url => setForm(f => ({ ...f, cover_image_url: url }))} />
       <div style={grid2}>
         <Field label="ราคา (บาท)" hint="ใส่ 0 ถ้าเป็นคอร์สฟรี">
           <input className="form-input" type="number" min={0} step="0.01" value={form.price} onChange={set("price")} />
