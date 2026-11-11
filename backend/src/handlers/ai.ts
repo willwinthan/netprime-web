@@ -610,7 +610,7 @@ async function publicDocs(db: D1Database): Promise<Doc[]> {
       WHERE status IN ('open', 'closed') AND end_date >= ? ORDER BY start_date LIMIT 60`).bind(today)
       .all<{ id: string; title: string; vendor: string | null; description: string | null; start_date: string; end_date: string; time_text: string | null; mode: string; location: string | null; price: number; status: string }>(),
     db.prepare(`SELECT slug, title, excerpt, substr(body, 1, 800) AS body FROM articles
-      WHERE status = 'published' AND published_at <= datetime('now') ORDER BY published_at DESC LIMIT 60`)
+      WHERE status = 'published' AND published_at <= datetime('now', '+7 hours') ORDER BY published_at DESC LIMIT 60`)
       .all<{ slug: string; title: string; excerpt: string | null; body: string }>(),
     db.prepare("SELECT value FROM site_settings WHERE key = 'home'").first<{ value: string }>()
   ]);

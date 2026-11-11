@@ -37,12 +37,25 @@ const SLIP_MAX_BYTES = 10 * 1024 * 1024;
 // Validation helpers
 // ==========================================
 
-type Kind = "text" | "email" | "date" | "dates" | "int" | "bool" | "url" | readonly string[];
+type Kind = "text" | "email" | "date" | "datetime" | "dates" | "int" | "bool" | "url" | readonly string[];
 interface FieldSpec { kind: Kind; label: string; max?: number; min?: number; required?: boolean; default?: unknown }
 type Values = Record<string, any>;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** "YYYY-MM-DD" or "YYYY-MM-DD HH:MM[:SS]" (also with "T"): a real calendar date and time of day. */
+function validDateTime(value: string): boolean {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[ T]([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?)?$/.exec(value);
+  return !!m && validDate(m[1]);
+}
+
+/**
+ * Article publish times are Asia/Bangkok wall-clock "YYYY-MM-DD HH:MM:SS", so a date picked in the
+ * console means midnight Thai time. Public queries compare them with ARTICLE_LIVE.
+ */
+export const ARTICLE_LIVE = "published_at <= datetime('now', '+7 hours')";
+export const bangkokNowSql = () => new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
 
 function validDate(value: string): boolean {
   if (!DATE_RE.test(value)) return false;
@@ -95,6 +108,7 @@ function parseFields(body: unknown, spec: Record<string, FieldSpec>, partial = f
       if (raw.length > (field.max ?? 500)) return { values, error: `${field.label}ยาวเกิน ${field.max ?? 500} ตัวอักษร` };
       if (kind === "email" && !EMAIL_RE.test(raw)) return { values, error: `${field.label}ไม่ถูกต้อง` };
       if (kind === "date" && !validDate(raw)) return { values, error: `${field.label}ต้องเป็นรูปแบบ YYYY-MM-DD` };
+      if (kind === "datetime" && !validDateTime(raw)) return { values, error: `${field.label}ต้องเป็นรูปแบบ YYYY-MM-DD หรือ YYYY-MM-DD HH:MM` };
       if (kind === "url" && !safeUrl(raw)) return { values, error: `${field.label}ต้องขึ้นต้นด้วย https:// หรือ /` };
       values[key] = kind === "email" ? raw.toLowerCase() : raw;
     }
@@ -516,7 +530,7 @@ publicSiteRouter.get("/articles", async (c) => {
   const q = (c.req.query("q") || "").trim().slice(0, 100);
   const like = q ? `%${q.replace(/[\\%_]/g, ch => "\\" + ch)}%` : null;
   const { limit, offset } = pageParams(c, 12, 48);
-  const where = `status = 'published' AND published_at <= datetime('now') AND (? IS NULL OR category = ?)
+  const where = `status = 'published' AND ${ARTICLE_LIVE} AND (? IS NULL OR category = ?)
     AND (? IS NULL OR title LIKE ? ESCAPE '\\' OR excerpt LIKE ? ESCAPE '\\')`;
   const filters = [category, category, like, like, like];
   const rows = await c.env.DB.prepare(`SELECT id, slug, title, category, excerpt, cover_url, published_at FROM articles
@@ -525,7 +539,7 @@ publicSiteRouter.get("/articles", async (c) => {
   const total = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM articles WHERE ${where}`)
     .bind(...filters).first<{ n: number }>();
   const categories = await c.env.DB.prepare(`SELECT DISTINCT category FROM articles
-    WHERE status = 'published' AND published_at <= datetime('now') AND category IS NOT NULL ORDER BY category`).all<{ category: string }>();
+    WHERE status = 'published' AND ${ARTICLE_LIVE} AND category IS NOT NULL ORDER BY category`).all<{ category: string }>();
   return c.json({ articles: rows.results, total: total?.n ?? 0, categories: categories.results.map(r => r.category) });
 });
 
@@ -533,7 +547,7 @@ publicSiteRouter.get("/articles/:slug", async (c) => {
   const article = await c.env.DB.prepare(`SELECT a.id, a.slug, a.title, a.category, a.excerpt, a.body, a.content_json, a.cover_url, a.published_at,
     COALESCE(a.author_label, u.name) AS author_name
     FROM articles a LEFT JOIN users u ON u.id = a.author_id
-    WHERE a.slug = ? AND a.status = 'published' AND a.published_at <= datetime('now')`).bind(c.req.param("slug")).first();
+    WHERE a.slug = ? AND a.status = 'published' AND a.${ARTICLE_LIVE}`).bind(c.req.param("slug")).first();
   if (!article) return c.json({ error: "ไม่พบบทความ" }, 404);
   return c.json({ article });
 });
@@ -1226,7 +1240,7 @@ const ARTICLE_SPEC: Record<string, FieldSpec> = {
   cover_url: { kind: "url", label: "รูปปก", max: 500 },
   author_label: { kind: "text", label: "ชื่อผู้เขียนที่แสดง", max: 120 },
   status: { kind: ["draft", "review", "published"], label: "สถานะ", required: true, default: "draft" },
-  published_at: { kind: "date", label: "วันที่เผยแพร่" },
+  published_at: { kind: "datetime", label: "วันเวลาเผยแพร่" },
   review_note: { kind: "text", label: "หมายเหตุจากผู้ตรวจ", max: 1000 },
   notion_page_id: { kind: "text", label: "หน้า Notion ต้นทาง", max: 64 }
 };
@@ -1250,11 +1264,15 @@ function articleValues(values: Values, existing?: Record<string, any>): string |
       return "เนื้อหาแบบบล็อกไม่ถูกต้อง";
     }
   }
-  if (values.published_at) values.published_at = `${values.published_at} 00:00:00`;
+  // Thai time; a bare date means 00:00. Seconds are kept only when given.
+  if (values.published_at) {
+    const [date, time = "00:00"] = values.published_at.replace("T", " ").split(" ");
+    values.published_at = `${date} ${time.length === 5 ? `${time}:00` : time}`;
+  }
   // Publishing without a date publishes immediately; keep the original date on later edits.
   const status = values.status ?? existing?.status;
   if (status === "published" && !values.published_at && !existing?.published_at) {
-    values.published_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+    values.published_at = bangkokNowSql();
   }
   return null;
 }

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Plus, FileText } from "lucide-react";
 import { can, useApi } from "../hooks/useApi";
 import { Chip, Empty, ErrorBox, formatDateTime, tableStyle, thStyle, tdStyle } from "../components/site-admin/ui";
+import { formatSchedule, isScheduled } from "../utils/articleSchedule";
 
 // BlockNote is large; load it only when someone opens the editor.
 const ArticleEditor = lazy(() => import("../components/editor/ArticleEditor"));
@@ -110,7 +111,10 @@ export const ArticlesStudio: React.FC = () => {
                       </div>
                     </div>
                   </td>
-                  <td style={tdStyle}><Chip {...STATUS[a.status]} /></td>
+                  <td style={tdStyle}>{isScheduled(a.status, a.published_at)
+                    ? <span title={`บทความจะขึ้นเว็บ ${formatSchedule(a.published_at)} น.`}><Chip label="ตั้งเวลาไว้" color="#6d28d9" bg="#ede9fe" />
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, whiteSpace: "nowrap" }}>{formatSchedule(a.published_at)} น.</div></span>
+                    : <Chip {...STATUS[a.status]} />}</td>
                   <td style={tdStyle}>{a.author_name || "—"}{a.author_id === api.user?.id ? " (คุณ)" : ""}</td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateTime(a.updated_at)}</td>
                 </tr>

@@ -72,6 +72,11 @@ export function toIso(timestamp: string): string {
   return timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T") + "Z";
 }
 
+/** Article publish times are Thai wall-clock time (backend ARTICLE_LIVE), not UTC. */
+export function articleIso(timestamp: string): string {
+  return timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T") + "+07:00";
+}
+
 export function staticPageMeta(pathname: string, origin: string): PageMeta | null {
   const page = STATIC_PAGES[pathname];
   if (!page) return null;
@@ -91,7 +96,7 @@ export function articlePageMeta(article: PublicArticle, origin: string): PageMet
     url: `${origin}/blog/${encodeURIComponent(article.slug)}`,
     image: absoluteUrl(article.cover_url, origin) || origin + DEFAULT_IMAGE_PATH,
     type: "article",
-    publishedTime: toIso(article.published_at),
+    publishedTime: articleIso(article.published_at),
     section: article.category
   };
 }
@@ -143,7 +148,7 @@ export function sitemapEntries(origin: string, articles: Array<Pick<PublicArticl
   courses: Array<Pick<PublicCourse, "id"> & { slug?: string | null }> = []): SitemapEntry[] {
   return [
     ...Object.keys(STATIC_PAGES).map(path => ({ loc: origin + path })),
-    ...articles.map(a => ({ loc: `${origin}/blog/${encodeURIComponent(a.slug)}`, lastmod: toIso(a.published_at).slice(0, 10) })),
+    ...articles.map(a => ({ loc: `${origin}/blog/${encodeURIComponent(a.slug)}`, lastmod: articleIso(a.published_at).slice(0, 10) })),
     ...courses.map(c => ({ loc: `${origin}/courses/${encodeURIComponent(c.slug || c.id)}` }))
   ];
 }

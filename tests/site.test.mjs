@@ -141,6 +141,32 @@ test('migrated articles keep their original author and publish date', async () =
   assert.equal(pub.article.published_at, '2015-06-21 00:00:00');
 });
 
+test('scheduled articles: Thai-time publish date and time, hidden until then, rescheduling a published article', async () => {
+  const bkk = ms => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16);
+  const later = bkk(Date.now() + 2 * 3_600_000);            // two hours from now, Thai time, "YYYY-MM-DDTHH:MM"
+  const { article } = await expectStatus('/api/admin/site/articles', 201, { method: 'POST', token: admin.token,
+    body: { title: 'บทความตั้งเวลา', slug: 'scheduled-post', body: 'เนื้อหา', status: 'published', published_at: later } });
+  assert.equal(article.published_at, `${later.replace('T', ' ')}:00`, 'stored as Thai wall-clock time');
+  await expectStatus('/api/public/articles/scheduled-post', 404);
+  assert.ok(!(await expectStatus('/api/public/articles?limit=48', 200)).articles.some(a => a.slug === 'scheduled-post'));
+
+  // A Thai date-only value means 00:00 Thai time: today is already live, tomorrow is not.
+  const today = bkk(Date.now()).slice(0, 10);
+  await expectStatus(`/api/admin/site/articles/${article.id}`, 200, { method: 'PATCH', token: admin.token, body: { published_at: today } });
+  assert.equal((await expectStatus('/api/public/articles/scheduled-post', 200)).article.published_at, `${today} 00:00:00`);
+
+  // Rescheduling an article that is already live hides it again until the new time.
+  await expectStatus(`/api/admin/site/articles/${article.id}`, 200, { method: 'PATCH', token: admin.token, body: { published_at: later } });
+  await expectStatus('/api/public/articles/scheduled-post', 404);
+  const past = bkk(Date.now() - 60_000);
+  await expectStatus(`/api/admin/site/articles/${article.id}`, 200, { method: 'PATCH', token: admin.token, body: { published_at: past } });
+  await expectStatus('/api/public/articles/scheduled-post', 200);
+
+  for (const bad of ['2026-13-01', '2026-11-12 25:00', 'tomorrow']) {
+    await expectStatus(`/api/admin/site/articles/${article.id}`, 400, { method: 'PATCH', token: admin.token, body: { published_at: bad } });
+  }
+});
+
 test('contact form requires consent and lands in the coordinator queue', async () => {
   const body = { name: 'ผู้ติดต่อ', email: 'contact@example.invalid', message: 'สนใจอบรม In-house' };
   await expectStatus('/api/public/inquiries', 400, { method: 'POST', body });
