@@ -1,18 +1,24 @@
 import React, { useEffect, useState } from "react";
-import { Activity, BarChart3, MessageCircle, MessageSquare, RefreshCw, UserPlus, Wifi } from "lucide-react";
+import { Activity, BarChart3, MessageCircle, MessageSquare, RefreshCw, Table2, LineChart as LineIcon, UserPlus, Wifi } from "lucide-react";
 import { useApi, can } from "../hooks/useApi";
-import { MetricsCard } from "../components/MetricsCard";
 import { ErrorBox, Empty } from "../components/site-admin/ui";
-import { LineChart } from "../components/analytics/LineChart";
+import { CapacityBars, Delta, Funnel, HBarList, Heatmap, LegendSwatch, Sparkline, TrendChart, TrendPoint, VIZ, bucketLabel } from "../components/analytics/charts";
 import { NavTarget, RANGES, RangeKey, baht, formatDuration, rangeQuery, timeAgo } from "../components/analytics/format";
 
-interface Kpis {
-  total_users: number; new_signups: number; active_learners: number; converted_users: number; conversion_percent: number;
-  sales_count: number; revenue: number; sales_30d_count: number; revenue_30d: number;
-  learning_seconds: number; avg_learning_seconds: number; published_courses: number; categories: number;
+interface Metric { total: number; previous_total: number; series: TrendPoint[] }
+type MetricKey = "signups" | "active_learners" | "revenue" | "orders" | "enrollments" | "completions" | "registrations" | "leads";
+interface Insights {
+  range: { key: string; from: string; to: string; bucket: "day" | "month" };
+  previous: { from: string; to: string };
+  metrics: Record<MetricKey, Metric>;
+  funnel: Array<{ stage: string; label: string; count: number }>;
+  paid_from_cohort: number;
+  heatmap: Array<{ dow: number; hour: number; events: number; users: number }>;
+  top_courses: Array<{ id: string; title: string; enrollments: number; learners: number; revenue: number; completion_percent: number; avg_progress: number }>;
+  revenue_by_kind: Array<{ kind: string; orders: number; revenue: number }>;
+  lead_sources: Array<{ source: string; count: number }>;
+  upcoming_sessions: Array<{ id: string; title: string; start_date: string; capacity: number; taken: number; confirmed: number; waitlist: number }>;
 }
-interface SeriesPoint { key: string; signups: number; revenue: number; sales: number; active_learners: number }
-interface DashboardData { range: { key: string; from: string; to: string; bucket: "day" | "month" }; kpis: Kpis; series: SeriesPoint[] }
 interface EventItem { id: number; type: string; label: string; description: string; user_id: string | null; created_at: string; link: NavTarget | null }
 interface OnlineUser { id: string; name: string; email: string; roles: string[]; last_seen_at: string; course_title: string | null; lesson_title: string | null }
 interface Activity {
@@ -22,8 +28,19 @@ interface Activity {
   online: OnlineUser[];
 }
 
-type ChartTab = "signups" | "revenue" | "sales" | "active_learners";
-const CHART_TABS: Array<[ChartTab, string]> = [["signups", "สมัครใหม่"], ["revenue", "รายได้"], ["sales", "ยอดขายสินค้า"], ["active_learners", "ผู้เรียนที่ใช้งาน"]];
+/** The eight comparable metrics, in tile order; `money` formats in baht. */
+const METRICS: Array<{ key: MetricKey; label: string; hint: string; money?: boolean }> = [
+  { key: "signups", label: "ผู้เรียนสมัครใหม่", hint: "บัญชีผู้เรียนที่สร้างในช่วงนี้" },
+  { key: "active_learners", label: "ผู้เรียนที่ใช้งาน", hint: "ผู้เรียนที่มีกิจกรรมการเรียน (ไม่นับซ้ำ)" },
+  { key: "revenue", label: "รายได้", hint: "ยอดรับจริงของคำสั่งซื้อที่ชำระแล้ว", money: true },
+  { key: "orders", label: "คำสั่งซื้อที่ชำระ", hint: "จำนวนคำสั่งซื้อที่ยืนยันการชำระแล้ว" },
+  { key: "enrollments", label: "ลงทะเบียนเรียน", hint: "การลงทะเบียนเรียนคอร์สออนไลน์" },
+  { key: "completions", label: "เรียนจบคอร์ส", hint: "การลงทะเบียนที่เรียนจบในช่วงนี้" },
+  { key: "registrations", label: "ผู้สมัครรอบอบรม", hint: "จำนวนที่นั่งที่สมัคร (ไม่รวมที่ยกเลิก)" },
+  { key: "leads", label: "Lead และข้อความติดต่อ", hint: "ฟอร์มเก็บ lead และฟอร์มติดต่อรวมกัน" }
+];
+const KIND_LABEL: Record<string, string> = { course: "คอร์สเดี่ยว", bundle: "ชุดคอร์ส", membership: "สมาชิกรายช่วง", organization: "องค์กร (ที่นั่ง)" };
+const count = (v: number) => Math.round(v).toLocaleString("th-TH");
 
 const todayBkk = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
 const daysAgoBkk = (n: number) => new Date(Date.now() + 7 * 3600000 - n * 86400000).toISOString().slice(0, 10);
@@ -43,8 +60,10 @@ export const AnalyticsDashboard: React.FC<{ onContact?: (userId: string) => void
   const [range, setRange] = useState<RangeKey>("30d");
   const [from, setFrom] = useState(daysAgoBkk(29));
   const [to, setTo] = useState(todayBkk());
-  const [chart, setChart] = useState<ChartTab>("signups");
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [metric, setMetric] = useState<MetricKey>("signups");
+  const [compare, setCompare] = useState(true);
+  const [asTable, setAsTable] = useState(false);
+  const [data, setData] = useState<Insights | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +74,7 @@ export const AnalyticsDashboard: React.FC<{ onContact?: (userId: string) => void
     setError(null);
     try {
       const [d, a] = await Promise.all([
-        api.get<DashboardData>(`/analytics/dashboard?${rangeQuery(range, from, to)}`),
+        api.get<Insights>(`/analytics/insights?${rangeQuery(range, from, to)}`),
         api.get<Activity>("/analytics/activity")
       ]);
       setData(d);
@@ -80,17 +99,20 @@ export const AnalyticsDashboard: React.FC<{ onContact?: (userId: string) => void
     return <div className="glass-card" style={{ padding: "40px", textAlign: "center" }}><h2 style={{ color: "var(--danger)" }}>ต้องมีสิทธิ์ดูรายงาน</h2></div>;
   }
 
-  const k = data?.kpis;
-  const series = data?.series || [];
-  const fmt = chart === "revenue" ? baht : (v: number) => Math.round(v).toLocaleString("th-TH");
-  const rangeLabel = data ? `${data.range.from} ถึง ${data.range.to}` : "";
+  const active = METRICS.find(m => m.key === metric)!;
+  const fmt = active.money ? baht : count;
+  const current = data?.metrics[metric];
+  const unit = data?.range.bucket === "day" ? "วัน" : "เดือน";
+  const rangeLabel = data ? `${bucketLabel(data.range.from, true)} – ${bucketLabel(data.range.to, true)}` : "";
+  const prevLabel = data ? `${bucketLabel(data.previous.from, true)} – ${bucketLabel(data.previous.to, true)}` : "";
+  const peakPoint = current?.series.reduce<TrendPoint | null>((best, p) => !best || p.value > best.value ? p : best, null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "12px", flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: "24px", display: "flex", alignItems: "center", gap: "10px" }}><BarChart3 size={24} color="var(--primary)" />แดชบอร์ดโรงเรียน</h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>ภาพรวมผู้ใช้ ยอดขาย และการเรียน {rangeLabel && `(${rangeLabel})`}</p>
+          <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>วิเคราะห์ผู้เรียน ยอดขาย และงานอบรม {rangeLabel && `(${rangeLabel} เทียบ ${prevLabel})`} · กดการ์ดเพื่อดูแนวโน้ม</p>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
           {RANGES.map(([key, label]) => (
@@ -112,29 +134,138 @@ export const AnalyticsDashboard: React.FC<{ onContact?: (userId: string) => void
       <ErrorBox message={error} />
       {loading && !data && <Empty text="กำลังโหลดข้อมูล…" />}
 
-      {k && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
-          <MetricsCard title="ผู้ใช้ทั้งหมด" value={k.total_users.toLocaleString("th-TH")} subValue={`สมัครใหม่ ${k.new_signups.toLocaleString("th-TH")} คนในช่วงนี้`} icon="Users" color="blue" />
-          <MetricsCard title="ผู้เรียนที่ใช้งาน" value={k.active_learners.toLocaleString("th-TH")} subValue={`เวลาเรียนเฉลี่ย ${formatDuration(k.avg_learning_seconds)} ต่อคน`} icon="Activity" color="accent" />
-          <MetricsCard title="อัตราการซื้อ/ลงทะเบียน" value={`${k.conversion_percent}%`} subValue={`${k.converted_users.toLocaleString("th-TH")} คนมีคำสั่งซื้อหรือคอร์ส`} icon="TrendingUp" color="purple" />
-          <MetricsCard title="ยอดขาย 30 วัน" value={baht(k.revenue_30d)} subValue={`${k.sales_30d_count.toLocaleString("th-TH")} รายการ · ช่วงที่เลือก ${baht(k.revenue)}`} icon="Banknote" color="accent" />
-          <MetricsCard title="คอร์สที่เผยแพร่" value={k.published_courses.toLocaleString("th-TH")} subValue={`${k.categories.toLocaleString("th-TH")} หมวดหมู่`} icon="BookOpen" color="blue" />
-        </div>
-      )}
-
       {data && (
-        <div className="glass-card" style={card}>
-          <div role="tablist" aria-label="กราฟ" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {CHART_TABS.map(([key, label]) => (
-              <button key={key} role="tab" aria-selected={chart === key} onClick={() => setChart(key)}
-                className={chart === key ? "tech-button-primary" : "tech-button-outline"} style={{ padding: "6px 14px", fontSize: "13px" }}>{label}</button>
-            ))}
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(165px, 100%), 1fr))", gap: "12px" }}>
+            {METRICS.map(m => {
+              const value = data.metrics[m.key];
+              const selected = metric === m.key;
+              return (
+                <button key={m.key} onClick={() => setMetric(m.key)} aria-pressed={selected} title={m.hint} className="glass-card"
+                  style={{ ...card, gap: 6, textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+                    border: selected ? `2px solid ${VIZ.current}` : "2px solid transparent", padding: "14px 16px" }}>
+                  <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{m.label}</span>
+                  <span style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.2 }}>{m.money ? baht(value.total) : count(value.total)}</span>
+                  <Delta current={value.total} previous={value.previous_total} />
+                  <Sparkline values={value.series.map(p => p.value)} label={`แนวโน้ม${m.label}`} />
+                </button>
+              );
+            })}
           </div>
-          <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-            รวม {fmt(series.reduce((s, p) => s + p[chart], 0))}{chart === "active_learners" ? " (ผลรวมรายช่วง)" : ""} · แสดงเป็นราย{data.range.bucket === "day" ? "วัน" : "เดือน"}
+
+          <section className="glass-card" style={card} aria-label="แนวโน้ม">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <h3 style={{ fontSize: 16 }}>{active.label} ราย{unit}</h3>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>
+                  รวม <strong>{fmt(current!.total)}</strong>{compare && <> · ช่วงก่อน {fmt(current!.previous_total)}</>}
+                  {peakPoint && peakPoint.value > 0 && <> · สูงสุด {fmt(peakPoint.value)} ({bucketLabel(peakPoint.key)})</>}
+                  {metric === "active_learners" && " · ยอดรวมนับคนไม่ซ้ำทั้งช่วง"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+                  <input type="checkbox" checked={compare} onChange={e => setCompare(e.target.checked)} />เทียบช่วงก่อนหน้า
+                </label>
+                <button className="tech-button-outline" onClick={() => setAsTable(v => !v)} style={{ padding: "6px 10px", fontSize: 13 }}>
+                  {asTable ? <><LineIcon size={14} />ดูเป็นกราฟ</> : <><Table2 size={14} />ดูเป็นตาราง</>}
+                </button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <LegendSwatch color={VIZ.current} label={`ช่วงนี้ (${rangeLabel})`} />
+              {compare && <LegendSwatch color={VIZ.previous} dashed label={`ช่วงก่อนหน้า (${prevLabel})`} />}
+            </div>
+            {asTable ? (
+              <div style={{ overflowX: "auto", maxHeight: 320 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead><tr>{["ช่วง", active.label, ...(compare ? ["ช่วงก่อนหน้า", "เปลี่ยนแปลง"] : [])].map(h => <th key={h} style={{ textAlign: "left", padding: "6px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(0,0,0,0.08)", position: "sticky", top: 0, background: "#fff" }}>{h}</th>)}</tr></thead>
+                  <tbody>{current!.series.map(p => (
+                    <tr key={p.key}>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>{bucketLabel(p.key, true)}</td>
+                      <td style={{ padding: "6px 8px", borderBottom: "1px solid rgba(0,0,0,0.04)", fontWeight: 600 }}>{fmt(p.value)}</td>
+                      {compare && <>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>{p.previous === null ? "-" : `${fmt(p.previous)} (${p.previous_key ? bucketLabel(p.previous_key) : ""})`}</td>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>{p.previous === null ? "-" : <Delta current={p.value} previous={p.previous} compact />}</td>
+                      </>}
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : (
+              <TrendChart data={current!.series} format={fmt} currentLabel="ช่วงนี้" previousLabel="ช่วงก่อนหน้า" showPrevious={compare} />
+            )}
+          </section>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "16px" }}>
+            <section className="glass-card" style={card} aria-label="เส้นทางผู้เรียน">
+              <div>
+                <h3 style={{ fontSize: 16 }}>เส้นทางผู้เรียนใหม่</h3>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>ผู้เรียนที่สมัครในช่วงนี้ ไปถึงแต่ละขั้นแล้วกี่คน · ซื้อคอร์สแล้ว {count(data.paid_from_cohort)} คน</div>
+              </div>
+              <Funnel stages={data.funnel} />
+            </section>
+            <section className="glass-card" style={card} aria-label="ช่วงเวลาที่เรียน">
+              <div>
+                <h3 style={{ fontSize: 16 }}>ช่วงเวลาที่ผู้เรียนเข้าเรียน</h3>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>จำนวนกิจกรรมการเรียนตามวันและชั่วโมง (เวลาไทย) ใช้วางแผนเวลาประกาศหรือ live</div>
+              </div>
+              <Heatmap cells={data.heatmap} />
+            </section>
           </div>
-          <LineChart data={series.map(p => ({ key: p.key, value: p[chart] }))} format={fmt} label={CHART_TABS.find(t => t[0] === chart)![1]} />
-        </div>
+
+          <section className="glass-card" style={card} aria-label="คอร์สเด่น">
+            <div>
+              <h3 style={{ fontSize: 16 }}>คอร์สเด่นในช่วงนี้</h3>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>เรียงตามการลงทะเบียนในช่วงนี้ · อัตราเรียนจบและความคืบหน้าเฉลี่ยนับจากผู้เรียนทั้งหมดของคอร์ส</div>
+            </div>
+            {data.top_courses.length === 0 ? <Empty text="ยังไม่มีคอร์สที่เผยแพร่" /> : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead><tr>{["คอร์ส", "ลงทะเบียนช่วงนี้", "ผู้เรียนทั้งหมด", "เรียนจบ", "ความคืบหน้าเฉลี่ย", "รายได้ช่วงนี้"].map((h, i) => <th key={h} style={{ textAlign: i ? "right" : "left", padding: "8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(0,0,0,0.08)", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                  <tbody>{(() => {
+                    const maxEnroll = Math.max(...data.top_courses.map(c => c.enrollments), 1);
+                    return data.top_courses.map(co => (
+                      <tr key={co.id}>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", maxWidth: 320 }}>
+                          {onNavigate ? <button style={{ ...linkBtn, color: "var(--text-primary)", fontSize: 13 }} onClick={() => onNavigate({ tab: "reports", id: co.id })}>{co.title}</button> : co.title}
+                        </td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "right", minWidth: 140 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                            <div style={{ flex: 1, maxWidth: 80, height: 6, background: VIZ.track, borderRadius: 3 }}><div style={{ width: `${(co.enrollments / maxEnroll) * 100}%`, height: "100%", background: VIZ.current, borderRadius: 3 }} /></div>
+                            <strong>{count(co.enrollments)}</strong>
+                          </div>
+                        </td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "right" }}>{count(co.learners)}</td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "right" }}>{co.completion_percent}%</td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "right" }}>{co.avg_progress}%</td>
+                        <td style={{ padding: "8px", borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "right" }}>{baht(co.revenue)}</td>
+                      </tr>
+                    ));
+                  })()}</tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "16px" }}>
+            <section className="glass-card" style={card} aria-label="รายได้ตามประเภท">
+              <h3 style={{ fontSize: 16 }}>รายได้ตามประเภทสินค้า</h3>
+              <HBarList items={data.revenue_by_kind.map(r => ({ label: `${KIND_LABEL[r.kind] ?? r.kind} (${count(r.orders)} รายการ)`, value: r.revenue }))} format={baht} empty="ยังไม่มีคำสั่งซื้อที่ชำระในช่วงนี้" />
+            </section>
+            <section className="glass-card" style={card} aria-label="ที่มาของ lead">
+              <h3 style={{ fontSize: 16 }}>ที่มาของ lead และข้อความติดต่อ</h3>
+              <HBarList items={data.lead_sources.map(r => ({ label: r.source, value: r.count }))} format={count} color={VIZ.previous} empty="ยังไม่มี lead ในช่วงนี้" />
+            </section>
+            <section className="glass-card" style={card} aria-label="รอบอบรมที่กำลังจะมาถึง">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ fontSize: 16 }}>ที่นั่งรอบอบรมที่กำลังจะมาถึง</h3>
+                {onNavigate && <button style={linkBtn} onClick={() => onNavigate({ tab: "site" })}>จัดการรอบ</button>}
+              </div>
+              <CapacityBars rows={data.upcoming_sessions} />
+            </section>
+          </div>
+        </>
       )}
 
       {activity && (
