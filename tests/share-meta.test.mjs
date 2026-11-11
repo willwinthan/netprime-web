@@ -16,7 +16,7 @@ test('article pages get absolute, escaped share tags', () => {
   const meta = articlePageMeta(article, origin);
   assert.equal(meta.url, `${origin}/blog/ccna-study-plan`);
   assert.equal(meta.image, article.cover_url);
-  assert.equal(meta.publishedTime, '2026-10-18T09:00:00Z');
+  assert.equal(meta.publishedTime, '2026-10-18T09:00:00+07:00', 'article times are Thai time');
   const html = headTags(meta);
   assert.match(html, /<meta property="og:title" content="เตรียมสอบ &quot;CCNA&quot; &lt;ให้ผ่าน&gt; \| NetPrime">/);
   assert.match(html, /<meta property="og:image" content="https:\/\/api\.netprime\.example\/api\/public\/images\/abc\.jpg">/);

@@ -5,7 +5,7 @@ import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core/extensions";
 import { createReactBlockSpec, getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/ariakit";
-import { ArrowLeft, ImagePlus, LayoutTemplate, Download, Settings2, Trash2, X, ExternalLink, History, RotateCcw, AlertTriangle } from "lucide-react";
+import { ArrowLeft, ImagePlus, LayoutTemplate, Download, Settings2, Trash2, X, ExternalLink, History, RotateCcw, AlertTriangle, Clock } from "lucide-react";
 import { API_BASE_URL, can, useApi } from "../../hooks/useApi";
 import { ErrorBox, Modal, Field, uploadImage, formatDateTime } from "../site-admin/ui";
 import { CoverMaker } from "./CoverMaker";
@@ -13,6 +13,7 @@ import { uploadInlineImages } from "./inlineImages";
 import { notionEmbedUrl } from "../../site/notionEmbed";
 import { thaiDictionary } from "./thaiDictionary";
 import { useDangerousDelete } from "../security/DangerConfirmDialog";
+import { formatSchedule, isFuture, isScheduled, toDateTimeInput } from "../../utils/articleSchedule";
 
 // ==========================================
 // Editor schema: default blocks (minus uploads we cannot store) + Notion embed
@@ -92,6 +93,7 @@ async function sendArticle(api: Api, path: string, method: string, body: unknown
   return data;
 }
 
+const SCHEDULED = { color: "#6d28d9", bg: "#ede9fe" };
 const STATUS: Record<Article["status"], { label: string; color: string; bg: string }> = {
   draft: { label: "ฉบับร่าง", color: "#3a4660", bg: "#eceff4" },
   review: { label: "รอตรวจ", color: "#7a4b00", bg: "#fff1d6" },
@@ -126,7 +128,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
   const [title, setTitle] = useState(initial?.title ?? "");
   const [meta, setMeta] = useState({
     category: initial?.category ?? "", excerpt: initial?.excerpt ?? "", slug: initial?.slug ?? "",
-    cover_url: initial?.cover_url ?? "", published_at: initial?.published_at?.slice(0, 10) ?? ""
+    cover_url: initial?.cover_url ?? "", published_at: toDateTimeInput(initial?.published_at)
   });
   const [notionPageId, setNotionPageId] = useState(initial?.notion_page_id ?? null);
   const [dirty, setDirty] = useState(false);
@@ -144,6 +146,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
 
   const isAuthor = !article || article.author_id === api.user?.id;
   const status = article?.status ?? "draft";
+  const scheduled = isScheduled(status, article?.published_at);
   const canEditContent = canManage || (isAuthor && (canWrite || canPublish) && (status !== "published" || canPublish));
   const dictionary = useMemo(() => thaiDictionary(), []);
 
@@ -191,7 +194,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
     applyingRef.current = true;
     setArticle(prev => ({ ...(prev ?? {} as Article), ...next, author_name: next.author_name ?? prev?.author_name }));
     setTitle(next.title);
-    setMeta({ category: next.category ?? "", excerpt: next.excerpt ?? "", slug: next.slug, cover_url: next.cover_url ?? "", published_at: next.published_at?.slice(0, 10) ?? "" });
+    setMeta({ category: next.category ?? "", excerpt: next.excerpt ?? "", slug: next.slug, cover_url: next.cover_url ?? "", published_at: toDateTimeInput(next.published_at) });
     setNotionPageId(next.notion_page_id ?? null);
     let blocks: any[] | undefined;
     try { blocks = next.content_json ? JSON.parse(next.content_json) : undefined; } catch { blocks = undefined; }
@@ -265,7 +268,7 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
     if (saved) {
       const messages: Record<string, string> = {
         review: "ส่งให้ตรวจแล้ว ผู้ตรวจจะได้รับการแจ้งเตือน",
-        published: "เผยแพร่แล้ว",
+        published: isFuture(saved.published_at) ? `ตั้งเวลาเผยแพร่ไว้ ${formatSchedule(saved.published_at)} น. บทความจะขึ้นเว็บเมื่อถึงเวลา` : "เผยแพร่แล้ว",
         draft: note ? "ส่งกลับให้ผู้เขียนแก้ไขแล้ว" : "เปลี่ยนเป็นฉบับร่างแล้ว"
       };
       setNotice(messages[next]);
@@ -308,7 +311,9 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
         <button className="np-icon-button" onClick={() => { if (!dirty || confirm("มีการแก้ไขที่ยังไม่บันทึก ออกจากหน้านี้?")) onClose(); }}>
           <ArrowLeft size={18} /> บทความทั้งหมด
         </button>
-        <span className="np-status" style={{ color: STATUS[status].color, background: STATUS[status].bg }}>{STATUS[status].label}</span>
+        {scheduled
+          ? <span className="np-status" style={{ color: SCHEDULED.color, background: SCHEDULED.bg }}><Clock size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />ตั้งเวลาไว้ {formatSchedule(article?.published_at)} น.</span>
+          : <span className="np-status" style={{ color: STATUS[status].color, background: STATUS[status].bg }}>{STATUS[status].label}</span>}
         <span className="np-save-state" aria-live="polite">
           {conflict ? "หยุดบันทึกอัตโนมัติ: มีฉบับใหม่กว่า" : saving ? "กำลังบันทึก…" : dirty ? "มีการแก้ไขที่ยังไม่บันทึก" : savedAt ? `บันทึกแล้ว ${formatDateTime(savedAt)}` : "ยังไม่ได้บันทึก"}
         </span>
@@ -316,11 +321,12 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
           {canImport && canEditContent && <button className="np-icon-button" onClick={() => setImporting(true)}><Download size={16} /> นำเข้าจาก Notion</button>}
           {article && <button className="np-icon-button" aria-expanded={showHistory} onClick={() => { setShowHistory(v => !v); setShowDetails(false); }}><History size={16} /> ประวัติการแก้ไข</button>}
           <button className="np-icon-button" aria-expanded={showDetails} onClick={() => { setShowDetails(v => !v); setShowHistory(false); }}><Settings2 size={16} /> รายละเอียด</button>
-          {article?.status === "published" && <a className="np-icon-button" href={`/blog/${article.slug}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /> ดูบนเว็บ</a>}
+          {article?.status === "published" && !scheduled && <a className="np-icon-button" href={`/blog/${article.slug}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /> ดูบนเว็บ</a>}
           {canEditContent && <button className="tech-button-outline" disabled={saving} onClick={() => save()}>บันทึก</button>}
           {reviewingOthers && <button className="tech-button-outline" onClick={() => setReviewing(true)}>ส่งกลับแก้ไข</button>}
           {status !== "published" && (canPublish
-            ? <button className="tech-button-primary" disabled={saving} onClick={() => transition("published")}>{reviewingOthers ? "อนุมัติและเผยแพร่" : "เผยแพร่"}</button>
+            ? <button className="tech-button-primary" disabled={saving} onClick={() => transition("published")}>
+                {isFuture(meta.published_at) ? (reviewingOthers ? "อนุมัติและตั้งเวลาเผยแพร่" : "ตั้งเวลาเผยแพร่") : (reviewingOthers ? "อนุมัติและเผยแพร่" : "เผยแพร่")}</button>
             : status === "draft"
               ? <button className="tech-button-primary" disabled={saving} onClick={() => transition("review")}>ส่งตรวจ</button>
               : <button className="tech-button-outline" disabled={saving} onClick={() => transition("draft")}>ดึงกลับมาแก้</button>)}
@@ -417,8 +423,11 @@ const EditorPage: React.FC<{ api: Api; initial: Article | null; onClose: () => v
               <input className="form-input" maxLength={80} value={meta.slug} readOnly={!canEditContent} onChange={e => { setMeta(m => ({ ...m, slug: e.target.value })); setDirty(true); }} />
             </Field>
             {canPublish && (
-              <Field label="วันที่เผยแพร่" hint="ใส่วันในอนาคตเพื่อตั้งเวลา">
-                <input className="form-input" type="date" value={meta.published_at} onChange={e => { setMeta(m => ({ ...m, published_at: e.target.value })); setDirty(true); }} />
+              <Field label="วันเวลาเผยแพร่ (เวลาไทย)"
+                hint={isFuture(meta.published_at)
+                  ? `บทความจะขึ้นเว็บ ${formatSchedule(meta.published_at)} น.${status === "published" ? " · กดบันทึกเพื่อใช้เวลานี้ บทความจะซ่อนจากเว็บจนถึงเวลานั้น" : " · กด \"ตั้งเวลาเผยแพร่\" เพื่อยืนยัน"}`
+                  : "เว้นว่าง = เผยแพร่ทันทีเมื่อกดเผยแพร่ · ใส่วันเวลาในอนาคตเพื่อตั้งเวลา"}>
+                <input className="form-input" type="datetime-local" value={meta.published_at} onChange={e => { setMeta(m => ({ ...m, published_at: e.target.value })); setDirty(true); }} />
               </Field>
             )}
             <div className="np-seo">
