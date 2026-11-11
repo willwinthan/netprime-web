@@ -246,3 +246,33 @@ test('instructor learner report shows activity in their own courses only, not pl
   assert.ok(asInstructor.last_activity, 'course events count');
   assert.ok(asInstructor.last_activity < asAdmin.last_activity, JSON.stringify({ asAdmin, asInstructor }));
 });
+
+test('insights: metrics with the previous period, a narrowing funnel, heatmap, courses, revenue by kind and round fill', async () => {
+  const insights = range => expectStatus(`/api/analytics/insights?range=${range}`, 200, { token: coord.token });
+  const d = await insights('30d');
+  assert.deepEqual(Object.keys(d.metrics).sort(), ['active_learners', 'completions', 'enrollments', 'leads', 'orders', 'registrations', 'revenue', 'signups']);
+  for (const m of Object.values(d.metrics)) {
+    assert.equal(m.series.length, 30);
+    assert.equal(m.total, m === d.metrics.active_learners ? m.total : m.series.reduce((s, p) => s + p.value, 0));
+    assert.ok(m.series.every(p => p.previous_key && p.previous_key < d.range.from));
+  }
+  // The previous period is the 30 days just before, aligned point by point.
+  assert.equal(d.metrics.signups.series[0].previous_key, d.previous.from);
+  assert.equal(d.metrics.signups.series.at(-1).previous_key, d.previous.to);
+  assert.ok(d.metrics.revenue.total >= 1234, 'the paid order from the dashboard test counts');
+  assert.ok(d.metrics.orders.total >= 1);
+
+  const counts = d.funnel.map(s => s.count);
+  assert.equal(counts.length, 4);
+  assert.ok(counts.every((n, i) => !i || n <= counts[i - 1]), `funnel never widens: ${counts}`);
+  assert.ok(Array.isArray(d.heatmap) && d.heatmap.every(c => c.dow >= 0 && c.dow <= 6 && c.hour >= 0 && c.hour <= 23));
+  assert.ok(d.top_courses.length > 0 && d.top_courses.every(c => c.completion_percent >= 0 && c.completion_percent <= 100));
+  assert.ok(d.revenue_by_kind.some(r => r.kind === 'course' && r.revenue >= 1234));
+  assert.ok(d.upcoming_sessions.every(s => s.taken >= s.confirmed));
+
+  const year = await insights('12m');
+  assert.equal(year.metrics.signups.series.length, 12);
+  assert.equal(year.metrics.signups.series[0].previous_key, `${Number(year.range.from.slice(0, 4)) - 1}${year.range.from.slice(4, 7)}`);
+  await expectStatus('/api/analytics/insights?range=forever', 400, { token: admin.token });
+  await expectStatus('/api/analytics/insights?range=30d', 403, { token: student1.token });
+});

@@ -358,6 +358,143 @@ analyticsRouter.get("/analytics/dashboard", rbac(), permit("reports.view"), asyn
   });
 });
 
+// ---------- Insights (dashboard v2) ----------
+
+/** The period of the same length just before `range` (same bucket), for comparisons. */
+function previousRange(range: Range): Range {
+  if (range.bucket === "month") {
+    const months = bucketKeys(range).length;
+    const start = new Date(range.from.slice(0, 7) + "-01T00:00:00Z");
+    start.setUTCMonth(start.getUTCMonth() - months);
+    const end = new Date(Date.parse(range.from + "T00:00:00Z") - DAY_MS);
+    return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10), bucket: "month", key: "previous" };
+  }
+  const days = Math.round((Date.parse(range.to) - Date.parse(range.from)) / DAY_MS) + 1;
+  const to = Date.parse(range.from + "T00:00:00Z") - DAY_MS;
+  return { from: new Date(to - (days - 1) * DAY_MS).toISOString().slice(0, 10), to: new Date(to).toISOString().slice(0, 10), bucket: "day", key: "previous" };
+}
+
+/** Per-bucket SQL for each comparable metric; binds are (from, to) unless `binds` says otherwise. */
+const INSIGHT_METRICS: Record<string, { sql: (b: Bucket) => string; double?: boolean }> = {
+  signups: { sql: b => `SELECT ${bucketOf(b, "created_at")} AS k, COUNT(*) AS v FROM users
+    WHERE role = 'student' AND staff_role IS NULL AND ${dayOf("created_at")} BETWEEN ? AND ? GROUP BY k` },
+  active_learners: { sql: b => `WITH ${ACTIVE_CTE} SELECT ${b === "day" ? "d" : "substr(d, 1, 7)"} AS k, COUNT(DISTINCT user_id) AS v FROM act WHERE d BETWEEN ? AND ? GROUP BY k` },
+  revenue: { sql: b => `SELECT k, COALESCE(SUM(amt), 0) AS v FROM (${SALES_UNION(b)}) GROUP BY k`, double: true },
+  orders: { sql: b => `SELECT k, COUNT(*) AS v FROM (${SALES_UNION(b)}) GROUP BY k`, double: true },
+  enrollments: { sql: b => `SELECT ${bucketOf(b, "enrolled_at")} AS k, COUNT(*) AS v FROM enrollments WHERE ${dayOf("enrolled_at")} BETWEEN ? AND ? GROUP BY k` },
+  completions: { sql: b => `SELECT ${bucketOf(b, "completed_at")} AS k, COUNT(*) AS v FROM enrollments
+    WHERE completed_at IS NOT NULL AND ${dayOf("completed_at")} BETWEEN ? AND ? GROUP BY k` },
+  registrations: { sql: b => `SELECT ${bucketOf(b, "created_at")} AS k, COALESCE(SUM(attendees), 0) AS v FROM session_registrations
+    WHERE status != 'cancelled' AND ${dayOf("created_at")} BETWEEN ? AND ? GROUP BY k` },
+  leads: { sql: b => `SELECT k, COUNT(*) AS v FROM (
+      SELECT ${bucketOf(b, "created_at")} AS k FROM leads WHERE ${dayOf("created_at")} BETWEEN ?1 AND ?2
+      UNION ALL SELECT ${bucketOf(b, "created_at")} FROM inquiries WHERE ${dayOf("created_at")} BETWEEN ?1 AND ?2) GROUP BY k` }
+};
+
+/**
+ * GET /api/analytics/insights?range=…  (reports.view)
+ * Everything the analysis dashboard draws in one call: eight metrics with per-bucket series and the
+ * previous period of the same length, the learner funnel of this period's sign-ups, a weekday × hour
+ * activity heatmap, top courses, revenue by product kind, lead sources and upcoming round fill rates.
+ */
+analyticsRouter.get("/analytics/insights", rbac(), permit("reports.view"), async (c) => {
+  const db = c.env.DB;
+  const range = parseRange(c);
+  if (!range) return c.json({ error: "ช่วงเวลาไม่ถูกต้อง" }, 400);
+  const prev = previousRange(range);
+  const { from, to, bucket } = range;
+  const keys = bucketKeys(range), prevKeys = bucketKeys(prev);
+
+  const metricRows = await Promise.all(Object.entries(INSIGHT_METRICS).map(async ([name, m]) => {
+    const binds = m.double ? [prev.from, to, prev.from, to] : [prev.from, to];
+    const rows = await db.prepare(m.sql(bucket)).bind(...binds).all<{ k: string; v: number }>();
+    return [name, new Map(rows.results.map(r => [r.k, Number(r.v) || 0]))] as const;
+  }));
+  // Distinct active learners over a whole period is not the sum of its buckets.
+  const activeTotal = (f: string, t: string) => db.prepare(`WITH ${ACTIVE_CTE} SELECT COUNT(DISTINCT user_id) AS n FROM act WHERE d BETWEEN ? AND ?`)
+    .bind(f, t).first<{ n: number }>().then(r => r?.n ?? 0);
+  const [activeNow, activeBefore] = await Promise.all([activeTotal(from, to), activeTotal(prev.from, prev.to)]);
+
+  const metrics: Record<string, { total: number; previous_total: number; series: Array<{ key: string; value: number; previous_key: string | null; previous: number | null }> }> = {};
+  for (const [name, values] of metricRows) {
+    const series = keys.map((k, i) => ({ key: k, value: values.get(k) ?? 0, previous_key: prevKeys[i] ?? null, previous: prevKeys[i] ? values.get(prevKeys[i]) ?? 0 : null }));
+    const sum = (list: string[]) => list.reduce((s, k) => s + (values.get(k) ?? 0), 0);
+    metrics[name] = name === "active_learners"
+      ? { total: activeNow, previous_total: activeBefore, series }
+      : { total: sum(keys), previous_total: sum(prevKeys), series };
+  }
+
+  const cohort = `SELECT id FROM users WHERE role = 'student' AND staff_role IS NULL AND ${dayOf("created_at")} BETWEEN ?1 AND ?2`;
+  const enrolled = "EXISTS (SELECT 1 FROM enrollments e WHERE e.user_id = u.id)";
+  // Each stage includes the next, so the funnel never widens (a completion counts as a start).
+  const started = `EXISTS (SELECT 1 FROM lesson_progress lp WHERE lp.user_id = u.id) OR EXISTS (SELECT 1 FROM learning_time lt WHERE lt.user_id = u.id AND lt.seconds > 0)
+    OR EXISTS (SELECT 1 FROM enrollments e WHERE e.user_id = u.id AND (e.progress_percent > 0 OR e.status = 'completed' OR e.completed_at IS NOT NULL))`;
+  const completed = "EXISTS (SELECT 1 FROM enrollments e WHERE e.user_id = u.id AND (e.status = 'completed' OR e.completed_at IS NOT NULL))";
+  const paid = "EXISTS (SELECT 1 FROM course_orders o WHERE o.user_id = u.id AND o.status IN ('paid', 'partial'))";
+
+  const [funnel, heatmap, topCourses, revenueByKind, leadSources, sessions] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS signed_up,
+        SUM(CASE WHEN ${enrolled} THEN 1 ELSE 0 END) AS enrolled,
+        SUM(CASE WHEN ${enrolled} AND (${started}) THEN 1 ELSE 0 END) AS started,
+        SUM(CASE WHEN ${enrolled} AND ${completed} THEN 1 ELSE 0 END) AS completed,
+        SUM(CASE WHEN ${paid} THEN 1 ELSE 0 END) AS paid
+      FROM users u WHERE u.id IN (${cohort})`).bind(from, to).first<Record<string, number>>(),
+    db.prepare(`SELECT CAST(strftime('%w', created_at, '+7 hours') AS INTEGER) AS dow, CAST(strftime('%H', created_at, '+7 hours') AS INTEGER) AS hour,
+        COUNT(*) AS events, COUNT(DISTINCT user_id) AS users
+      FROM user_events WHERE user_id IS NOT NULL AND type IN (${LEARNING_EVENTS.map(t => `'${t}'`).join(", ")}) AND ${dayOf("created_at")} BETWEEN ? AND ?
+      GROUP BY dow, hour`).bind(from, to).all<{ dow: number; hour: number; events: number; users: number }>(),
+    db.prepare(`SELECT co.id, co.title,
+        (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = co.id AND ${dayOf("e.enrolled_at")} BETWEEN ?1 AND ?2) AS enrollments,
+        (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = co.id) AS learners,
+        (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = co.id AND (e.status = 'completed' OR e.completed_at IS NOT NULL)) AS completed,
+        (SELECT COALESCE(AVG(e.progress_percent), 0) FROM enrollments e WHERE e.course_id = co.id) AS avg_progress,
+        (SELECT COALESCE(SUM(COALESCE(o.amount_received, o.amount)), 0) FROM course_orders o
+          WHERE o.course_id = co.id AND o.status = 'paid' AND o.paid_at IS NOT NULL AND ${dayOf("o.paid_at")} BETWEEN ?1 AND ?2) AS revenue
+      FROM courses co WHERE co.status = 'published'
+      ORDER BY enrollments DESC, revenue DESC, learners DESC LIMIT 8`).bind(from, to).all<Record<string, any>>(),
+    db.prepare(`SELECT kind, COUNT(*) AS orders, COALESCE(SUM(COALESCE(amount_received, amount)), 0) AS revenue FROM course_orders
+      WHERE status = 'paid' AND paid_at IS NOT NULL AND ${dayOf("paid_at")} BETWEEN ? AND ? GROUP BY kind ORDER BY revenue DESC`)
+      .bind(from, to).all<{ kind: string; orders: number; revenue: number }>(),
+    db.prepare(`SELECT source, COUNT(*) AS n FROM (
+        SELECT COALESCE(NULLIF(TRIM(l.utm_source), ''), f.name, 'ฟอร์มบนเว็บไซต์') AS source FROM leads l LEFT JOIN lead_forms f ON f.id = l.form_id
+          WHERE ${dayOf("l.created_at")} BETWEEN ?1 AND ?2
+        UNION ALL SELECT 'ฟอร์มติดต่อ' FROM inquiries WHERE ${dayOf("created_at")} BETWEEN ?1 AND ?2)
+      GROUP BY source ORDER BY n DESC`).bind(from, to).all<{ source: string; n: number }>(),
+    db.prepare(`SELECT s.id, s.title, s.start_date, s.capacity, s.status,
+        (SELECT COALESCE(SUM(attendees), 0) FROM session_registrations r WHERE r.session_id = s.id AND r.status IN ('pending', 'confirmed', 'paid', 'attended')) AS taken,
+        (SELECT COALESCE(SUM(attendees), 0) FROM session_registrations r WHERE r.session_id = s.id AND r.status IN ('confirmed', 'paid', 'attended')) AS confirmed,
+        (SELECT COUNT(*) FROM session_registrations r WHERE r.session_id = s.id AND r.status = 'waitlist') AS waitlist
+      FROM training_sessions s WHERE s.status IN ('open', 'closed') AND s.start_date >= ? ORDER BY s.start_date LIMIT 8`).bind(bkkDay(Date.now())).all<Record<string, any>>()
+  ]);
+
+  // Six biggest sources, the rest folded into "อื่น ๆ".
+  const sources = leadSources.results;
+  const leadTop = sources.slice(0, 6).map(r => ({ source: r.source, count: r.n }));
+  const rest = sources.slice(6).reduce((s, r) => s + r.n, 0);
+  if (rest) leadTop.push({ source: "อื่น ๆ", count: rest });
+
+  return c.json({
+    range: { key: range.key, from, to, bucket },
+    previous: { from: prev.from, to: prev.to },
+    metrics,
+    funnel: [
+      { stage: "signed_up", label: "สมัครสมาชิก", count: funnel?.signed_up ?? 0 },
+      { stage: "enrolled", label: "ลงทะเบียนคอร์ส", count: funnel?.enrolled ?? 0 },
+      { stage: "started", label: "เริ่มเรียน", count: funnel?.started ?? 0 },
+      { stage: "completed", label: "เรียนจบอย่างน้อย 1 คอร์ส", count: funnel?.completed ?? 0 }
+    ],
+    paid_from_cohort: funnel?.paid ?? 0,
+    heatmap: heatmap.results,
+    top_courses: topCourses.results.map(r => ({
+      id: r.id, title: r.title, enrollments: r.enrollments, learners: r.learners, revenue: r.revenue,
+      completion_percent: r.learners ? Math.round((r.completed / r.learners) * 1000) / 10 : 0, avg_progress: Math.round(r.avg_progress)
+    })),
+    revenue_by_kind: revenueByKind.results,
+    lead_sources: leadTop,
+    upcoming_sessions: sessions.results
+  });
+});
+
 /** GET /api/analytics/online — users whose last heartbeat is within 5 minutes. */
 analyticsRouter.get("/analytics/online", rbac(), permit("reports.view"), async (c) => {
   return c.json({ window_minutes: ONLINE_WINDOW_MS / 60000, users: await onlineUsers(c.env.DB) });
