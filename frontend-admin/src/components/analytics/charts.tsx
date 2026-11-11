@@ -46,6 +46,21 @@ export function niceTicks(max: number, integer = true, target = 4): number[] {
   return ticks;
 }
 
+/**
+ * Which x positions get a date label: the first and the last always, others only when at least
+ * `gap` px from every kept label, so labels never collide however narrow the chart is.
+ */
+export function labelIndexes(n: number, x: (i: number) => number, gap = 64): number[] {
+  if (n <= 0) return [];
+  if (n === 1) return [0];
+  const kept = [0];
+  const last = n - 1;
+  for (let i = 1; i < last; i++) if (x(i) - x(kept[kept.length - 1]) >= gap && x(last) - x(i) >= gap) kept.push(i);
+  if (x(last) - x(kept[kept.length - 1]) >= gap * 0.75 || kept.length === 1) kept.push(last);
+  else kept[kept.length - 1] = last;
+  return kept;
+}
+
 /** Width of an element, kept in sync with ResizeObserver so SVG text never stretches. */
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null);
@@ -134,10 +149,7 @@ export const TrendChart: React.FC<{
     const v = get(p);
     return v === null ? "" : `${i && get(data[i - 1]) !== null ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
   }).join("");
-  // Room for one label per ~72px; the last point always gets its own label when it fits.
-  const every = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(innerW / 72))));
-  const labelIdx = data.map((_, i) => i).filter(i => i % every === 0 && (data.length - 1 - i >= every * 0.6 || i === data.length - 1));
-  if (data.length > 1 && !labelIdx.includes(data.length - 1) && (data.length - 1) % every >= every * 0.6) labelIdx.push(data.length - 1);
+  const labelIdx = labelIndexes(data.length, x);
 
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     const box = (e.target as SVGRectElement).getBoundingClientRect();
@@ -317,6 +329,117 @@ export const CapacityBars: React.FC<{ rows: Array<{ id: string; title: string; s
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><span style={{ width: 12, height: 8, borderRadius: 2, background: VIZ.ramp[5] }} />ยืนยัน/ชำระแล้ว</span>
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><span style={{ width: 12, height: 8, borderRadius: 2, background: VIZ.ramp[2] }} />รอตรวจ</span>
       </div>
+    </div>
+  );
+};
+
+// ---------- Several metrics on one plot ----------
+
+/**
+ * Categorical slots in a fixed order (validated adjacent-pair light palette). A metric keeps its
+ * slot whatever else is selected, so colours never move when the selection changes. Slots 3–5 are
+ * below 3:1 on the surface: the chart always has a legend, end labels (≤ 4 lines) and a table view.
+ */
+export const SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+
+export interface MultiSeries { id: string; label: string; color: string; points: TrendPoint[]; format: (v: number) => string }
+export type MultiMode = "index" | "actual";
+
+/**
+ * Lines for one or more metrics on ONE axis. "actual" plots real values (callers only offer it when
+ * every series shares a unit); "index" plots each series as % of its own peak in the period, so
+ * metrics of different size and unit can be compared by shape without a second axis. The tooltip
+ * always shows real values. With a single series the previous period can be drawn dashed.
+ */
+export const MultiTrendChart: React.FC<{ series: MultiSeries[]; mode: MultiMode; showPrevious: boolean; height?: number }> = ({ series, mode, showPrevious, height = 300 }) => {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const single = series.length === 1;
+  const previous = single && showPrevious;
+  const endLabels = series.length <= 4 && !single;
+  const pad = { top: 14, right: endLabels ? 128 : 16, bottom: 30, left: mode === "index" ? 44 : 60 };
+  const n = series[0]?.points.length ?? 0;
+  const peaks = series.map(s => Math.max(...s.points.map(p => Math.max(p.value, previous ? p.previous ?? 0 : 0)), 0));
+  const scaled = (si: number, v: number) => mode === "index" ? (peaks[si] ? (v / peaks[si]) * 100 : 0) : v;
+  const max = mode === "index" ? 100 : Math.max(...peaks, 0);
+  const ticks = mode === "index" ? [0, 25, 50, 75, 100] : niceTicks(max, true);
+  const top = ticks[ticks.length - 1] || 1;
+  const innerW = Math.max(1, width - pad.left - pad.right), innerH = height - pad.top - pad.bottom;
+  const x = (i: number) => pad.left + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
+  const y = (v: number) => pad.top + innerH - (v / top) * innerH;
+  const fmtAxis = mode === "index" ? (v: number) => `${v}%` : series[0]?.format ?? String;
+  const line = (si: number, get: (p: TrendPoint) => number | null) => series[si].points.map((p, i) => {
+    const v = get(p);
+    return v === null ? "" : `${i && get(series[si].points[i - 1]) !== null ? "L" : "M"}${x(i).toFixed(1)},${y(scaled(si, v)).toFixed(1)}`;
+  }).join("");
+  const keys = series[0]?.points ?? [];
+  const labelIdx = labelIndexes(n, x);
+
+  // End labels, nudged apart so they never overlap (14px minimum).
+  const ends = endLabels ? series.map((s, si) => ({ si, y: y(scaled(si, s.points[n - 1]?.value ?? 0)) })).sort((a, b) => a.y - b.y) : [];
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+
+  const onMove = (e: React.MouseEvent<SVGRectElement>) => {
+    const box = (e.target as SVGRectElement).getBoundingClientRect();
+    setHover(Math.max(0, Math.min(n - 1, Math.round(((e.clientX - box.left) / Math.max(1, box.width)) * (n - 1)))));
+  };
+  if (!series.length) return <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "40px 0", textAlign: "center" }}>เลือกหัวข้อทางซ้ายอย่างน้อย 1 หัวข้อ</div>;
+
+  return (
+    <div ref={ref} style={{ position: "relative", width: "100%", height }}>
+      {width > 0 && (
+        <svg width={width} height={height} role="img" aria-label={series.map(s => s.label).join(", ")}>
+          {ticks.map(t => (
+            <g key={t}>
+              <line x1={pad.left} x2={pad.left + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? "rgba(15,23,42,0.18)" : VIZ.grid} />
+              <text x={pad.left - 8} y={y(t)} dy="0.32em" textAnchor="end" fontSize={11} fill={VIZ.axis}>{fmtAxis(t)}</text>
+            </g>
+          ))}
+          {labelIdx.map(i => (
+            <text key={i} x={x(i)} y={height - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} fontSize={11} fill={VIZ.axis}>{bucketLabel(keys[i].key)}</text>
+          ))}
+          {single && <path d={`${line(0, p => p.value)}L${x(n - 1)},${y(0)}L${x(0)},${y(0)}Z`} fill={series[0].color} opacity={0.07} />}
+          {previous && <path d={line(0, p => p.previous)} fill="none" stroke={series[0].color} strokeOpacity={0.6} strokeWidth={1.75} strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" />}
+          {series.map((s, si) => (
+            <path key={s.id} d={line(si, p => p.value)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
+              opacity={hover === null ? 1 : 0.95} />
+          ))}
+          {ends.map(({ si, y: ly }) => (
+            <g key={series[si].id}>
+              <circle cx={x(n - 1)} cy={y(scaled(si, series[si].points[n - 1]?.value ?? 0))} r={3.5} fill={series[si].color} stroke="#fff" strokeWidth={2} />
+              <text x={x(n - 1) + 10} y={ly} dy="0.32em" fontSize={11} fill="var(--text-secondary)">{series[si].label.length > 16 ? `${series[si].label.slice(0, 15)}…` : series[si].label}</text>
+            </g>
+          ))}
+          {hover !== null && (
+            <g aria-hidden>
+              <line x1={x(hover)} x2={x(hover)} y1={pad.top} y2={pad.top + innerH} stroke="rgba(15,23,42,0.25)" strokeDasharray="3 3" />
+              {series.map((s, si) => <circle key={s.id} cx={x(hover)} cy={y(scaled(si, s.points[hover]?.value ?? 0))} r={4} fill={s.color} stroke="#fff" strokeWidth={2} />)}
+            </g>
+          )}
+          <rect x={pad.left} y={pad.top} width={innerW} height={innerH} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+        </svg>
+      )}
+      {hover !== null && keys[hover] && (
+        <div style={{ ...tooltipStyle, top: pad.top, left: Math.min(Math.max(x(hover) + 12, 0), Math.max(0, width - 260)) }}>
+          <div style={{ fontWeight: 600, marginBottom: 2 }}>{bucketLabel(keys[hover].key, true)}</div>
+          {series.map((s, si) => {
+            const p = s.points[hover];
+            return (
+              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+                <LegendSwatch color={s.color} label={s.label} />
+                <strong>{s.format(p.value)}{mode === "index" && !single ? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}> · {Math.round(scaled(si, p.value))}%</span> : null}</strong>
+              </div>
+            );
+          })}
+          {previous && keys[hover].previous_key && keys[hover].previous !== null && <>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 14 }}>
+              <LegendSwatch color={series[0].color} dashed label={bucketLabel(keys[hover].previous_key!, true)} />
+              <strong>{series[0].format(keys[hover].previous!)}</strong>
+            </div>
+            <Delta current={keys[hover].value} previous={keys[hover].previous!} compact />
+          </>}
+        </div>
+      )}
     </div>
   );
 };

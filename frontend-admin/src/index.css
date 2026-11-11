@@ -752,3 +752,10 @@ h1, h2, h3, h4, h5, h6 {
   /* Wide data tables scroll inside their card instead of stretching the page. */
   .main-content table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* Analysis dashboard: metric list on the left, chart on the right; stacked on narrow screens. */
+.np-analysis-grid { display: grid; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); }
+@media (max-width: 860px) {
+  .np-analysis-grid { grid-template-columns: minmax(0, 1fr); }
+  .np-analysis-grid > :first-child { border-right: 0 !important; border-bottom: 1px solid rgba(15, 23, 42, 0.06); }
+}
