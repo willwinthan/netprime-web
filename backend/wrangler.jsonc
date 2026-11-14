@@ -9,6 +9,7 @@
 	"vars": {
 		"FRONTEND_ORIGINS": "",
 		"APP_URL": "",
+		"API_ORIGIN": "",
 		"EMAIL_FROM": ""
 	},
 	// Workers Logs: search errors and request logs in the dashboard.
@@ -54,6 +55,7 @@
 			"vars": {
 				"FRONTEND_ORIGINS": "https://netprime-frontend-staging.nfr-apjc-th-cloudthing.workers.dev",
 				"APP_URL": "https://netprime-frontend-staging.nfr-apjc-th-cloudthing.workers.dev",
+				"API_ORIGIN": "https://netprime-backend-staging.nfr-apjc-th-cloudthing.workers.dev",
 				"EMAIL_FROM": ""
 			},
 			"d1_databases": [

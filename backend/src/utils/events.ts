@@ -17,13 +17,15 @@ export function onEvent(listener: EventListener) {
   listeners.push(listener);
 }
 
-export async function trackEvent(db: D1Database, userId: string | null, type: EventType, options: TrackOptions = {}): Promise<void> {
+export async function trackEvent(db: D1Database, userId: string | null, type: EventType, options: TrackOptions = {}): Promise<boolean> {
   try {
     await db.prepare("INSERT INTO user_events (user_id, type, course_id, lesson_id, data_json) VALUES (?, ?, ?, ?, ?)")
       .bind(userId, type, options.courseId ?? null, options.lessonId ?? null,
         options.data === undefined ? null : JSON.stringify(options.data).slice(0, 4000)).run();
     await Promise.all(listeners.map(l => l(db, userId, type, options).catch(err => console.error("Event listener failed:", err))));
+    return true;
   } catch (error) {
     console.error("trackEvent failed:", error);
+    return false;
   }
 }

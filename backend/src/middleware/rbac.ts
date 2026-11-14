@@ -37,6 +37,8 @@ export type Env = {
     NOTION_TOKEN?: string;
     /** Public site origin used in email links, e.g. https://www.netprime.co.th (no trailing slash). */
     APP_URL?: string;
+    /** Canonical public origin of this API Worker, used for short-lived signed file links. */
+    API_ORIGIN?: string;
     /**
      * Origin that serves uploaded self-learning HTML, e.g. https://lessons.netprime.co.th (no trailing slash),
      * routed to this Worker. Must differ from the site's origin. Unset: this Worker's own origin.

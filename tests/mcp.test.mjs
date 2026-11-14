@@ -55,7 +55,7 @@ test('setup: agent keys with read and write MCP access', async () => {
   const reader = await make('MCP reader', { scopes: ['reports:read', 'sessions:read', 'inquiries:read', 'events:read', 'orders:confirm'], mcp_access: 'read' });
   keys.reader = reader.secret; keys.readerId = reader.key.id;
   assert.equal(reader.key.mcp_access, 'read');
-  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'sessions:write', 'articles:write', 'orders:confirm', 'orders:read', 'qa:read', 'qa:answer'], mcp_access: 'write' });
+  const writer = await make('MCP writer', { scopes: ['reports:read', 'inquiries:read', 'inquiries:write', 'sessions:write', 'articles:write', 'orders:confirm', 'orders:read', 'events:read', 'qa:read', 'qa:answer'], mcp_access: 'write' });
   keys.writer = writer.secret; keys.writerId = writer.key.id;
   const off = await make('No MCP', { scopes: ['reports:read'], mcp_access: 'off' });
   keys.off = off.secret;
@@ -154,6 +154,72 @@ test('write access: draft runs at once, act goes to the approval queue', async (
   await expectStatus(`/api/admin/platform/api-keys/${keys.writerId}`, 200, { method: 'PATCH', token: admin, body: { mcp_access: 'read' } });
   assert.ok(!(await toolNames(keys.writer)).includes('confirm_order'));
   await expectStatus(`/api/admin/platform/api-keys/${keys.writerId}`, 200, { method: 'PATCH', token: admin, body: { mcp_access: 'write' } });
+});
+
+test('payment slip upload emits an event and MCP returns a short-lived private preview', async () => {
+  const names = await toolNames(keys.writer);
+  assert.ok(names.includes('get_order_payment_review'));
+  const described = (await mcp(keys.writer, 'tools/list')).body.result.tools.find(t => t.name === 'get_order_payment_review');
+  assert.deepEqual(described.inputSchema.required, ['order_id']);
+  assert.equal(described.annotations.readOnlyHint, true);
+
+  const order = (await expectStatus('/api/student/orders', 201, {
+    method: 'POST', token: student, body: { course_id: 'course_aws_csa' }
+  })).order;
+  const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'slip.png', { type: 'image/png' });
+  const form = new FormData();
+  form.set('file', png);
+  const uploaded = await fetch(`${base}/api/student/orders/${order.id}/slip`, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + student }, body: form
+  });
+  assert.equal(uploaded.status, 200, await uploaded.text());
+
+  const events = await callTool(keys.writer, 'get_events', { types: 'order.slip_uploaded' });
+  const event = events.data.data.find(e => e.event === 'order.slip_uploaded' && e.data?.order_id === order.id);
+  assert.ok(event, JSON.stringify(events.data));
+  assert.deepEqual(event.data, { order_id: order.id });
+  assert.equal(event.user_id, null);
+  assert.equal(event.course_id, null);
+  assert.ok(!(await toolNames(keys.reader)).includes('get_order_payment_review'));
+  const readerEvents = await callTool(keys.reader, 'get_events', { types: 'order.slip_uploaded' });
+  const readerEvent = readerEvents.data.data.find(e => e.event === 'order.slip_uploaded' && e.data?.order_id === order.id);
+  assert.ok(readerEvent);
+  assert.deepEqual(readerEvent.data, { order_id: order.id }, 'events-only keys receive no payer, title, reference or amount');
+
+  const review = await callTool(keys.writer, 'get_order_payment_review', { order_id: order.reference });
+  assert.equal(review.isError, false, review.text);
+  assert.equal(review.data.data.order_id, order.id);
+  assert.equal(review.data.data.reference, order.reference);
+  assert.equal(review.data.data.payer.email, 'student3@netprime.com');
+  assert.equal(review.data.data.item.title, order.course_title);
+  assert.equal(review.data.data.amount_due, order.amount);
+  assert.equal(review.data.data.slip.content_type, 'image/png');
+  assert.match(review.data.data.slip.download_url, /^http:\/\/127\.0\.0\.1:\d+\/api\/v1\/order-slips\//);
+  assert.ok(Date.parse(review.data.data.slip.expires_at) > Date.now());
+
+  const slip = await fetch(review.data.data.slip.download_url);
+  assert.equal(slip.status, 200);
+  assert.equal(slip.headers.get('content-type'), 'image/png');
+  assert.equal(slip.headers.get('referrer-policy'), 'no-referrer');
+  assert.deepEqual([...new Uint8Array(await slip.arrayBuffer())], [...new Uint8Array(await png.arrayBuffer())]);
+
+  // Replacing a slip invalidates the old bearer URL even if both uploads share the same SQLite second.
+  const replacement = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1])], 'replacement.png', { type: 'image/png' });
+  const replacementForm = new FormData();
+  replacementForm.set('file', replacement);
+  const replaced = await fetch(`${base}/api/student/orders/${order.id}/slip`, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + student }, body: replacementForm
+  });
+  assert.equal(replaced.status, 200, await replaced.text());
+  assert.equal((await fetch(review.data.data.slip.download_url)).status, 403, 'old URL must not serve the replacement object');
+  const latest = await callTool(keys.writer, 'get_order_payment_review', { order_id: order.id });
+  const latestSlip = await fetch(latest.data.data.slip.download_url);
+  assert.equal(latestSlip.status, 200);
+  assert.deepEqual([...new Uint8Array(await latestSlip.arrayBuffer())], [...new Uint8Array(await replacement.arrayBuffer())]);
+
+  const tampered = new URL(review.data.data.slip.download_url);
+  tampered.searchParams.set('sig', '0'.repeat(64));
+  assert.equal((await fetch(tampered)).status, 403);
 });
 
 // ==========================================
