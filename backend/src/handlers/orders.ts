@@ -787,6 +787,8 @@ ordersRouter.post("/student/orders/:id/slip", rbac(["student", "admin"]), requir
     }
     if (order.slip_r2_key) await c.env.ASSETS.delete(order.slip_r2_key).catch(() => undefined);
     const fresh = (await loadOrder(db, order.id))!;
+    const tracked = await trackEvent(db, null, "order_slip_uploaded", { data: { order_id: fresh.id } });
+    if (!tracked) throw new Error("บันทึกเหตุการณ์สลิปไม่สำเร็จ");
     return c.json({ order: present(fresh), message: "แนบสลิปแล้ว เจ้าหน้าที่จะตรวจสอบโดยเร็ว" });
   } catch (error) {
     console.error("Slip upload failed:", error);
