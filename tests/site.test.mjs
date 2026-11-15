@@ -22,7 +22,7 @@ test('public site data hides drafts and internal notification recipients', async
   const site = await expectStatus('/api/public/site', 200);
   assert.equal(site.settings.notify_emails, undefined);
   assert.equal(site.settings.phone, '062-559-4622');
-  assert.match(site.settings.company, /Plantecplus/);
+  assert.match(site.settings.company, /Plantec Plus Co\.,Ltd/);
   assert.ok(site.promotions.every(p => p.title));
   const { sessions } = await expectStatus('/api/public/sessions', 200);
   assert.ok(sessions.length > 0);

@@ -154,7 +154,7 @@ interface SiteSettings {
 }
 
 const DEFAULT_SETTINGS: SiteSettings = {
-  company: "Plantecplus Co.,Ltd (NetPrime Training)", phone: "062-559-4622", email: "netprime@plantecplus.com", line: null,
+  company: "Plantec Plus Co.,Ltd (NetPrime Training)", phone: "062-559-4622", email: "netprime@plantecplus.com", line: null,
   address: "118/28 ถนน พระรามที่ 6 แขวงพญาไท เขตพญาไท กรุงเทพมหานคร 10400", hours: null, map_url: null, facebook_url: null,
   announcement: { active: false, auto: true, text: null, link: null }, notify_emails: null
 };
