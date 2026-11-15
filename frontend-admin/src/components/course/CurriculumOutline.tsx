@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle, FileText, Globe, Layers, Lock, PlayCircle, Package } from "lucide-react";
+import { CheckCircle, FileText, Globe, Layers, Lock, PlayCircle, Package, Terminal } from "lucide-react";
 import { CourseSection, LESSON_TYPE_LABEL, PlayerLesson, unlockText } from "./types";
 import "./course.css";
 
@@ -16,7 +16,7 @@ interface Props {
 }
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
-  video: <PlayCircle size={10} />, text: <FileText size={10} />, pdf: <FileText size={10} />, embed: <Globe size={10} />, scorm: <Package size={10} />, self_learning: <Globe size={10} />
+  video: <PlayCircle size={10} />, text: <FileText size={10} />, pdf: <FileText size={10} />, embed: <Globe size={10} />, scorm: <Package size={10} />, self_learning: <Globe size={10} />, lab: <Terminal size={10} />
 };
 
 export const CurriculumOutline: React.FC<Props> = ({ lessons, sections, activeLessonId, enrolled, onSelect }) => {

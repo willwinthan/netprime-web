@@ -11,6 +11,7 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/server": "2.4.0",
+    "@netprime/lab-engine": "workspace:*",
     "@tsndr/cloudflare-worker-jwt": "^2.5.3",
     "agents": "0.33.0",
     "hono": "^4.4.2",

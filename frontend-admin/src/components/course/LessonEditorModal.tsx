@@ -30,6 +30,7 @@ interface Props {
   onSaved: () => void;
 }
 
+interface LabOption { id: string; title: string; description: string | null; version: number }
 interface SelfLearningOption { id: string; slug: string; title: string; visibility: "public" | "course" }
 
 /** Create or edit any lesson (video, text, PDF, embed, SCORM, self-learning), its chapter and drip settings. */
@@ -46,6 +47,8 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [selfLearningId, setSelfLearningId] = useState(lesson?.self_learning_id ?? "");
   const [selfLearningOptions, setSelfLearningOptions] = useState<SelfLearningOption[] | null>(null);
+  const [labId, setLabId] = useState(lesson?.lab_id ?? "");
+  const [labOptions, setLabOptions] = useState<LabOption[] | null>(null);
   const [dripDays, setDripDays] = useState(lesson?.available_after_days ? String(lesson.available_after_days) : "");
   const [availableOn, setAvailableOn] = useState(lesson?.available_on ?? "");
   const [scormFile, setScormFile] = useState<File | null>(null);
@@ -69,6 +72,13 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     if (type !== "self_learning" || selfLearningOptions) return;
     api.get<{ lessons: SelfLearningOption[] }>("/instructor/self-learning-options")
       .then(res => setSelfLearningOptions(res.lessons)).catch(err => { setSelfLearningOptions([]); setError(err.message); });
+  }, [type]);
+
+  // Labs come from the Virtual Lab library (menu "Virtual Lab"); only published ones are offered.
+  useEffect(() => {
+    if (type !== "lab" || labOptions) return;
+    api.get<{ labs: LabOption[] }>("/instructor/lab-options")
+      .then(res => setLabOptions(res.labs)).catch(err => { setLabOptions([]); setError(err.message); });
   }, [type]);
 
   const uploadPdf = async (file: File | undefined) => {
@@ -151,6 +161,10 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
     if (type === "self_learning") {
       if (!selfLearningId) return setError("เลือกบทเรียน Self-learning ที่จะใช้");
       body.self_learning_id = selfLearningId;
+    }
+    if (type === "lab") {
+      if (!labId) return setError("เลือก Virtual Lab ที่จะใช้");
+      body.lab_id = labId;
     }
     setBusy("กำลังบันทึก...");
     try {
@@ -243,6 +257,15 @@ export const LessonEditorModal: React.FC<Props> = ({ courseId, lesson, sections,
               {selfLearningOptions?.map(o => (
                 <option key={o.id} value={o.id}>{o.title}{o.visibility === "course" ? " (ใช้ในคอร์สเท่านั้น)" : " (เปิดบนหน้าเว็บด้วย)"}</option>
               ))}
+            </select>
+          </Field>
+        )}
+
+        {type === "lab" && (
+          <Field label="Virtual Lab" hint="เลือกจากคลัง lab ที่เผยแพร่แล้ว ผู้เรียนเรียนจบบทนี้เมื่อระบบตรวจว่าทำ lab ผ่านครบทุกข้อเท่านั้น (กดทำเครื่องหมายเองไม่ได้)">
+            <select className="form-input" value={labId} onChange={e => setLabId(e.target.value)} required>
+              <option value="">{labOptions ? (labOptions.length ? "เลือก lab" : "ยังไม่มี lab ที่เผยแพร่") : "กำลังโหลด..."}</option>
+              {labOptions?.map(o => <option key={o.id} value={o.id}>{o.title} (v{o.version})</option>)}
             </select>
           </Field>
         )}

@@ -14,6 +14,7 @@ import { InstallAppButton } from "./pwa/pwa";
 import logo from "../logo/NetPrimeLogo.png";
 import { FEATURES } from "./features";
 // Console pages load on first visit so learners and visitors don't download every staff screen.
+const LabsAdminPage = lazy(() => import("./pages/LabsAdminPage").then(m => ({ default: m.LabsAdminPage })));
 const SelfLearningAdminPage = lazy(() => import("./pages/SelfLearningAdminPage").then(m => ({ default: m.SelfLearningAdminPage })));
 const InstructorRoundsPage = lazy(() => import("./pages/InstructorRoundsPage").then(m => ({ default: m.InstructorRoundsPage })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
@@ -77,10 +78,11 @@ import {
   History,
   Bot,
   Menu,
-  X
+  X,
+  TerminalSquare
 } from "lucide-react";
 
-type ConsoleTab = "dashboard" | "selflearningadmin" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
+type ConsoleTab = "dashboard" | "selflearningadmin" | "labs" | "hr" | "instructor" | "rounds" | "admin" | "site" | "articles" | "users"
   | "orders" | "courses" | "certificates" | "privacy" | "profile"
   | "analytics" | "reports" | "assessments" | "categories" | "marketing" | "website" | "communication"
   | "settings" | "ai" | "affiliate" | "commerce" | "audit" | "agents";
@@ -121,7 +123,8 @@ const NAV_GROUPS: NavGroup[] = [
     { tab: "site", label: "รอบอบรมและผู้สมัคร", icon: <CalendarDays size={16} />, show: perm(...TRAINING_PERMISSIONS) },
     { tab: "courses", label: "ตรวจและเผยแพร่คอร์ส", icon: <GraduationCap size={16} />, show: perm("courses.approve") },
     { tab: "categories", label: "หมวดหมู่คอร์ส", icon: <FolderTree size={16} />, show: perm("courses.approve", "website.design") },
-    { tab: "certificates", label: "ใบประกาศ", icon: <Award size={16} />, show: perm(...CERTIFICATE_PERMISSIONS) }
+    { tab: "certificates", label: "ใบประกาศ", icon: <Award size={16} />, show: perm(...CERTIFICATE_PERMISSIONS) },
+    { tab: "labs", label: "Virtual Lab", icon: <TerminalSquare size={16} />, show: perm("labs.manage") }
   ] },
   { id: "sales", title: "การขาย", hint: "คำสั่งซื้อ สลิปโอน ใบเสร็จ/ใบกำกับภาษี ชุดคอร์ส สมาชิก และใบเสนอราคา", items: [
     { tab: "orders", label: "คำสั่งซื้อและการชำระเงิน", icon: <Receipt size={16} />, show: perm("payments.manage") },
@@ -490,6 +493,7 @@ export const App: React.FC = () => {
                     <InstructorConsole />
                   </m.div>
                 )}
+                {currentTab === "labs" && <m.div key="labs" {...pageTransition}><LabsAdminPage /></m.div>}
                 {currentTab === "selflearningadmin" && <m.div key="selflearningadmin" {...pageTransition}><SelfLearningAdminPage /></m.div>}
                 {currentTab === "rounds" && (
                   <m.div key="rounds" {...pageTransition}>

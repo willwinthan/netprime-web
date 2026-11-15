@@ -8,6 +8,7 @@ import { canApproveCourses, verifiedTokenUserId } from "./courses";
 import { checkLessonAssets } from "./instructor";
 import { requireDeleteConfirmation } from "../utils/dangerConfirm";
 import { previewUrl } from "./selfLearning";
+import { labLessonPayload } from "../utils/labs";
 import {
   activeEnrollmentId, completeLesson, isCourseStaff, isLessonType, jsonList, LESSON_ORDER, LESSON_TYPE_SQL, lessonLockResponse
 } from "../utils/courseContent";
@@ -48,13 +49,15 @@ interface LessonRow {
   content_json: string | null; content_md: string | null; pdf_r2_key: string | null; embed_url: string | null;
   scorm_base: string | null; scorm_launch: string | null; available_after_days: number | null; available_on: string | null;
   self_learning_id: string | null;
+  lab_id: string | null;
 }
 
 /**
- * Self-learning lessons are stored as type 'embed' with self_learning_id set (the type CHECK cannot change on
- * D1, see migrations/0034); every API reports them as type 'self_learning'.
+ * Self-learning and Virtual Lab lessons are stored as type 'embed' with self_learning_id / lab_id set (the type
+ * CHECK cannot change on D1, see migrations/0034 and 0041); every API reports them as 'self_learning' / 'lab'.
  */
-const lessonType = (l: Pick<LessonRow, "type" | "self_learning_id">) => l.self_learning_id ? "self_learning" : l.type;
+const lessonType = (l: Pick<LessonRow, "type" | "self_learning_id" | "lab_id">) =>
+  l.lab_id ? "lab" : l.self_learning_id ? "self_learning" : l.type;
 
 // ==========================================
 // Categories
@@ -359,7 +362,7 @@ contentRouter.put("/instructor/courses/:id/details", rbac(["instructor", "admin"
 /** Instructor-facing lesson fields (no content bodies). */
 function builderLesson(l: LessonRow) {
   return {
-    id: l.id, title: l.title, type: lessonType(l), section_id: l.section_id, sort_order: l.sort_order, self_learning_id: l.self_learning_id,
+    id: l.id, title: l.title, type: lessonType(l), section_id: l.section_id, sort_order: l.sort_order, self_learning_id: l.self_learning_id, lab_id: l.lab_id,
     video_stream_uid: l.video_stream_uid, video_provider: l.video_provider, handout_r2_key: l.handout_r2_key,
     pdf_r2_key: l.pdf_r2_key, embed_url: l.embed_url, scorm_launch: l.scorm_launch,
     has_text: !!(l.content_json || l.content_md),
@@ -530,7 +533,7 @@ contentRouter.put("/instructor/courses/:id/structure", rbac(["instructor", "admi
 interface LessonInput {
   title?: unknown; type?: unknown; section_id?: unknown; content_json?: unknown; content_md?: unknown; pdf_r2_key?: unknown;
   embed_url?: unknown; video_stream_uid?: unknown; video_provider?: unknown; handout_r2_key?: unknown;
-  available_after_days?: unknown; available_on?: unknown; self_learning_id?: unknown;
+  available_after_days?: unknown; available_on?: unknown; self_learning_id?: unknown; lab_id?: unknown;
 }
 
 /** A PDF key the user may attach: their own upload (or one already used in their own lessons); admins any. */
@@ -562,14 +565,26 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
   }
   const type = body.type !== undefined ? body.type : current ? lessonType(current) : "video";
   const selfLearning = type === "self_learning";
-  if (!selfLearning && !isLessonType(type)) return { error: "ประเภทบทเรียนต้องเป็น video, text, pdf, embed, scorm หรือ self_learning" };
-  if (body.type !== undefined || !current) values.type = selfLearning ? "embed" : type;
+  const lab = type === "lab";
+  if (!selfLearning && !lab && !isLessonType(type)) return { error: "ประเภทบทเรียนต้องเป็น video, text, pdf, embed, scorm, self_learning หรือ lab" };
+  if (body.type !== undefined || !current) values.type = selfLearning || lab ? "embed" : type;
+  if (lab && body.lab_id !== undefined) {
+    const id = typeof body.lab_id === "string" ? body.lab_id : "";
+    const picked = id ? await c.env.DB.prepare("SELECT id FROM labs WHERE id = ? AND status = 'published'").bind(id).first() : null;
+    if (!picked) return { error: "เลือก Virtual Lab ที่เผยแพร่แล้ว" };
+    values.lab_id = id;
+    values.embed_url = null;
+    values.self_learning_id = null;
+  }
+  // Another type drops the lab, so the lesson is not still graded as a lab.
+  if (!lab && current?.lab_id) values.lab_id = null;
   if (selfLearning && body.self_learning_id !== undefined) {
     const id = typeof body.self_learning_id === "string" ? body.self_learning_id : "";
     const picked = id ? await c.env.DB.prepare("SELECT id FROM self_learning_lessons WHERE id = ? AND status = 'published'").bind(id).first() : null;
     if (!picked) return { error: "เลือกบทเรียน Self-learning ที่เผยแพร่แล้ว" };
     values.self_learning_id = id;
     values.embed_url = null;
+    values.lab_id = null;
   }
   // Another type drops the link, so the lesson is not still shown as self-learning.
   if (!selfLearning && current?.self_learning_id) values.self_learning_id = null;
@@ -600,7 +615,7 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
     if ((body.content_md || "").length > 200_000) return { error: "เนื้อหาบทเรียนยาวเกิน 200KB" };
     values.content_md = body.content_md || null;
   }
-  if (body.embed_url !== undefined && !selfLearning) {
+  if (body.embed_url !== undefined && !selfLearning && !lab) {
     const url = typeof body.embed_url === "string" ? body.embed_url.trim() : "";
     if (url && !embedSrc(url)) return { error: `ฝังได้เฉพาะลิงก์ https จาก ${EMBED_PROVIDERS}` };
     values.embed_url = url || null;
@@ -651,6 +666,7 @@ async function lessonValues(c: Context<Env>, body: LessonInput, courseId: string
   if (type === "video" && !merged.video_stream_uid) return { error: "บทเรียนวิดีโอต้องระบุวิดีโอ" };
   if (type === "embed" && !merged.embed_url) return { error: "บทเรียนแบบฝังเนื้อหาต้องระบุลิงก์" };
   if (selfLearning && !merged.self_learning_id) return { error: "เลือกบทเรียน Self-learning ที่จะใช้" };
+  if (lab && !merged.lab_id) return { error: "เลือก Virtual Lab ที่จะใช้" };
   if (type === "pdf" && !merged.pdf_r2_key) return { error: "บทเรียน PDF ต้องอัปโหลดไฟล์ PDF" };
   return { values };
 }
@@ -731,12 +747,23 @@ contentRouter.get("/instructor/self-learning-options", rbac(["instructor", "admi
   return c.json({ lessons: rows.results });
 });
 
+/**
+ * Published Virtual Labs an instructor may put in a course (staff with labs.manage build them; instructors pick).
+ * GET /api/instructor/lab-options
+ */
+contentRouter.get("/instructor/lab-options", rbac(["instructor", "admin"]), async (c) => {
+  const rows = await c.env.DB.prepare(`SELECT id, title, description, version FROM labs WHERE status = 'published'
+    ORDER BY title LIMIT 500`).all();
+  c.header("Cache-Control", "no-store");
+  return c.json({ labs: rows.results });
+});
+
 // ==========================================
 // Learner: lesson content, mark complete, PDF viewer
 // ==========================================
 
 /** Lesson + access decision for learner endpoints: staff, or enrolled with an unlocked lesson. */
-async function learnerLesson(c: Context<Env>, lessonId: string): Promise<{ lesson: LessonRow & { instructor_id: string }; staff: boolean; enrolled: boolean } | { error: Response }> {
+export async function learnerLesson(c: Context<Env>, lessonId: string): Promise<{ lesson: LessonRow & { instructor_id: string }; staff: boolean; enrolled: boolean } | { error: Response }> {
   const user = c.get("user");
   const db = c.env.DB;
   const lesson = await db.prepare("SELECT l.*, co.instructor_id FROM lessons l JOIN courses co ON co.id = l.course_id WHERE l.id = ?")
@@ -771,9 +798,11 @@ contentRouter.get("/student/lessons/:id/content", rbac(), async (c) => {
         .bind(l.self_learning_id).first<{ slug: string; title: string; current_file_id: string | null }>();
       if (sl?.current_file_id) selfLearning = { slug: sl.slug, title: sl.title, content_url: await previewUrl(c, sl.current_file_id) };
     }
+    const lab = l.lab_id ? await labLessonPayload(c.env.DB, l.lab_id, user.id, l.id, found.staff) : null;
     return c.json({
       lesson: { id: l.id, course_id: l.course_id, title: l.title, type, section_id: l.section_id },
       self_learning: selfLearning,
+      lab,
       completed: !!progress?.completed,
       content_json: l.type === "text" ? l.content_json : null,
       content_md: l.type === "text" ? l.content_md : null,
@@ -802,6 +831,8 @@ contentRouter.post("/student/lessons/:id/complete", rbac(["student", "admin"]), 
     if ("error" in found) return found.error;
     if (!found.enrolled) return c.json({ error: "ต้องมีการลงทะเบียนเรียนที่ใช้งานอยู่" }, 403);
     const l = found.lesson;
+    // A lab is completed only by the server grading the learner's work (handlers/labs.ts).
+    if (l.lab_id) return c.json({ error: "บทเรียน Virtual Lab จะบันทึกว่าเรียนจบเมื่อทำ lab ผ่านครบทุกข้อ" }, 400);
     if (!["text", "pdf", "embed"].includes(l.type))
       return c.json({ error: l.type === "scorm" ? "บทเรียน SCORM จะบันทึกว่าเรียนจบเมื่อทำแบบฝึกในบทเรียนเสร็จ" : "บทเรียนวิดีโอบันทึกว่าเรียนจบเมื่อดูวิดีโอจนจบ" }, 400);
     const result = await completeLesson(c.env.DB, user.id, l.id, l.course_id);

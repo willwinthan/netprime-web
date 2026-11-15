@@ -2,6 +2,9 @@
 PRAGMA foreign_keys = OFF;
 
 -- Clean up existing tables (dependencies first)
+DROP TABLE IF EXISTS lab_progress;
+DROP TABLE IF EXISTS lab_versions;
+DROP TABLE IF EXISTS labs;
 DROP TABLE IF EXISTS danger_confirmations;
 DROP TABLE IF EXISTS live_attendance;
 DROP TABLE IF EXISTS course_live_sessions;
@@ -1249,7 +1252,8 @@ INSERT INTO role_permissions (role, permission) VALUES
 ('instructor', 'articles.write'),
 ('instructor', 'articles.import_notion'),
 ('instructor', 'site.media'),
-('coordinator', 'site.self_learning');
+('coordinator', 'site.self_learning'),
+('coordinator', 'labs.manage');
 
 -- Enable foreign key checking again
 PRAGMA foreign_keys = ON;
@@ -2309,3 +2313,55 @@ ALTER TABLE lessons ADD COLUMN duration_seconds REAL;
 ALTER TABLE lesson_progress ADD COLUMN watched_seconds REAL NOT NULL DEFAULT 0;
 ALTER TABLE lesson_progress ADD COLUMN last_position REAL;
 ALTER TABLE lesson_progress ADD COLUMN last_beat_ms INTEGER;
+
+-- Virtual Lab (migrations/0041_virtual_labs.sql, handlers/labs.ts, packages/lab-engine): labs are JSON specs run by
+-- the shared engine; the server grades a learner by replaying their keystrokes. Lab lessons are stored as type 'embed'
+-- with lab_id set and reported as type 'lab'.
+CREATE TABLE IF NOT EXISTS labs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
+    spec_json TEXT NOT NULL,          -- current lab definition (packages/lab-engine validateSpec)
+    version INTEGER NOT NULL DEFAULT 1, -- bumped whenever spec_json changes; each version is kept in lab_versions
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Every spec a lab has had, so a learner's passed result can be checked again against the exact lab they did.
+CREATE TABLE IF NOT EXISTS lab_versions (
+    lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    spec_json TEXT NOT NULL,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (lab_id, version)
+);
+
+-- One row per learner and lab lesson. transcript_json is the current attempt ([[deviceId, keystrokes], ...]);
+-- the passed_* columns keep the first passing attempt as evidence and are never cleared by a reset.
+CREATE TABLE IF NOT EXISTS lab_progress (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+    lab_version INTEGER NOT NULL,
+    engine_version TEXT NOT NULL,
+    transcript_json TEXT NOT NULL DEFAULT '[]',
+    passed_count INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    results_json TEXT,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    passed_at TEXT,
+    passed_lab_version INTEGER,
+    passed_engine_version TEXT,
+    passed_transcript_json TEXT,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, lesson_id)
+);
+CREATE INDEX IF NOT EXISTS idx_lab_progress_lab ON lab_progress (lab_id);
+
+ALTER TABLE lessons ADD COLUMN lab_id TEXT REFERENCES labs(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_lessons_lab ON lessons (lab_id);
