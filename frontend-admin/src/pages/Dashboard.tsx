@@ -10,7 +10,6 @@ import { CommunityPage } from "./CommunityPage";
 import { Inbox, useInboxUnread } from "../components/communication/Inbox";
 import { CourseAnnouncements, MyAnnouncements } from "../components/communication/CourseAnnouncements";
 import { CertificatePrint } from "../components/learner/PrintView";
-import { runInSandbox } from "../components/learner/codeSandbox";
 import { LessonContentView } from "../components/course/LessonContentView";
 import { SelfLearningResume } from "../components/course/SelfLearningResume";
 import { CurriculumOutline } from "../components/course/CurriculumOutline";
@@ -126,7 +125,7 @@ export const Dashboard: React.FC = () => {
   const [videoData, setVideoData] = useState<VideoResponse | null>(null);
   
   // Tab selector state
-  const [activeDetailTab, setActiveDetailTab] = useState<"video" | "resources" | "quizzes" | "notes" | "qa" | "ai" | "sandbox" | "assessments">("video");
+  const [activeDetailTab, setActiveDetailTab] = useState<"video" | "resources" | "quizzes" | "notes" | "qa" | "ai" | "assessments">("video");
 
   // Q&A state
   const [qaThreads, setQaThreads] = useState<any[]>([]);
@@ -203,10 +202,6 @@ export const Dashboard: React.FC = () => {
   const [aiMessage, setAiMessage] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
 
-  // Code Sandbox states
-  const [sandboxCode, setSandboxCode] = useState(`// Netprime Interactive Code Sandbox\n// Write JavaScript code here and hit Run!\n\nconsole.log("Welcome to Netprime Playground!");\n\nfunction calculateExp(level) {\n  // TODO: Implement challenge code\n  // Level 2 -> returns 500, Level 3 -> returns 1000\n  return 0;\n}`);
-  const [sandboxConsole, setSandboxConsole] = useState<string[]>([]);
-  const [sandboxChallengeCompleted, setSandboxChallengeCompleted] = useState(false);
 
   // Freelance Outsource states
   const [outsourceProjects, setOutsourceProjects] = useState<any[]>([]);
@@ -322,32 +317,6 @@ export const Dashboard: React.FC = () => {
       setAiChatHistory(prev => [...prev, { sender: "ai", text: "เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า edge worker" }]);
     } finally {
       setAiLoading(false);
-    }
-  };
-
-  // Learner code runs in a sandboxed iframe (opaque origin, no network), never with new Function() on the app origin.
-  const handleRunCode = async () => {
-    setSandboxConsole(["[ระบบ] กำลังเริ่มต้นเอนจินจำลองแบบแยกส่วน..."]);
-    const result = await runInSandbox(sandboxCode);
-    if (result.error) {
-      setSandboxConsole(prev => [
-        ...prev,
-        ...result.logs.map(l => `[คอนโซล] ${l}`),
-        `[ข้อผิดพลาด] เกิดข้อผิดพลาดขณะรันโค้ด: ${result.error}`
-      ]);
-      return;
-    }
-    setSandboxConsole(prev => [
-      ...prev,
-      ...result.logs.map(l => `[คอนโซล] ${l}`),
-      `[ระบบ] รันโค้ดสำเร็จใน ${result.durationMs.toFixed(2)} มิลลิวินาที`,
-      result.challengePassed ? "[ผ่านความท้าทาย] 🎉 เขียนฟังก์ชันถูกต้อง! คุณแก้โจทย์โค้ดในพื้นที่ทดลองสำเร็จ ได้รับ +100 EXP" : "[สถานะความท้าทาย] ยังไม่สมบูรณ์ ให้เขียน 'calculateExp(level)' ให้คืนค่า (level - 1) * 500"
-    ]);
-    if (result.challengePassed && !sandboxChallengeCompleted) {
-      setSandboxChallengeCompleted(true);
-      fetchGamificationData();
-      setAchievementUnlockedAlert("ปรมาจารย์ความท้าทายพื้นที่ทดลองโค้ด");
-      setTimeout(() => setAchievementUnlockedAlert(null), 4500);
     }
   };
 
@@ -993,14 +962,14 @@ export const Dashboard: React.FC = () => {
               {api.user?.name} (เอเจนต์ เลเวล {gamificationProfile.level})
             </h3>
             <p style={{ fontSize: "13px", color: "var(--text-secondary)", margin: "4px 0 0 0" }}>
-              แสดงโปรไฟล์การเรียนของคุณเป็นเอเจนต์ไอทีอัตโนมัติ คอร์สที่เรียนจบและพื้นที่ทดลองโค้ดจะถูกผูกเป็น **เครื่องมือ/ทักษะของเอเจนต์** สำหรับจับคู่กับองค์กร
+              แสดงโปรไฟล์การเรียนของคุณเป็นเอเจนต์ไอทีอัตโนมัติ คอร์สที่เรียนจบและความสำเร็จที่ได้รับจะถูกผูกเป็น **เครื่องมือ/ทักษะของเอเจนต์** สำหรับจับคู่กับองค์กร
             </p>
           </div>
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "8px" }}>
             {courses.filter(c => c.progress_percent === 100).length === 0 && (!gamificationProfile.achievements || gamificationProfile.achievements.length === 0) ? (
               <span style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                ยังไม่มีทักษะที่ผูกไว้ เรียนคอร์สให้จบหรือลองเล่นในพื้นที่ทดลองโค้ดเพื่อรับเครื่องมือ!
+                ยังไม่มีทักษะที่ผูกไว้ เรียนคอร์สให้จบเพื่อรับทักษะ!
               </span>
             ) : (
               <>
@@ -1033,7 +1002,7 @@ export const Dashboard: React.FC = () => {
                     color: "#60a5fa"
                   }}>
                     <Terminal size={12} />
-                    <strong>เครื่องมือจากพื้นที่ทดลอง:</strong> {ach.name}
+                    <strong>ความสำเร็จ:</strong> {ach.name}
                   </div>
                 ))}
               </>
@@ -2482,14 +2451,6 @@ export const Dashboard: React.FC = () => {
                     >
                       ผู้ช่วยสอน AI
                     </button>
-                    <button 
-                      onClick={() => {
-                        setActiveDetailTab("sandbox");
-                      }}
-                      style={{ padding: "6px 12px", borderRadius: "0.5rem", background: activeDetailTab === "sandbox" ? "var(--primary-glow)" : "none", border: "none", color: activeDetailTab === "sandbox" ? "var(--color-brand-primary)" : "var(--text-secondary)", fontWeight: "600", cursor: "pointer" }}
-                    >
-                      พื้นที่ทดลองโค้ด
-                    </button>
                     <button
                       onClick={() => setActiveDetailTab("assessments")}
                       style={{ padding: "6px 12px", borderRadius: "0.5rem", background: activeDetailTab === "assessments" ? "var(--primary-glow)" : "none", border: "none", color: activeDetailTab === "assessments" ? "var(--color-brand-primary)" : "var(--text-secondary)", fontWeight: "600", cursor: "pointer" }}
@@ -3133,92 +3094,6 @@ export const Dashboard: React.FC = () => {
                         >
                           ส่ง
                         </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Tab Contents: Code Sandbox */}
-                  {activeDetailTab === "sandbox" && (
-                    <div style={{ paddingTop: "12px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <Terminal size={18} color="var(--primary)" />
-                          <h4 style={{ fontSize: "16px", color: "var(--text-primary)" }}>พื้นที่ทดลองโค้ด Netprime</h4>
-                        </div>
-                        {sandboxChallengeCompleted ? (
-                          <span style={{ fontSize: "11px", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.2)", color: "#22c55e", padding: "4px 12px", borderRadius: "2rem", fontWeight: "700" }}>
-                            ผ่านความท้าทายแล้ว! ได้รับ +100 EXP
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: "11px", background: "rgba(229,107,37,0.12)", border: "1px solid rgba(229,107,37,0.2)", color: "var(--primary)", padding: "4px 12px", borderRadius: "2rem", fontWeight: "700" }}>
-                            ความท้าทายปัจจุบัน: เขียนฟังก์ชัน calculateExp
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px" }} className="internship-grid-responsive">
-                        {/* Code Editor Panel */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                          <span style={{ fontSize: "11px", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "1px" }}>ตัวแก้ไขโค้ด</span>
-                          <textarea
-                            value={sandboxCode}
-                            onChange={(e) => setSandboxCode(e.target.value)}
-                            style={{
-                              width: "100%",
-                              height: "300px",
-                              fontFamily: "monospace",
-                              fontSize: "13px",
-                              background: "#0d0a1a",
-                              color: "#c0caf5",
-                              border: "1px solid var(--border-subtle)",
-                              borderRadius: "12px",
-                              padding: "16px",
-                              resize: "none",
-                              outline: "none",
-                              lineHeight: "1.5"
-                            }}
-                          />
-                          <button
-                            onClick={handleRunCode}
-                            className="tech-button-primary"
-                            style={{ width: "100%", justifyContent: "center", borderRadius: "0.75rem", padding: "12px" }}
-                          >
-                            <Terminal size={16} /> รันโค้ดและทดสอบความท้าทาย
-                          </button>
-                        </div>
-
-                        {/* Compiler Console Output Panel */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                          <span style={{ fontSize: "11px", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "1px" }}>คอนโซลแสดงผล</span>
-                          <div style={{
-                            width: "100%",
-                            height: "300px",
-                            fontFamily: "monospace",
-                            fontSize: "12px",
-                            background: "#070510",
-                            color: "#4ade80",
-                            border: "1px solid var(--border-subtle)",
-                            borderRadius: "12px",
-                            padding: "16px",
-                            overflowY: "auto",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "6px"
-                          }}>
-                            {sandboxConsole.length === 0 ? (
-                              <span style={{ color: "var(--text-muted)" }}>คอนโซลว่าง รันโค้ดเพื่อดูผลลัพธ์ที่นี่</span>
-                            ) : (
-                              sandboxConsole.map((line, idx) => (
-                                <div key={idx} style={{ 
-                                  color: line.startsWith("[ข้อผิดพลาด]") ? "#ef4444" : line.startsWith("[ผ่านความท้าทาย]") ? "#22c55e" : line.startsWith("[ระบบ]") ? "var(--primary)" : "#4ade80",
-                                  whiteSpace: "pre-wrap"
-                                }}>
-                                  {line}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
                       </div>
                     </div>
                   )}
