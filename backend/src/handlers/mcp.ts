@@ -76,13 +76,13 @@ const INSTRUCTIONS = `เซิร์ฟเวอร์ MCP ของ NetPrime L
 - ใช้ dry_run=true เพื่อตรวจก่อน และส่ง idempotency_key ทุกครั้งเพื่อให้ลองใหม่ได้ปลอดภัย`;
 
 /** Builds the per-request MCP server for one agent key. */
-function buildServer(env: Bindings, ctx: ExecutionContext, key: KeyInfo, ip: string): McpServer {
+function buildServer(env: Bindings, ctx: ExecutionContext, key: KeyInfo, ip: string, origin: string): McpServer {
   const server = new McpServer({ name: "netprime-lms", version: "1.0.0" }, { instructions: INSTRUCTIONS });
   const mode: McpMode = key.mcp_access === "write" ? "write" : "read";
   const scopes = new Set<string>(key.scopes);
   const call = async (method: string, path: string, body?: unknown): Promise<ToolResult> => {
     const assertion = await signAssertion(env.JWT_SECRET, key.id, mode, ip);
-    const res = await dispatchInternal(env, ctx, "", method, `/v1${path}`, body, { [ASSERTION_HEADER]: assertion });
+    const res = await dispatchInternal(env, ctx, "", method, `/v1${path}`, body, { [ASSERTION_HEADER]: assertion, "X-NetPrime-Public-Origin": origin });
     return asResult(res.status, res.data);
   };
   const query = (args: Record<string, unknown>) => {
@@ -137,7 +137,7 @@ function buildServer(env: Bindings, ctx: ExecutionContext, key: KeyInfo, ip: str
 async function serveMcp(request: Request, env: Bindings, ctx: ExecutionContext, key: KeyInfo): Promise<Response> {
   if (key.mcp_access === "off") return json(403, { error: "key นี้ไม่ได้เปิดใช้ผ่าน MCP", code: "mcp_not_allowed" });
   const ip = request.headers.get("CF-Connecting-IP") || "local";
-  const handler = createMcpHandler(() => buildServer(env, ctx, key, ip), {
+  const handler = createMcpHandler(() => buildServer(env, ctx, key, ip, new URL(request.url).origin), {
     route: "/mcp", corsOptions: false, authContext: { props: { apiKeyId: key.id } },
     allowedHostnames: [new URL(request.url).hostname]
   });

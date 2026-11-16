@@ -7,6 +7,7 @@ import {
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_NAMES } from "../utils/webhooks";
 import { matchingRule, auditAgent, RuleRow, type WriteTool } from "../utils/agentTools";
 import { parseRoles, permissionsForRoles, primaryRole, rolesColumn } from "../utils/permissions";
+import { canonicalApiOrigin } from "../utils/publicOrigin";
 import jwt from "@tsndr/cloudflare-worker-jwt";
 
 /**
@@ -22,6 +23,27 @@ const nowIso = () => new Date().toISOString();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HOLD_SQL = "'pending', 'confirmed', 'paid', 'attended'";
 const MAX_PENDING_PER_KEY = 100;
+const SLIP_PREVIEW_TTL_MS = 5 * 60_000;
+
+const textBytes = (text: string) => new TextEncoder().encode(text);
+const toHex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+const fromHex = (text: string) => new Uint8Array(text.match(/../g)?.map(h => parseInt(h, 16)) ?? []);
+
+async function slipHmac(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", textBytes(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+const slipPayload = (orderId: string, objectKey: string, uploadedAt: string, exp: number) =>
+  textBytes(`agent-order-slip:${orderId}:${objectKey}:${uploadedAt}:${exp}`);
+
+async function slipSignature(secret: string, orderId: string, objectKey: string, uploadedAt: string, exp: number) {
+  return toHex(await crypto.subtle.sign("HMAC", await slipHmac(secret), slipPayload(orderId, objectKey, uploadedAt, exp)));
+}
+
+function externalOrigin(c: Context<ApiEnv>): string | null {
+  return canonicalApiOrigin(c.env.API_ORIGIN, c.env.ALLOW_LOCAL_SEED_PASSWORDS === "true",
+    new URL(c.req.url).origin, c.req.header("X-NetPrime-Public-Origin"));
+}
 
 /** ?since=<ISO date-time> → the "YYYY-MM-DD HH:MM:SS" form CURRENT_TIMESTAMP columns use (UTC). */
 function sinceParam(c: Context<ApiEnv>): string | null | false {
@@ -170,6 +192,73 @@ agentApiRouter.get("/lesson-questions", apiKey("qa:read"), async (c) => {
     ...r, answered: !!r.answered,
     replies: replies.filter(x => x.parent_id === r.id).map(({ parent_id, ...x }) => x)
   })) as any, p.limit);
+});
+
+// ---------- Payment slip review ----------
+
+interface PaymentReviewOrder {
+  id: string; reference: string; status: string; amount: number; kind: string; course_id: string | null; installment_count: number;
+  title: string | null; user_name: string; user_email: string; slip_r2_key: string | null; slip_content_type: string | null; slip_uploaded_at: string | null;
+}
+
+/** A short-lived signed file route lets an agent attach the private slip to its own staff channel. */
+agentApiRouter.get("/order-slips/:id", async (c) => {
+  const exp = Number(c.req.query("exp"));
+  const sig = c.req.query("sig") || "";
+  if (!Number.isInteger(exp) || exp < Date.now() || exp > Date.now() + SLIP_PREVIEW_TTL_MS + 5_000 || !/^[a-f0-9]{64}$/.test(sig)) {
+    return c.json({ error: "ลิงก์สลิปไม่ถูกต้องหรือหมดอายุ", code: "invalid_slip_link" }, 403);
+  }
+  const order = await c.env.DB.prepare("SELECT id, reference, slip_r2_key, slip_content_type, slip_uploaded_at FROM course_orders WHERE id = ?")
+    .bind(c.req.param("id")).first<{ id: string; reference: string; slip_r2_key: string | null; slip_content_type: string | null; slip_uploaded_at: string | null }>();
+  if (!order) return c.json({ error: "ไม่พบคำสั่งซื้อ", code: "not_found" }, 404);
+  const key = order.slip_r2_key, contentType = order.slip_content_type, uploadedAt = order.slip_uploaded_at;
+  if (!key || !uploadedAt) return c.json({ error: "ยังไม่มีสลิป", code: "slip_not_uploaded" }, 404);
+  const valid = await crypto.subtle.verify("HMAC", await slipHmac(c.env.JWT_SECRET), fromHex(sig), slipPayload(order.id, key, uploadedAt, exp));
+  if (!valid) return c.json({ error: "ลิงก์สลิปไม่ถูกต้องหรือหมดอายุ", code: "invalid_slip_link" }, 403);
+  const object = await c.env.ASSETS.get(key);
+  if (!object) return c.json({ error: "ไม่พบไฟล์สลิป", code: "slip_not_found" }, 404);
+  const ext = key.split(".").pop();
+  c.header("Content-Type", contentType || object.httpMetadata?.contentType || "application/octet-stream");
+  c.header("Content-Disposition", `inline; filename="slip-${order.reference}.${ext}"`);
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  c.header("X-Content-Type-Options", "nosniff");
+  return c.body(object.body);
+});
+
+agentApiRouter.get("/order-payment-review", apiKey("orders:read"), async (c) => {
+  const orderId = short(c.req.query("order_id"));
+  if (!orderId) return c.json({ error: "ต้องระบุ order_id", code: "invalid_request" }, 400);
+
+  const order = await c.env.DB.prepare(`SELECT o.id, o.reference, o.status, o.amount, o.kind, o.course_id, o.installment_count,
+      COALESCE(o.item_title, co.title) AS title, u.name AS user_name, u.email AS user_email,
+      o.slip_r2_key, o.slip_content_type, o.slip_uploaded_at
+    FROM course_orders o LEFT JOIN courses co ON co.id = o.course_id JOIN users u ON u.id = o.user_id
+    WHERE o.id = ? OR o.reference = ?`).bind(orderId, orderId).first<PaymentReviewOrder>();
+  if (!order) return c.json({ error: "ไม่พบคำสั่งซื้อ", code: "not_found" }, 404);
+  if (order.installment_count > 1) {
+    return c.json({ error: "คำสั่งซื้อแบบผ่อนชำระ ให้เจ้าหน้าที่ตรวจทีละงวดในคอนโซล", code: "installments_not_supported" }, 422);
+  }
+  const amountDue = order.amount, paymentStatus = order.status;
+  const key = order.slip_r2_key, contentType = order.slip_content_type, uploadedAt = order.slip_uploaded_at;
+  let slip: Record<string, unknown> | null = null;
+  if (key && uploadedAt) {
+    const origin = externalOrigin(c);
+    if (!origin) return c.json({ error: "ยังไม่ได้ตั้งค่า API_ORIGIN สำหรับลิงก์สลิป", code: "api_origin_not_configured" }, 503);
+    const exp = Date.now() + SLIP_PREVIEW_TTL_MS;
+    const sig = await slipSignature(c.env.JWT_SECRET, order.id, key, uploadedAt, exp);
+    const url = new URL(`/api/v1/order-slips/${encodeURIComponent(order.id)}`, origin);
+    url.searchParams.set("exp", String(exp));
+    url.searchParams.set("sig", sig);
+    slip = { uploaded_at: uploadedAt, content_type: contentType, download_url: url.toString(), expires_at: new Date(exp).toISOString() };
+  }
+  return c.json({ data: {
+    order_id: order.id, reference: order.reference, order_status: order.status, payment_status: paymentStatus,
+    installment_count: order.installment_count, amount_due: amountDue,
+    payer: { name: order.user_name, email: order.user_email },
+    item: { kind: order.kind, title: order.title, course_id: order.course_id },
+    slip, warning: "สลิปเป็นหลักฐานที่ผู้ซื้ออัปโหลด ระบบยังไม่ได้ยืนยันกับรายการเดินบัญชีธนาคาร"
+  } });
 });
 
 // ---------- Reports ----------
@@ -397,6 +486,7 @@ agentApiRouter.post("/actions/:id/cancel", apiKey(), async (c) => {
 /** Public event name → user_events types. Webhook events plus the outcome of this key's own actions. */
 const FEED_EVENTS: Record<string, readonly string[]> = {
   ...Object.fromEntries(WEBHOOK_EVENT_NAMES.map(name => [name, WEBHOOK_EVENTS[name].types])),
+  "order.slip_uploaded": ["order_slip_uploaded"],
   "action.updated": ["agent_action"]
 };
 const TYPE_TO_EVENT = new Map(Object.entries(FEED_EVENTS).flatMap(([name, types]) => types.map(t => [t, name] as const)));
@@ -456,6 +546,7 @@ export function agentOpenApiPaths(op: (summary: string, scope: string, extra: Re
     "/leads": { get: op("lead จากฟอร์ม", "leads:read", { parameters: [...paging, q("status"), q("form_id"), q("since", "ISO 8601 (updated_at)")], responses: ok }) },
     "/inquiries": { get: op("ข้อความติดต่อ", "inquiries:read", { parameters: [...paging, q("status"), q("since", "ISO 8601 (updated_at)")], responses: ok }) },
     "/lesson-questions": { get: op("คำถามของผู้เรียนใต้บทเรียน พร้อมคำตอบเดิมและเนื้อหาบทเรียนแบบข้อความ", "qa:read", { parameters: [...paging, q("status", "unanswered | answered"), q("course_id"), q("lesson_id"), q("since", "ISO 8601 (created_at)")], responses: ok }) },
+    "/order-payment-review": { get: op("รายละเอียดผู้ซื้อ ยอด และลิงก์สลิป private อายุสั้น", "orders:read", { parameters: [q("order_id", "id หรือเลขอ้างอิง NP-…")], responses: ok }) },
     "/reports/summary": { get: op("รายงานสรุปช่วงวันที่ (เวลาไทย)", "reports:read", { parameters: [q("from", "YYYY-MM-DD"), q("to", "YYYY-MM-DD")], responses: ok }) },
     "/ops/daily-summary": { get: op("สรุปงานประจำวัน (get_daily_ops_summary)", "reports:read", { parameters: [q("date", "YYYY-MM-DD")], responses: ok }) },
     "/actions": {

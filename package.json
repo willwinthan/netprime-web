@@ -51,7 +51,7 @@
     "test:email": "node scripts/test-local.mjs email",
     "test:platform": "node scripts/test-local.mjs platform",
     "test:agents": "node scripts/test-local.mjs agents",
-    "test:mcp": "node scripts/test-local.mjs mcp",
+    "test:mcp": "node --test tests/mcp-origin.test.mjs && node scripts/test-local.mjs mcp",
     "test:aiassist": "node scripts/test-local.mjs aiassist",
     "test:i18n": "node --test tests/i18n-keys.test.mjs",
     "test:oidc": "node --test tests/oidc-verify.test.mjs"

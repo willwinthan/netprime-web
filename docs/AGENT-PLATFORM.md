@@ -42,7 +42,7 @@ agent key คือแถวในตาราง `api_keys` ที่ `kind = '
 
 | ระดับ | ทำงานอย่างไร | tool |
 |---|---|---|
-| **อ่าน** | เรียก GET endpoint โดยตรง | `get_daily_ops_summary` `get_report_summary` `list_training_sessions` `list_registrations` `list_leads` `list_inquiries` `list_orders` `list_courses` `list_users` `list_enrollments` `list_lesson_questions` `get_events` |
+| **อ่าน** | เรียก GET endpoint โดยตรง | `get_daily_ops_summary` `get_report_summary` `list_training_sessions` `list_registrations` `list_leads` `list_inquiries` `list_orders` `get_order_payment_review` `list_courses` `list_users` `list_enrollments` `list_lesson_questions` `get_events` |
 | **ร่าง** | ทำทันที เปลี่ยนเฉพาะข้อมูลภายในที่ลูกค้าไม่เห็น | `update_lead` `update_inquiry` (เปลี่ยนสถานะและต่อท้ายบันทึกด้วยชื่อ agent) `draft_session` (สร้างรอบอบรมใหม่สถานะ draft) `draft_article` (เขียนบทความ Markdown เป็นฉบับร่างหรือส่งตรวจ) |
 | **ลงมือ** | เข้าคิวรอคนอนุมัติ | `confirm_order` (payments.manage) `update_registration` (site.sessions, ส่งอีเมลแจ้งผู้สมัคร) `publish_session` (site.sessions) `publish_article` (articles.publish) `grant_enrollment` (users.manage) `send_email` (communication.manage) `send_line` (communication.manage) `answer_lesson_question` (community.moderate, ต้องเป็นผู้สอนของคอร์สหรือผู้ดูแลระบบ) |
 
@@ -60,6 +60,14 @@ agent key คือแถวในตาราง `api_keys` ที่ `kind = '
 - `answer_lesson_question` เป็นระดับลงมือ คำตอบเข้าคิวจนผู้สอนของคอร์สนั้นหรือผู้ดูแลระบบอนุมัติ แล้วโพสต์เป็นคำตอบในกระทู้**ในชื่อผู้อนุมัติ** (ผ่าน `POST /api/lessons/:id/qa`) ผู้อนุมัติแก้ข้อความไม่ได้ ถ้าต้องแก้ให้ปฏิเสธพร้อมหมายเหตุแล้วให้ agent ส่งใหม่ ผู้ประสานงานที่ไม่ได้สอนคอร์สนั้นอนุมัติได้แต่งานจะล้มเหลว
 - ค่าเริ่มต้นผู้สอนไม่มีสิทธิ์ `agents.approve` ถ้าจะให้ผู้สอนอนุมัติคำตอบเอง แอดมินต้องเพิ่มสิทธิ์นี้ให้บทบาทผู้สอน (ผู้สอนจะเห็นคิวงาน agent ทั้งหมด แต่อนุมัติได้เฉพาะงานที่มีสิทธิ์ของงานนั้น)
 - ข้อจำกัด: วิดีโอยังไม่มี transcript agent จึงรู้เนื้อหาบทเรียนวิดีโอเพียงชื่อบทเรียนและคำตอบเก่าในกระทู้
+
+### แจ้งเตือนและตรวจสลิปโอนเงิน
+
+- เมื่อผู้ซื้อแนบสลิปของคำสั่งซื้อแบบชำระครั้งเดียว ระบบบันทึกเหตุการณ์เฉพาะ MCP feed ชื่อ `order.slip_uploaded` ซึ่งมีเพียง `order_id` ไม่มีชื่อ อีเมล เลขอ้างอิงหรือยอดเงิน agent ที่มี `events:read` จึงรู้ว่ามีงานใหม่ แต่ต้องมี `orders:read` จึงจะอ่านรายละเอียดต่อได้ เหตุการณ์นี้ไม่ถูกส่งเข้า webhook ทั่วไป
+- `get_order_payment_review` (`orders:read`) รับ `order_id` หรือเลขอ้างอิง `NP-…` แล้วคืนชื่อ/อีเมลผู้ซื้อ รายการ ยอดที่ต้องชำระ และลิงก์ดาวน์โหลดสลิปแบบ signed URL อายุ 5 นาที เพื่อนำรูปหรือ PDF ไปแนบในช่องทางเจ้าหน้าที่ของ agent เช่น Telegram
+- ไฟล์ยังเก็บ private ใน R2 และลิงก์ผูกกับ R2 object ของสลิปเวอร์ชันปัจจุบัน ถ้ามีการเปลี่ยนสลิป ลิงก์เดิมใช้ไม่ได้ ลิงก์ไม่ควรถูกส่งต่อให้ผู้ที่ไม่เกี่ยวข้อง
+- ข้อมูลจากสลิปเป็นเพียงหลักฐานที่ผู้ซื้ออัปโหลด ไม่ได้ยืนยันกับธนาคาร การอนุมัติ `confirm_order` ยังควรให้คนตรวจหรือเทียบ statement ก่อน
+- คำสั่งซื้อแบบผ่อนชำระยังให้เจ้าหน้าที่ตรวจสลิปแต่ละงวดในคอนโซล
 
 ### การส่งงาน
 
@@ -106,6 +114,7 @@ Idempotency-Key: confirm-NP-260012
 | `GET /v1/inquiries` | inquiries:read | กรอง `status`, `since` |
 | `GET /v1/reports/summary?from=&to=` | reports:read | ผู้เรียนใหม่ การลงทะเบียนเรียน เรียนจบ คำสั่งซื้อ/รายได้ ผู้สมัครอบรม lead ข้อความติดต่อ (เวลาไทย ไม่เกิน 366 วัน) |
 | `GET /v1/ops/daily-summary?date=` | reports:read | **get_daily_ops_summary** รอบอบรมใน 7 วัน สลิปรอยืนยัน ผู้สมัครรอตรวจ ข้อความ/lead ใหม่ อีเมลส่งไม่สำเร็จ งานรออนุมัติ และ `highlights` เป็นประโยคภาษาไทย |
+| `GET /v1/order-payment-review?order_id=` | orders:read | ผู้ซื้อ รายการ ยอด และ signed URL ของสลิปอายุ 5 นาที; รองรับคำสั่งซื้อแบบชำระครั้งเดียว |
 
 ทุกรายการใช้ cursor pagination แบบเดียวกับ API เดิม (`limit`, `cursor` → `next_cursor`) เอกสาร OpenAPI อยู่ที่ `GET /v1/openapi.json`
 
@@ -114,12 +123,12 @@ Idempotency-Key: confirm-NP-260012
 DGX Spark อยู่ในออฟฟิศและไม่ควรเปิดรับ webhook จากภายนอก agent จึงมาดึงเหตุการณ์เอง:
 
 ```http
-GET /api/v1/events?since=1234&types=registration.created,inquiry.created,order.paid,action.updated
+GET /api/v1/events?since=1234&types=registration.created,inquiry.created,order.slip_uploaded,order.paid,action.updated
 ```
 
 - ครั้งแรกไม่ต้องส่ง `since` ระบบคืนเหตุการณ์ 24 ชั่วโมงล่าสุด
 - เก็บค่า `next_since` ไว้ แล้วส่งในครั้งถัดไป ถ้า `has_more: true` ให้เรียกต่อทันที
-- เหตุการณ์ที่มี: ทุกเหตุการณ์ของ webhook (`user.created` `enrollment.created` `order.paid` `registration.created` `lead.created` `inquiry.created` …) และ `action.updated` ซึ่งเป็นผลของงานที่ key นี้ส่งเอง (key อื่นไม่เห็น)
+- เหตุการณ์ที่มี: ทุกเหตุการณ์ของ webhook (`user.created` `enrollment.created` `order.slip_uploaded` `order.paid` `registration.created` `lead.created` `inquiry.created` …) และ `action.updated` ซึ่งเป็นผลของงานที่ key นี้ส่งเอง (key อื่นไม่เห็น)
 - ข้อมูลมาจากตาราง `user_events` การเรียกทุก 1–5 นาทีเพียงพอ
 
 ## 5. ตัวอย่าง agent บน DGX Spark
@@ -135,6 +144,8 @@ GET /api/v1/events?since=1234&types=registration.created,inquiry.created,order.p
 ```
 
 ข้อแนะนำ: ตั้ง IP allowlist เป็น IP ขาออกของออฟฟิศ ตั้งช่วงเวลาให้ตรงเวลาทำงาน ให้ scope ระดับลงมือเฉพาะเรื่องที่ต้องใช้ และใช้ idempotency key ทุกครั้งที่ส่งงาน เพื่อให้ retry ได้ปลอดภัย
+
+สำหรับลิงก์สลิป ต้องตั้ง `API_ORIGIN` เป็น HTTPS origin จริงของ Worker API แบบไม่มี path หรือ slash ท้าย เช่น `https://api.example.com` ระบบ production ปฏิเสธ HTTP และจะไม่เชื่อถือ Host หรือ header จาก MCP request เพื่อสร้าง signed URL; ถ้ายังไม่ตั้ง tool จะตอบ `503 api_origin_not_configured` (local test อนุญาตเฉพาะ HTTP loopback)
 
 ## 7. MCP server (ระยะที่ 2–3)
 
