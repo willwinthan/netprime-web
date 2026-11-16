@@ -1167,7 +1167,7 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log (created_at);
 
 -- Seeds for website content (demo only)
-INSERT INTO site_settings (key, value) VALUES ('site', '{"company":"Plantecplus Co.,Ltd (NetPrime Training)","phone":"062-559-4622","email":"netprime@plantecplus.com","address":"118/28 ถนน พระรามที่ 6 แขวงพญาไท เขตพญาไท กรุงเทพมหานคร 10400","announcement":{"active":true,"text":"เปิดรับสมัคร CCNA รอบเดือนพฤศจิกายน ที่นั่งจำกัด","link":"#schedule"},"notify_emails":"admin@netprime.com"}');
+INSERT INTO site_settings (key, value) VALUES ('site', '{"company":"Plantec Plus Co.,Ltd (NetPrime Training)","phone":"062-559-4622","email":"netprime@plantecplus.com","address":"118/28 ถนน พระรามที่ 6 แขวงพญาไท เขตพญาไท กรุงเทพมหานคร 10400","announcement":{"active":true,"text":"เปิดรับสมัคร CCNA รอบเดือนพฤศจิกายน ที่นั่งจำกัด","link":"#schedule"},"notify_emails":"admin@netprime.com"}');
 
 INSERT INTO training_sessions (id, course_id, title, vendor, description, start_date, end_date, time_text, mode, location, instructor_name, price, capacity, status) VALUES
 ('ses_ccna_nov', 'course_cisco_ccna', 'CCNA 200-301', 'Cisco', 'ปูพื้นฐาน Routing & Switching พร้อม Lab อุปกรณ์จริง', '2026-11-03', '2026-11-07', '09:00–16:00', 'classroom', 'ห้องอบรม NetPrime ชั้น 5', 'อ.สมชาย', 18900, 12, 'open'),
