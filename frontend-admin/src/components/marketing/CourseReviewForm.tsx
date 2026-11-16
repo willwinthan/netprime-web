@@ -31,7 +31,7 @@ export const CourseReviewForm: React.FC<{ courseId: string; tone?: "site" | "con
 
   if (!api.token || !state) return null;
   if (!state.eligible && !state.review) {
-    return state.reason ? <p style={{ fontSize: 14, color: tone === "site" ? "#4a5775" : "var(--text-muted)", margin: 0 }}>{state.reason}</p> : null;
+    return state.reason ? <p style={{ fontSize: 14, color: tone === "site" ? "#4a5775" : "var(--text-muted)", margin: tone === "console" ? "0 0 24px" : 0 }}>{state.reason}</p> : null;
   }
 
   const submit = async (event: React.FormEvent) => {
@@ -52,18 +52,39 @@ export const CourseReviewForm: React.FC<{ courseId: string; tone?: "site" | "con
     }
   };
 
+  const status = state.review?.status;
+  const statusTone = status === "approved" ? { bg: "rgba(16,185,129,0.12)", fg: "#146c43" }
+    : status === "hidden" ? { bg: "rgba(100,116,139,0.14)", fg: "#475569" }
+    : { bg: "rgba(245,158,11,0.14)", fg: "#8a5300" };
+  // In the console the form sits between the course intro and the lesson tabs, so it gets its own card
+  // and bottom margin; on the public site the caller already wraps it in a card.
+  const consoleCard: React.CSSProperties = tone === "console"
+    ? { padding: "20px 22px", marginBottom: 28, borderRadius: "1.25rem", border: "1px solid rgba(15,23,42,0.08)", background: "rgba(255,255,255,0.75)" }
+    : {};
+
   return (
-    <form onSubmit={submit} style={{ display: "grid", gap: 12 }} aria-label="รีวิวคอร์สนี้">
-      <strong style={{ fontSize: 16 }}>{state.review ? "รีวิวของคุณ" : "ให้คะแนนคอร์สนี้"}</strong>
+    <form onSubmit={submit} style={{ display: "grid", gap: 14, ...consoleCard }} aria-label="รีวิวคอร์สนี้">
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 12px" }}>
+        <strong style={{ fontSize: 16 }}>{state.review ? "รีวิวของคุณ" : "ให้คะแนนคอร์สนี้"}</strong>
+        {status && (
+          <span style={{ fontSize: 12.5, fontWeight: 600, padding: "3px 10px", borderRadius: 999, background: statusTone.bg, color: statusTone.fg }}>
+            {STATUS_TEXT[status]}
+          </span>
+        )}
+      </div>
       <StarInput value={rating} onChange={setRating} />
       <textarea className="form-input" rows={3} maxLength={2000} value={body} onChange={e => setBody(e.target.value)}
         placeholder="เล่าประสบการณ์การเรียน สิ่งที่ได้ และคำแนะนำสำหรับผู้เรียนคนอื่น (ไม่บังคับ)" style={{ background: "#fff", width: "100%" }} />
-      {state.review && <span style={{ fontSize: 13, color: tone === "site" ? "#4a5775" : "var(--text-muted)" }}>สถานะ: {STATUS_TEXT[state.review.status]}</span>}
-      {error && <span role="alert" style={{ color: "#b42318", fontSize: 14 }}>{error}</span>}
-      {message && <span role="status" style={{ color: "#146c43", fontSize: 14 }}>{message}</span>}
-      <button type="submit" className={tone === "site" ? "ps-btn ps-btn-primary" : "tech-button-primary"} disabled={busy} style={{ justifySelf: "start" }}>
-        {busy ? "กำลังส่ง…" : state.review ? "อัปเดตรีวิว" : "ส่งรีวิว"}
-      </button>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px 16px" }}>
+        <div style={{ minHeight: 20 }}>
+          {error && <span role="alert" style={{ color: "#b42318", fontSize: 14 }}>{error}</span>}
+          {!error && message && <span role="status" style={{ color: "#146c43", fontSize: 14 }}>{message}</span>}
+        </div>
+        <button type="submit" className={tone === "site" ? "ps-btn ps-btn-primary" : "tech-button-primary"} disabled={busy}
+          style={tone === "console" ? { padding: "10px 22px", fontSize: 14 } : undefined}>
+          {busy ? "กำลังส่ง…" : state.review ? "อัปเดตรีวิว" : "ส่งรีวิว"}
+        </button>
+      </div>
     </form>
   );
 };
