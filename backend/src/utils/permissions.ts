@@ -32,6 +32,7 @@ export const PERMISSIONS = [
   { key: "site.media", group: "เว็บไซต์", label: "อัปโหลดรูปภาพ" },
   { key: "site.audit", group: "เว็บไซต์", label: "ดูประวัติการแก้ไข" },
   { key: "site.self_learning", group: "เว็บไซต์", label: "จัดการบทเรียน Self-learning (อัปโหลดไฟล์ HTML ที่รันสคริปต์ได้)" },
+  { key: "labs.manage", group: "การเงินและคอร์ส", label: "สร้างและเผยแพร่ Virtual Lab ให้ผู้สอนใช้ในบทเรียน และดูผล lab ของผู้เรียน" },
   { key: "articles.write", group: "บทความ", label: "เขียนและแก้ไขบทความของตัวเอง (ส่งตรวจก่อนเผยแพร่)" },
   { key: "articles.publish", group: "บทความ", label: "เผยแพร่บทความ อนุมัติหรือส่งกลับบทความที่ส่งตรวจ" },
   { key: "articles.manage", group: "บทความ", label: "แก้ไขและลบบทความของทุกคน" },
@@ -60,7 +61,7 @@ const ADMIN_ONLY = new Set<string>(PERMISSIONS.filter(p => "adminOnly" in p && p
 export const DEFAULT_GRANTS: Record<Exclude<Role, "admin">, Permission[]> = {
   coordinator: ["site.dashboard", "site.sessions", "site.inquiries", "site.promotions", "site.settings", "site.media", "site.audit",
     "articles.write", "articles.publish", "articles.manage", "articles.import_notion", "payments.manage",
-    "reports.view", "communication.manage", "community.moderate", "marketing.manage", "website.design", "site.self_learning"],
+    "reports.view", "communication.manage", "community.moderate", "marketing.manage", "website.design", "site.self_learning", "labs.manage"],
   instructor: ["articles.write", "articles.import_notion", "site.media", "community.moderate"],
   partner: [],
   student: []

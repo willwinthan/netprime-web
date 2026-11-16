@@ -1,6 +1,6 @@
 // Shared types and labels for the course builder (instructor) and the learner player.
 
-export type LessonType = "video" | "text" | "pdf" | "embed" | "scorm" | "self_learning";
+export type LessonType = "video" | "text" | "pdf" | "embed" | "scorm" | "self_learning" | "lab";
 
 export const LESSON_TYPE_LABEL: Record<LessonType, string> = {
   video: "วิดีโอ",
@@ -8,7 +8,8 @@ export const LESSON_TYPE_LABEL: Record<LessonType, string> = {
   pdf: "เอกสาร PDF",
   embed: "ฝังเนื้อหา",
   scorm: "SCORM",
-  self_learning: "Self-learning"
+  self_learning: "Self-learning",
+  lab: "Virtual Lab"
 };
 
 /** One-line explanation shown when an instructor picks the type of a new lesson. */
@@ -18,7 +19,8 @@ export const LESSON_TYPE_HINT: Record<LessonType, string> = {
   pdf: "อัปโหลดเอกสาร PDF ให้ผู้เรียนอ่านหรือดาวน์โหลด",
   embed: "ฝังสไลด์ ฟอร์ม หรือเว็บจากผู้ให้บริการที่อนุญาต",
   scorm: "อัปโหลดแพ็กเกจ SCORM (.zip)",
-  self_learning: "เลือกบทเรียนโต้ตอบจากคลัง Self-learning"
+  self_learning: "เลือกบทเรียนโต้ตอบจากคลัง Self-learning",
+  lab: "ให้ผู้เรียนตั้งค่าอุปกรณ์เครือข่ายจำลองบนเว็บ ระบบตรวจผลเอง"
 };
 
 export const LEVEL_LABEL: Record<string, string> = {
@@ -45,6 +47,8 @@ export interface BuilderLesson {
   scorm_launch: string | null;
   /** Self-learning lesson shown by a lesson of type self_learning. */
   self_learning_id: string | null;
+  /** Virtual Lab shown by a lesson of type lab. */
+  lab_id: string | null;
   has_text: boolean;
   available_after_days: number | null;
   available_on: string | null;

@@ -1,11 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { CheckCircle, ExternalLink, Lock } from "lucide-react";
 import { API_BASE_URL, useApi } from "../../hooks/useApi";
 import { BlockRenderer, parseDocument } from "../../site/BlockRenderer";
 import { Markdown, parseMarkdown } from "../../site/Markdown";
 import { LESSON_TYPE_LABEL, PlayerLesson, unlockText } from "./types";
 import { LessonFrame } from "../../site/SelfLearningPage";
+import type { LabPayload } from "./LabPlayer";
 import "./course.css";
+
+// The lab simulator and terminal are a separate chunk, loaded only for lab lessons.
+const LabPlayer = lazy(() => import("./LabPlayer"));
 
 /**
  * Learner player for non-video lessons (text, PDF, embed, SCORM, self-learning) and the lock screen for any
@@ -26,6 +30,8 @@ interface Content {
   has_scorm: boolean;
   /** Self-learning lesson: a signed link to its file (course-only lessons open nowhere else). */
   self_learning: { slug: string; title: string; content_url: string } | null;
+  /** Virtual Lab lesson: the lab spec and the learner's saved attempt. */
+  lab: LabPayload | null;
   preview: boolean;
 }
 
@@ -39,6 +45,7 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
   const [scormUrl, setScormUrl] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
   const [completed, setCompleted] = useState(!!lesson.completed);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     setContent(null); setError(null); setPdfUrl(null); setScormUrl(null); setCompleted(!!lesson.completed);
@@ -67,7 +74,7 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
       }
     })();
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [lesson.id, lesson.locked, api.token]);
+  }, [lesson.id, lesson.locked, api.token, reloadKey]);
 
   // The SCORM player page posts its status after each LMSCommit / LMSFinish.
   useEffect(() => {
@@ -141,6 +148,13 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
         </>
       ) : !error && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>กำลังโหลดไฟล์ PDF...</div>)}
 
+      {content && lesson.type === "lab" && (content.lab ? (
+        <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>กำลังเตรียม lab...</div>}>
+          <LabPlayer lessonId={lesson.id} lab={content.lab} preview={content.preview} completed={completed}
+            onCompleted={percent => { setCompleted(true); onCompleted(percent); }} onReload={() => setReloadKey(k => k + 1)} />
+        </Suspense>
+      ) : <p style={{ color: "var(--text-muted)" }}>lab ของบทเรียนนี้ยังไม่พร้อมใช้งาน กรุณาแจ้งผู้สอน</p>)}
+
       {content && lesson.type === "self_learning" && (content.self_learning ? (
         // A lesson that reports itself complete (Lesson Kit) completes this course lesson on the server;
         // markComplete then fetches the new course progress. Others use the button below.
@@ -164,8 +178,8 @@ export const LessonContentView: React.FC<Props> = ({ lesson, onCompleted }) => {
             <button type="button" className="tech-button-primary" style={{ borderRadius: "1rem" }} disabled={marking} onClick={markComplete}>
               {marking ? "กำลังบันทึก..." : "ทำเครื่องหมายว่าเรียนแล้ว"}
             </button>
-          ) : lesson.type === "scorm" && (
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>ระบบจะบันทึกว่าเรียนจบเมื่อทำบทเรียนในแพ็กเกจเสร็จ</span>
+          ) : (lesson.type === "scorm" || lesson.type === "lab") && (
+            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{lesson.type === "lab" ? "ระบบจะบันทึกว่าเรียนจบเมื่อตรวจแล้วว่าทำ lab ผ่านครบทุกข้อ" : "ระบบจะบันทึกว่าเรียนจบเมื่อทำบทเรียนในแพ็กเกจเสร็จ"}</span>
           )}
         </div>
       )}

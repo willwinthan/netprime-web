@@ -1,0 +1,7 @@
+/* Equipment icons (DeviceIcon.tsx) */
+.np-ld-icon-top { fill: #1e6fd9; stroke: #0b3d80; stroke-width: 1.5; }
+.np-ld-icon-side { fill: #155bb5; stroke: #0b3d80; stroke-width: 1.5; }
+.np-ld-icon-mark { stroke: #fff; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.np-ld-icon.switch .np-ld-icon-top { fill: #0e9488; stroke: #075e57; }
+.np-ld-icon.pc .np-ld-icon-top, .np-ld-icon.server .np-ld-icon-top { fill: #64748b; stroke: #334155; }
+.np-ld-icon.pc .np-ld-icon-side { fill: #475569; stroke: #334155; }
