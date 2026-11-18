@@ -10,11 +10,11 @@ import { Link } from "../../site/router";
  */
 
 interface Source { type: "course" | "session" | "article" | "faq"; title: string; url: string }
-interface ChatMessage { role: "user" | "assistant"; text: string; sources?: Source[]; mock?: boolean; handoff?: boolean }
+interface ChatMessage { role: "user" | "assistant"; text: string; sources?: Source[]; mock?: boolean; handoff?: boolean; suggestions?: string[] }
 
 const SOURCE_LABEL: Record<Source["type"], string> = { course: "คอร์ส", session: "รอบอบรม", article: "บทความ", faq: "คำถามที่พบบ่อย" };
 const TURNSTILE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
-const GREETING = "สวัสดีครับ สอบถามเรื่องคอร์สออนไลน์ รอบอบรม หรือราคาได้เลย เช่น \"มีคอร์ส AWS ไหม\"";
+const GREETING = "สวัสดีครับ สอบถามเรื่องคอร์ส รอบอบรม การชำระเงิน ใบประกาศนียบัตร หรือการเดินทางได้เลย หรือเลือกคำถามด้านล่าง";
 
 /** Renders **bold** and [text](/internal-link) only; everything else is plain text. */
 function renderReply(text: string): React.ReactNode[] {
@@ -95,16 +95,19 @@ export const AiSalesChatWidget: React.FC = () => {
   useEffect(() => {
     let alive = true;
     fetch(`${API_BASE_URL}/ai/public/config`).then(r => r.ok ? r.json() : null)
-      .then(data => { if (alive) setEnabled(!!data?.chatbot_enabled); }).catch(() => undefined);
+      .then(data => {
+        if (!alive) return;
+        setEnabled(!!data?.chatbot_enabled);
+        if (Array.isArray(data?.suggestions)) setMessages(prev => prev.length === 1 ? [{ ...prev[0], suggestions: data.suggestions.slice(0, 6) }] : prev);
+      }).catch(() => undefined);
     return () => { alive = false; };
   }, []);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, lead]);
 
   if (!enabled) return null;
 
-  const send = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = input.trim().slice(0, 500);
+  const ask = async (question: string) => {
+    const text = question.trim().slice(0, 500);
     if (!text || busy) return;
     const history = messages.slice(1).slice(-6).map(m => ({ role: m.role, text: m.text }));
     setMessages(prev => [...prev, { role: "user", text }]);
@@ -116,11 +119,13 @@ export const AiSalesChatWidget: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "ส่งข้อความไม่สำเร็จ กรุณาลองใหม่");
-      setMessages(prev => [...prev, { role: "assistant", text: data.reply, sources: data.sources, mock: data.mock, handoff: data.handoff }]);
+      setMessages(prev => [...prev, { role: "assistant", text: data.reply, sources: data.sources, mock: data.mock, handoff: data.handoff,
+        suggestions: Array.isArray(data.suggestions) ? data.suggestions.slice(0, 4) : undefined }]);
     } catch (err: any) {
       setMessages(prev => [...prev, { role: "assistant", text: err.message }]);
     } finally { setBusy(false); }
   };
+  const send = (e: React.FormEvent) => { e.preventDefault(); ask(input); };
 
   const lastQuestion = [...messages].reverse().find(m => m.role === "user")?.text ?? "";
 
@@ -145,7 +150,17 @@ export const AiSalesChatWidget: React.FC = () => {
                     แหล่งข้อมูล: {m.sources.map((s, si) => <React.Fragment key={si}>{si > 0 && " · "}<Link to={s.url}>{SOURCE_LABEL[s.type]}: {s.title}</Link></React.Fragment>)}
                   </div>
                 )}
-                {m.mock && <div style={{ fontSize: 11, color: "var(--ps-ink-2)", marginTop: 2 }}>ผลตัวอย่าง (AI ไม่พร้อมใช้งาน)</div>}
+                {m.mock && <div style={{ fontSize: 11, color: "var(--ps-ink-2)", marginTop: 2 }}>สรุปจากรายการบนเว็บไซต์โดยตรง</div>}
+                {m.suggestions && m.suggestions.length > 0 && i === messages.length - 1 && !busy && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                    {m.suggestions.map(q => (
+                      <button key={q} type="button" onClick={() => ask(q)}
+                        style={{ fontSize: 12, padding: "5px 10px", borderRadius: 999, border: "1px solid var(--ps-line)", background: "#fff", color: "var(--ps-brand-strong)", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {m.handoff && !lead && (
                   <button type="button" className="ps-btn" style={{ marginTop: 6, fontSize: 13 }} onClick={() => setLead(true)}>ให้เจ้าหน้าที่ติดต่อกลับ</button>
                 )}

@@ -203,6 +203,43 @@ test('website chatbot answers from published data only and refuses off-topic que
   await expectStatus('/api/ai/public/chat', 400, { method: 'POST', body: { message: '' } });
 });
 
+test('website chatbot answers common questions from the knowledge base, without AI', async () => {
+  await setAi({ chatbot_per_ip: 1000 });
+  const config = await expectStatus('/api/ai/public/config', 200);
+  assert.ok(config.suggestions.length > 0);
+  // Paraphrases, not the stored wording: [question, text the answer must contain]
+  const cases = [
+    ['ออกใบกำกับภาษีได้ไหม', /ใบกำกับภาษี/], ['ขอใบเสร็จในนามบริษัทได้มั้ยครับ', /ใบกำกับภาษี/],
+    ['จ่ายเงินช่องทางไหนได้บ้าง', /พร้อมเพย์/], ['รับบัตรเครดิตไหม', /ยังไม่รับชำระด้วยบัตรเครดิต/],
+    ['อยู่ที่ไหนคะ', /Tipco/], ['มีที่จอดรถไหม', /จอดรถฟรี/], ['ยกเลิกคลาสได้เงินคืนไหม', /Confirm Class/],
+    ['มีเอกสารแจกไหม', /Softfile/], ['เรียนจบได้ cert ไหม', /ข้อสอบปลายภาค/], ['อบรมกี่โมงถึงกี่โมง', /9:00/],
+    ['มีโปรโมชั่นไหม', /โค้ด/], ['ที่นี่สอบ ccna ได้ไหม', /ศูนย์อบรมอย่างเดียว/], ['ขอใบเสนอราคาหน่อย', /PO/],
+    ['อยากจัดอบรมให้พนักงานในบริษัท', /In-House/], ['เรียนผ่าน zoom ได้ไหม', /Zoom/], ['มือใหม่ควรเริ่มเรียนอะไร', /CCNA/],
+    ['ลืมรหัสผ่าน', /ลืมรหัสผ่าน/], ['ทวนฟรีไหม', /ทวน/], ['ที่นั่งเต็มแล้ว', /รอคิว/], ['ไปเรียนที่สถาบันยังไงครับ', /Tipco/]
+  ];
+  for (const [message, expected] of cases) {
+    const data = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message } });
+    assert.equal(data.answer, 'faq', `"${message}" was not answered from the knowledge base: ${data.reply}`);
+    assert.equal(data.mock, false);
+    assert.equal(data.sources[0].type, 'faq');
+    assert.match(data.reply, expected, `"${message}" got: ${data.reply}`);
+    assert.ok(!/\{\w+\}/.test(data.reply), `unfilled placeholder in "${message}": ${data.reply}`);
+  }
+  // Contact details come from the site settings, not from the knowledge base text.
+  const contact = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'ขอเบอร์โทรหน่อย' } });
+  assert.match(contact.reply, /062-559-4622/);
+  assert.match(contact.reply, /netprime@plantecplus\.com/);
+  assert.equal(contact.handoff, true);
+  const greeting = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'สวัสดีครับ' } });
+  assert.equal(greeting.answer, 'greeting');
+  assert.ok(greeting.suggestions.length > 0);
+  // Course questions still go to course search, and off-topic questions are still refused.
+  const course = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'มีคอร์ส Cloudflare Workers ไหม ราคาเท่าไร' } });
+  assert.notEqual(course.answer, 'faq');
+  const offTopic = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'วันนี้อากาศเป็นยังไง' } });
+  assert.notEqual(offTopic.answer, 'faq');
+});
+
 test('daily quota is enforced per user; admins are not limited', async () => {
   const me = await expectStatus('/api/ai/me', 200, { token: instructor.token });
   assert.equal(me.unlimited, false);

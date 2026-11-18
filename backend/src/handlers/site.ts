@@ -159,7 +159,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
   announcement: { active: false, auto: true, text: null, link: null }, notify_emails: null
 };
 
-async function loadSettings(db: D1Database): Promise<SiteSettings> {
+export async function loadSettings(db: D1Database): Promise<SiteSettings> {
   const row = await db.prepare("SELECT value FROM site_settings WHERE key = 'site'").first<{ value: string }>();
   let stored: Partial<SiteSettings> = {};
   try { stored = row ? JSON.parse(row.value) : {}; } catch { console.error("site_settings.site is not valid JSON"); }
@@ -1704,7 +1704,7 @@ async function saveJsonSetting(c: Context<Env>, key: string, value: unknown) {
     .bind(key, JSON.stringify(value), c.get("user").id).run();
 }
 
-async function loadHome(db: D1Database): Promise<HomeContent> {
+export async function loadHome(db: D1Database): Promise<HomeContent> {
   const { value } = await loadJsonSetting<HomeContent>(db, "home");
   // Each section falls back separately, so an older saved document still renders new sections.
   return {

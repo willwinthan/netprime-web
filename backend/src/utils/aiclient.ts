@@ -94,7 +94,7 @@ export function bangkokDayStartIso(now = Date.now()): string {
 
 /** Public chatbot answers today (all visitors); refused off-topic questions never reach the model. */
 export async function chatbotAnswersToday(db: D1Database): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM ai_usage_log WHERE feature = 'chatbot' AND status = 'ok' AND created_at >= ?")
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM ai_usage_log WHERE feature = 'chatbot' AND status = 'ok' AND counted = 1 AND created_at >= ?")
     .bind(bangkokDayStartIso()).first<{ n: number }>();
   return row?.n ?? 0;
 }

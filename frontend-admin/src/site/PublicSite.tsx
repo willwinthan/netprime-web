@@ -199,8 +199,8 @@ export const PublicSite: React.FC<{ loggedIn: boolean; onLogin: (token: string, 
 
   return (
     <SiteContext.Provider value={context}>
-      <SiteLayout>{page}</SiteLayout>
-      {page && <AiSalesChatWidget />}
+      {/* Inside the layout so the widget gets the site theme variables (.ps). */}
+      <SiteLayout>{page}{page && <AiSalesChatWidget />}</SiteLayout>
       {auth && (
         <AuthDialog mode={auth} onClose={() => setAuth(null)} onLogin={(token, user) => {
           setAuth(null);
