@@ -43,8 +43,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   chatbot_daily_cap: 500
 };
 
-/** Text model for the new assistants (the original tutor keeps its own model). */
-export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+/** Workers AI text model used by every AI feature (tutor, assistants, chatbot, outsource). */
+export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 /** Short-window burst limit per user on top of the daily quota. */
 const BURST_PER_10_MIN = 30;
 

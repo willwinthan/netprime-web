@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { Env, UserPayload, rbac } from "../middleware/rbac";
 import { createNotification } from "./notifications";
+import { AI_MODEL } from "../utils/aiclient";
 
 export const outsourceRouter = new Hono<Env>();
 
@@ -470,7 +471,7 @@ Do NOT include any extra conversational text or Markdown code fences in your out
 
     const userMessage = `Goal: ${goal}\nScope: ${scope}\nTech Stack: ${techStack}\nDuration: ${duration}\nBudget Preference: ${budgetType} (${budgetRange})`;
 
-    const response = await ai.run("@cf/meta/llama-3-8b-instruct", {
+    const response = await ai.run(AI_MODEL, {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage }
@@ -541,7 +542,7 @@ Do NOT include any extra conversational text or Markdown code fences in your out
 
       const userMessage = `Project: ${projectTitle} (${projectDescription})\nSOW: ${scopeOfWork}\nMilestone: ${milestoneTitle} (${milestoneDescription})\nStudent Deliverables: ${deliverables}`;
 
-      const response = await ai.run("@cf/meta/llama-3-8b-instruct", {
+      const response = await ai.run(AI_MODEL, {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage }

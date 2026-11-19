@@ -24,7 +24,7 @@ Netprime LMS คือระบบจัดการการเรียนร�
 | Database | Cloudflare D1 (SQLite) 26 ตาราง | `backend/schema.sql`, `backend/migrations/` |
 | File storage | Cloudflare R2 (handout PDF, วิดีโอ) | binding `ASSETS` |
 | Session | Cloudflare KV (token ที่ logout แล้ว, OAuth state) | binding `SESSIONS` |
-| AI | Workers AI `@cf/meta/llama-3-8b-instruct` | binding `AI` |
+| AI | Workers AI `@cf/meta/llama-3.1-8b-instruct-fp8-fast` (`AI_MODEL` in `utils/aiclient.ts`) | binding `AI` |
 | วิดีโอ | Cloudflare Stream (signed URL), YouTube/Vimeo, หรือไฟล์ R2 (รองรับ Range) | `utils/stream.ts` |
 | ภายนอก | Omise (ชำระเงิน THB), Resend (อีเมล), Google/GitHub OAuth | |
 | เครื่องมือ | pnpm workspace, Wrangler, Node test runner | `package.json`, `scripts/test-local.mjs` |

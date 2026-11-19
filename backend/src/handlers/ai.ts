@@ -4,7 +4,7 @@ import { permit } from "../utils/permissions";
 import { clientIp, rateLimited } from "../utils/ratelimit";
 import { trackEvent } from "../utils/events";
 import {
-  AI_FEATURES, AI_FEATURE_LABELS, AiFeature, AiMessage, DATA_RULE, aiGate, asData, buildInsert, cleanText,
+  AI_FEATURES, AI_FEATURE_LABELS, AI_MODEL, AiFeature, AiMessage, DATA_RULE, aiGate, asData, buildInsert, cleanText,
   chatbotAnswersToday, extractJson, loadAiSettings, logUsage, normalizeAiSettings, runAi, saveAiSettings, sentencesOf, sha256Hex,
   stripHtml, tableColumns, usedToday
 } from "../utils/aiclient";
@@ -47,7 +47,7 @@ Explain coding concepts clearly. If the student asks for code, provide clean, co
       { role: "user", content: text }
     ];
 
-    const response = await ai.run("@cf/meta/llama-3-8b-instruct", {
+    const response = await ai.run(AI_MODEL, {
       messages,
       max_tokens: 1024
     });
