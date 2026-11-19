@@ -4,10 +4,12 @@ import { permit } from "../utils/permissions";
 import { clientIp, rateLimited } from "../utils/ratelimit";
 import { trackEvent } from "../utils/events";
 import {
-  AI_FEATURES, AI_FEATURE_LABELS, AiFeature, AiMessage, DATA_RULE, aiGate, asData, buildInsert, cleanText,
+  AI_FEATURES, AI_FEATURE_LABELS, AI_MODEL, AiFeature, AiMessage, DATA_RULE, aiGate, asData, buildInsert, cleanText,
   chatbotAnswersToday, extractJson, loadAiSettings, logUsage, normalizeAiSettings, runAi, saveAiSettings, sentencesOf, sha256Hex,
   stripHtml, tableColumns, usedToday
 } from "../utils/aiclient";
+import { CHATBOT_KNOWLEDGE, DIRECT_ANSWER_SCORE, KnowledgeEntry, RELATED_SCORE, fillAnswer, matchKnowledge } from "../utils/chatbotKnowledge";
+import { loadHome, loadSettings } from "./site";
 
 export const aiRouter = new Hono<Env>();
 
@@ -45,7 +47,7 @@ Explain coding concepts clearly. If the student asks for code, provide clean, co
       { role: "user", content: text }
     ];
 
-    const response = await ai.run("@cf/meta/llama-3-8b-instruct", {
+    const response = await ai.run(AI_MODEL, {
       messages,
       max_tokens: 1024
     });
@@ -603,7 +605,7 @@ const baht = (n: number) => (n > 0 ? `฿${Number(n).toLocaleString("th-TH")}` :
 /** Published, public data only: published courses, open/closed upcoming sessions, published articles, FAQ. */
 async function publicDocs(db: D1Database): Promise<Doc[]> {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-  const [courses, sessions, articles, home] = await Promise.all([
+  const [courses, sessions, articles] = await Promise.all([
     db.prepare("SELECT id, title, description, price FROM courses WHERE status = 'published' ORDER BY published_at DESC, title LIMIT 150")
       .all<{ id: string; title: string; description: string | null; price: number | null }>(),
     db.prepare(`SELECT id, title, vendor, description, start_date, end_date, time_text, mode, location, price, status FROM training_sessions
@@ -611,8 +613,7 @@ async function publicDocs(db: D1Database): Promise<Doc[]> {
       .all<{ id: string; title: string; vendor: string | null; description: string | null; start_date: string; end_date: string; time_text: string | null; mode: string; location: string | null; price: number; status: string }>(),
     db.prepare(`SELECT slug, title, excerpt, substr(body, 1, 800) AS body FROM articles
       WHERE status = 'published' AND published_at <= datetime('now', '+7 hours') ORDER BY published_at DESC LIMIT 60`)
-      .all<{ slug: string; title: string; excerpt: string | null; body: string }>(),
-    db.prepare("SELECT value FROM site_settings WHERE key = 'home'").first<{ value: string }>()
+      .all<{ slug: string; title: string; excerpt: string | null; body: string }>()
   ]);
   const modes: Record<string, string> = { classroom: "ห้องอบรม", online: "ออนไลน์", hybrid: "Hybrid" };
   const docs: Doc[] = [];
@@ -628,14 +629,22 @@ async function publicDocs(db: D1Database): Promise<Doc[]> {
   for (const a of articles.results ?? []) {
     docs.push({ type: "article", title: a.title, text: stripHtml(`${a.excerpt ?? ""} ${a.body ?? ""}`).slice(0, 800), url: `/blog/${encodeURIComponent(a.slug)}`, facts: "บทความ" });
   }
-  try {
-    const faq = home ? JSON.parse(home.value)?.faq : null;
-    if (Array.isArray(faq)) for (const f of faq.slice(0, 20)) {
-      if (typeof f?.q === "string" && typeof f?.a === "string") docs.push({ type: "faq", title: f.q.slice(0, 200), text: f.a.slice(0, 600), url: "/#faq", facts: "คำถามที่พบบ่อย" });
-    }
-  } catch { /* no saved FAQ */ }
   return docs;
 }
+
+/** The built-in knowledge base plus the FAQ staff edit on the home page (their wording wins a tie). */
+async function knowledgeEntries(db: D1Database): Promise<KnowledgeEntry[]> {
+  const home = await loadHome(db);
+  const homeFaq: KnowledgeEntry[] = (Array.isArray(home.faq) ? home.faq : []).slice(0, 20)
+    .filter(f => typeof f?.q === "string" && typeof f?.a === "string")
+    .map((f, i) => ({ id: `home-${i}`, q: f.q.slice(0, 200), aliases: [], keywords: [], a: f.a.slice(0, 1000), url: "/" }));
+  return [...homeFaq, ...CHATBOT_KNOWLEDGE];
+}
+
+const GREETING_RE = /^(สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ดีคะ|hello|hi|hey|ทักทาย)/i;
+const GREETING_REPLY = "สวัสดีครับ ผู้ช่วย NetPrime ยินดีให้ข้อมูลเรื่องคอร์สออนไลน์ รอบอบรม การชำระเงิน ใบประกาศนียบัตร และการเดินทาง พิมพ์คำถามหรือเลือกจากหัวข้อด้านล่างได้เลยครับ";
+/** Starter questions the widget offers as buttons. */
+const STARTER_QUESTIONS = ["รูปแบบการเรียนมีอะไรบ้าง", "ชำระเงินได้ช่องทางไหนบ้าง", "มีใบประกาศนียบัตรไหม", "NetPrime อยู่ที่ไหน เดินทางอย่างไร"];
 
 function retrieve(docs: Doc[], terms: string[]): Doc[] {
   if (!terms.length) return [];
@@ -665,7 +674,10 @@ function mockChatReply(sources: Doc[], handoff: boolean): string {
   if (!sources.length) {
     return "ยังไม่พบข้อมูลที่ตรงกับคำถามบนเว็บไซต์ แนะนำให้ดูคอร์สทั้งหมดที่ /courses หรือตารางอบรมที่ /schedule หรือกด \"ให้เจ้าหน้าที่ติดต่อกลับ\" เพื่อสอบถามเพิ่มเติม";
   }
-  const lines = sources.map(d => `- **${d.title}** — ${d.facts} ([ดูรายละเอียด](${d.url}))`);
+  const items = sources.filter(d => d.type !== "faq");
+  // Near-miss FAQ entries come back as suggestion buttons; ask the visitor to pick one.
+  if (!items.length) return "ยังไม่แน่ใจว่าหมายถึงเรื่องไหน ลองเลือกคำถามที่ใกล้เคียงด้านล่าง หรือพิมพ์คำถามให้ละเอียดขึ้นอีกนิดได้เลยครับ";
+  const lines = items.map(d => `- **${d.title}** — ${d.facts} ([ดูรายละเอียด](${d.url}))`);
   return ["จากข้อมูลบนเว็บไซต์ พบรายการที่เกี่ยวข้อง:", ...lines,
     handoff ? "\nหากต้องการให้เจ้าหน้าที่ติดต่อกลับ กดปุ่ม \"ให้เจ้าหน้าที่ติดต่อกลับ\" ได้เลย" : ""].join("\n").trim();
 }
@@ -673,7 +685,7 @@ function mockChatReply(sources: Doc[], handoff: boolean): string {
 aiRouter.get("/ai/public/config", async (c) => {
   const settings = await loadAiSettings(c.env.DB);
   c.header("Cache-Control", "public, max-age=60");
-  return c.json({ chatbot_enabled: settings.features.chatbot });
+  return c.json({ chatbot_enabled: settings.features.chatbot, suggestions: STARTER_QUESTIONS });
 });
 
 aiRouter.post("/ai/public/chat", async (c) => {
@@ -688,8 +700,31 @@ aiRouter.post("/ai/public/chat", async (c) => {
   }
   c.header("Cache-Control", "no-store");
 
+  if (GREETING_RE.test(message) && message.length <= 30) {
+    await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: GREETING_REPLY.length, mock: false, counted: false });
+    return c.json({ reply: GREETING_REPLY, sources: [], refused: false, handoff: false, mock: false, answer: "greeting", suggestions: STARTER_QUESTIONS });
+  }
+
+  // Common questions (payment, location, certificates...) are answered with the curated text itself:
+  // policy wording must not be paraphrased by a model, and it works when AI is unavailable.
+  const [site, entries] = await Promise.all([loadSettings(c.env.DB), knowledgeEntries(c.env.DB)]);
+  const contact = { company: site.company, phone: site.phone, email: site.email, address: site.address, line: site.line, hours: site.hours };
+  const matches = matchKnowledge(message, entries);
+  const best = matches[0];
+  if (best && best.score >= DIRECT_ANSWER_SCORE) {
+    const reply = fillAnswer(best.entry.a, contact);
+    const related = matches.slice(1, 4).filter(m => m.score >= DIRECT_ANSWER_SCORE).map(m => m.entry.q);
+    await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: reply.length, mock: false, counted: false });
+    return c.json({ reply, sources: [{ type: "faq", title: best.entry.q, url: best.entry.url }], refused: false,
+      handoff: !!best.entry.handoff, mock: false, answer: "faq", suggestions: related });
+  }
+  const relatedFaq = matches.filter(m => m.score >= RELATED_SCORE).slice(0, 3);
+
   const docs = await publicDocs(c.env.DB);
-  let sources = retrieve(docs, queryTerms(message));
+  let sources = [
+    ...relatedFaq.map(m => ({ type: "faq" as const, title: m.entry.q, text: fillAnswer(m.entry.a, contact), url: m.entry.url, facts: "คำถามที่พบบ่อย" })),
+    ...retrieve(docs, queryTerms(message))
+  ].slice(0, 5);
   const sales = INTENT_SALES.test(message);
   const handoff = INTENT_HANDOFF.test(message);
   if (!sources.length && sales) {
@@ -701,7 +736,7 @@ aiRouter.post("/ai/public/chat", async (c) => {
 
   if (!sources.length && !sales) {
     await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: REFUSAL.length, mock: !c.env.AI, status: "refused" });
-    return c.json({ reply: REFUSAL, sources: [], refused: true, handoff: false, mock: !c.env.AI });
+    return c.json({ reply: REFUSAL, sources: [], refused: true, handoff: false, mock: !c.env.AI, suggestions: STARTER_QUESTIONS });
   }
 
   const context = sources.map((d, i) => `[${i + 1}] ${d.title}\nประเภท: ${d.type}\n${d.facts}\n${d.text}\nลิงก์: ${d.url}`).join("\n\n");
@@ -718,7 +753,8 @@ aiRouter.post("/ai/public/chat", async (c) => {
   const reply = result?.text.slice(0, 3000) || mockChatReply(sources, handoff);
   const mock = !result;
   await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: reply.length, tokens: result?.tokens, mock });
-  return c.json({ reply, sources: citations, refused: false, handoff: handoff || !sources.length, mock, ...(capped ? { capped: true } : {}) });
+  return c.json({ reply, sources: citations, refused: false, handoff: handoff || !sources.length, mock,
+    suggestions: relatedFaq.map(m => m.entry.q), ...(capped ? { capped: true } : {}) });
 });
 
 // ==========================================

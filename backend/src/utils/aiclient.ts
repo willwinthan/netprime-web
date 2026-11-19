@@ -43,8 +43,8 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   chatbot_daily_cap: 500
 };
 
-/** Text model for the new assistants (the original tutor keeps its own model). */
-export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+/** Workers AI text model used by every AI feature (tutor, assistants, chatbot, outsource). */
+export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 /** Short-window burst limit per user on top of the daily quota. */
 const BURST_PER_10_MIN = 30;
 
@@ -94,7 +94,7 @@ export function bangkokDayStartIso(now = Date.now()): string {
 
 /** Public chatbot answers today (all visitors); refused off-topic questions never reach the model. */
 export async function chatbotAnswersToday(db: D1Database): Promise<number> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM ai_usage_log WHERE feature = 'chatbot' AND status = 'ok' AND created_at >= ?")
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM ai_usage_log WHERE feature = 'chatbot' AND status = 'ok' AND counted = 1 AND created_at >= ?")
     .bind(bangkokDayStartIso()).first<{ n: number }>();
   return row?.n ?? 0;
 }
