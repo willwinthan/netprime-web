@@ -8,7 +8,7 @@ import {
   chatbotAnswersToday, extractJson, loadAiSettings, logUsage, normalizeAiSettings, runAi, saveAiSettings, sentencesOf, sha256Hex,
   stripHtml, tableColumns, usedToday
 } from "../utils/aiclient";
-import { CHATBOT_KNOWLEDGE, DIRECT_ANSWER_SCORE, KnowledgeEntry, RELATED_SCORE, fillAnswer, matchKnowledge } from "../utils/chatbotKnowledge";
+import { CHATBOT_KNOWLEDGE, DIRECT_ANSWER_SCORE, KnowledgeEntry, RELATED_SCORE, directAnswer, fillAnswer, matchKnowledge } from "../utils/chatbotKnowledge";
 import { loadHome, loadSettings } from "./site";
 
 export const aiRouter = new Hono<Env>();
@@ -568,7 +568,7 @@ aiRouter.post("/ai/write", rbac(), permit("articles.write", "articles.manage"), 
 // 5. Public website sales assistant (published data only)
 // ==========================================
 
-interface Doc { type: "course" | "session" | "article" | "faq"; title: string; text: string; url: string; facts: string }
+interface Doc { type: "course" | "session" | "article" | "faq"; title: string; text: string; url: string; facts: string; start?: string }
 
 const THAI_STOP = new Set(["ครับ", "ค่ะ", "คะ", "นะ", "จ้า", "ไหม", "มั้ย", "อะไร", "บ้าง", "ยังไง", "อย่างไร", "เท่าไร", "เท่าไหร่", "ช่วย", "อยาก",
   "ขอ", "หน่อย", "ทำ", "ได้", "ให้", "ใช้", "มี", "เป็น", "คือ", "จะ", "ไป", "มา", "ใน", "กับ", "จาก", "แล้ว", "ไม่", "นี้", "นั้น", "อย่าง",
@@ -600,6 +600,63 @@ const INTENT_SCHEDULE = /รอบ|ตาราง|อบรม|schedule|trainin
 const INTENT_SALES = /คอร์ส|course|หลักสูตร|อบรม|ราคา|สมัคร|ตาราง|รอบ|เรียน|ใบประกาศ|certificate|training|price|schedule|ลงทะเบียน|ชำระ|จ่าย|ส่วนลด|โปรโมชั่น|ติดต่อ|เจ้าหน้าที่|ใบกำกับ|ใบเสนอราคา|องค์กร|สอบ|exam/i;
 const INTENT_HANDOFF = /ติดต่อ|เจ้าหน้าที่|โทร|ใบเสนอราคา|quotation|contact|call|ฝากเบอร์|องค์กร|บริษัท|in-house|อินเฮาส์/i;
 
+// "มีคอร์สอะไรบ้าง", "เดือนนี้มีรอบอบรมอะไรบ้าง": a request for the whole list, not for one course.
+const INTENT_LIST = /อะไรบ้าง|มีอะไร|ไหนบ้าง|ทั้งหมด|รายการ|what courses|which courses|list|all courses/i;
+const LIST_COURSES = /คอร์ส|course|หลักสูตร/i;
+const LIST_SESSIONS = /รอบ|ตาราง|อบรม|schedule|training|เปิดสอน|คลาส|class/i;
+/** Words a listing question may carry besides the stop words; any other word names a topic, so it is a search instead. */
+const LIST_FILLER = new Set(["เดือน", "หน้า", "ช่วง", "ล่าสุด", "ใหม่", "ปี", "สัปดาห์", "อาทิตย์", "ทั้งหมด", "เปิด", "ตาราง", "คลาส", "ออนไลน์",
+  "รายการ", "ตอนนี้", "เกี่ยว", "บ้าง", "online", "class", "classes", "schedule", "training", "list", "all", "which", "courses"]);
+const LIST_LIMIT = 8;
+
+/** A plain list of published courses or upcoming sessions, built from site data without the model. */
+function listReply(message: string, docs: Doc[]): { reply: string; sources: Doc[] } | null {
+  if (!INTENT_LIST.test(message)) return null;
+  const wantSessions = LIST_SESSIONS.test(message);
+  const wantCourses = LIST_COURSES.test(message) && !/รอบ|ตาราง/.test(message);
+  if (!wantSessions && !wantCourses) return null;
+  if (queryTerms(message).some(t => !LIST_FILLER.has(t))) return null;
+
+  const parts: string[] = [];
+  const sources: Doc[] = [];
+  const line = (d: Doc) => `- **${d.title}** — ${d.facts}`;
+  if (wantSessions) {
+    const sessions = docs.filter(d => d.type === "session");
+    const now = new Date(Date.now() + 7 * 3600 * 1000);
+    const month = (offset: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)).toISOString().slice(0, 7);
+    const offset = /เดือนหน้า|next month/i.test(message) ? 1 : /เดือนนี้|this month/i.test(message) ? 0 : null;
+    const inMonth = offset === null ? sessions : sessions.filter(d => d.start?.startsWith(month(offset)));
+    const label = offset === 1 ? "เดือนหน้า" : offset === 0 ? "เดือนนี้" : "";
+    if (inMonth.length) {
+      const shown = inMonth.slice(0, LIST_LIMIT);
+      parts.push(`รอบอบรมที่เปิด${label ? `ใน${label}` : "อยู่ตอนนี้"} ${inMonth.length} รอบ:`, ...shown.map(line));
+      if (inMonth.length > shown.length) parts.push(`และอีก ${inMonth.length - shown.length} รอบ`);
+      sources.push(...shown);
+    } else if (sessions.length) {
+      const shown = sessions.slice(0, 3);
+      parts.push(`${label ? `${label}` : "ตอนนี้"}ยังไม่มีรอบอบรม รอบที่เปิดอยู่ตอนนี้:`, ...shown.map(line));
+      sources.push(...shown);
+    } else {
+      parts.push("ตอนนี้ยังไม่มีรอบอบรมที่ประกาศไว้ กด \"ให้เจ้าหน้าที่ติดต่อกลับ\" เพื่อสอบถามรอบถัดไปได้ครับ");
+    }
+    parts.push("ดูตารางอบรมทั้งหมดและสมัครได้ที่ [ตารางอบรม](/schedule)");
+  }
+  if (wantCourses) {
+    const courses = docs.filter(d => d.type === "course");
+    if (parts.length) parts.push("");
+    if (courses.length) {
+      const shown = courses.slice(0, LIST_LIMIT);
+      parts.push(`คอร์สออนไลน์ที่เปิดขาย ${courses.length} คอร์ส:`, ...shown.map(line));
+      if (courses.length > shown.length) parts.push(`และอีก ${courses.length - shown.length} คอร์ส`);
+      sources.push(...shown);
+    } else {
+      parts.push("ตอนนี้ยังไม่มีคอร์สออนไลน์ที่เปิดขาย");
+    }
+    parts.push("ดูคอร์สทั้งหมดได้ที่ [คอร์สออนไลน์](/courses)");
+  }
+  return { reply: parts.join("\n"), sources };
+}
+
 const baht = (n: number) => (n > 0 ? `฿${Number(n).toLocaleString("th-TH")}` : "ฟรี");
 
 /** Published, public data only: published courses, open/closed upcoming sessions, published articles, FAQ. */
@@ -623,7 +680,7 @@ async function publicDocs(db: D1Database): Promise<Doc[]> {
   }
   for (const s of sessions.results ?? []) {
     const when = s.start_date === s.end_date ? s.start_date : `${s.start_date} ถึง ${s.end_date}`;
-    docs.push({ type: "session", title: s.title, text: `${s.vendor ?? ""} ${stripHtml(s.description).slice(0, 400)}`, url: "/schedule",
+    docs.push({ type: "session", title: s.title, text: `${s.vendor ?? ""} ${stripHtml(s.description).slice(0, 400)}`, url: "/schedule", start: s.start_date,
       facts: `รอบอบรม ${when}${s.time_text ? ` เวลา ${s.time_text}` : ""} รูปแบบ${modes[s.mode] ?? s.mode}${s.location ? ` ที่ ${s.location}` : ""} ราคา ${baht(s.price)}${s.status === "closed" ? " (ปิดรับสมัครแล้ว)" : ""}` });
   }
   for (const a of articles.results ?? []) {
@@ -710,10 +767,11 @@ aiRouter.post("/ai/public/chat", async (c) => {
   const [site, entries] = await Promise.all([loadSettings(c.env.DB), knowledgeEntries(c.env.DB)]);
   const contact = { company: site.company, phone: site.phone, email: site.email, address: site.address, line: site.line, hours: site.hours };
   const matches = matchKnowledge(message, entries);
-  const best = matches[0];
-  if (best && best.score >= DIRECT_ANSWER_SCORE) {
+  // A strong match, or a fair one that the words of the answer agree with (directAnswer).
+  const best = directAnswer(message, entries, matches);
+  if (best) {
     const reply = fillAnswer(best.entry.a, contact);
-    const related = matches.slice(1, 4).filter(m => m.score >= DIRECT_ANSWER_SCORE).map(m => m.entry.q);
+    const related = matches.filter(m => m !== best).slice(0, 3).filter(m => m.score >= DIRECT_ANSWER_SCORE).map(m => m.entry.q);
     await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: reply.length, mock: false, counted: false });
     return c.json({ reply, sources: [{ type: "faq", title: best.entry.q, url: best.entry.url }], refused: false,
       handoff: !!best.entry.handoff, mock: false, answer: "faq", suggestions: related });
@@ -721,6 +779,13 @@ aiRouter.post("/ai/public/chat", async (c) => {
   const relatedFaq = matches.filter(m => m.score >= RELATED_SCORE).slice(0, 3);
 
   const docs = await publicDocs(c.env.DB);
+  // A request for the whole list is answered from the published data directly: the same answer all day, with or without AI.
+  const listed = listReply(message, docs);
+  if (listed) {
+    await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: listed.reply.length, mock: false, counted: false });
+    return c.json({ reply: listed.reply, sources: listed.sources.map(d => ({ type: d.type, title: d.title, url: d.url })), refused: false,
+      handoff: false, mock: false, answer: "list", suggestions: [] });
+  }
   let sources = [
     ...relatedFaq.map(m => ({ type: "faq" as const, title: m.entry.q, text: fillAnswer(m.entry.a, contact), url: m.entry.url, facts: "คำถามที่พบบ่อย" })),
     ...retrieve(docs, queryTerms(message))

@@ -238,6 +238,26 @@ test('website chatbot answers common questions from the knowledge base, without 
   assert.notEqual(course.answer, 'faq');
   const offTopic = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'วันนี้อากาศเป็นยังไง' } });
   assert.notEqual(offTopic.answer, 'faq');
+  // Thai keywords match whole words: "โทร" (call) inside "โทรศัพท์" (phone) must not give the contact answer.
+  const phone = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'เรียนผ่านโทรศัพท์ได้ไหมคะ' } });
+  assert.equal(phone.answer, 'faq');
+  assert.match(phone.reply, /มือถือ/);
+  // A course name no entry knows sends the question to course search, not to a near FAQ such as training hours.
+  const session = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'รอบอบรม fortigate วันไหน' } });
+  assert.notEqual(session.answer, 'faq');
+  // A request for the whole list is answered from published data, without the model.
+  const courses = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'มีคอร์สอะไรบ้าง' } });
+  assert.equal(courses.answer, 'list');
+  assert.equal(courses.mock, false);
+  assert.match(courses.reply, /\(\/courses\)/);
+  assert.ok(courses.sources.every(s => s.type === 'course'));
+  const sessions = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'เดือนนี้มีรอบอบรมอะไรบ้าง' } });
+  assert.equal(sessions.answer, 'list');
+  assert.match(sessions.reply, /\(\/schedule\)/);
+  assert.ok(sessions.sources.every(s => s.type === 'session'));
+  // A topic in the question makes it a search, not the whole list.
+  const topic = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'มีคอร์สอะไรเกี่ยวกับ firewall บ้าง' } });
+  assert.notEqual(topic.answer, 'list');
 });
 
 test('daily quota is enforced per user; admins are not limited', async () => {
