@@ -10,7 +10,7 @@ import { Link } from "../../site/router";
  */
 
 interface Source { type: "course" | "session" | "article" | "faq"; title: string; url: string }
-interface ChatMessage { role: "user" | "assistant"; text: string; sources?: Source[]; mock?: boolean; handoff?: boolean; suggestions?: string[] }
+interface ChatMessage { role: "user" | "assistant"; text: string; sources?: Source[]; mock?: boolean; handoff?: boolean; suggestions?: string[]; stream?: boolean }
 
 const SOURCE_LABEL: Record<Source["type"], string> = { course: "คอร์ส", session: "รอบอบรม", article: "บทความ", faq: "คำถามที่พบบ่อย" };
 const TURNSTILE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
@@ -32,6 +32,69 @@ function renderReply(text: string): React.ReactNode[] {
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
+
+// ---------- Typing effect ----------
+// The whole reply has already arrived; it is only shown a little at a time, like typing.
+
+/** Pieces the text is revealed by: a whole markdown link, "**", or one grapheme (keeps Thai vowels and tone marks with their consonant). */
+const graphemes = typeof Intl !== "undefined" && (Intl as any).Segmenter ? new (Intl as any).Segmenter("th", { granularity: "grapheme" }) : null;
+function revealUnits(text: string): string[] {
+  const units: string[] = [];
+  for (const part of text.split(/(\[[^\]]+\]\([^)\s]+\)|\*\*)/)) {
+    if (!part) continue;
+    if (part === "**" || part.startsWith("[")) units.push(part);
+    else if (graphemes) for (const g of graphemes.segment(part)) units.push(g.segment);
+    else units.push(...Array.from(part));
+  }
+  return units;
+}
+
+/** Typing time grows with the length of the reply in three steps; a very short reply finishes sooner (25 ms a piece at most). */
+const TYPING_TIERS = [
+  { upTo: 200, ms: 1200 },      // one or two sentences
+  { upTo: 500, ms: 2500 },      // a typical FAQ answer
+  { upTo: Infinity, ms: 4000 }  // a list of courses or a long answer
+];
+function typingDuration(chars: number, pieces: number): number {
+  const tier = TYPING_TIERS.find(t => chars <= t.upTo)!;
+  return Math.min(tier.ms, pieces * 25);
+}
+
+const TYPING_CSS = `@keyframes np-caret { 50% { opacity: 0 } }
+.np-streaming::after { content: ""; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: var(--ps-brand-strong); animation: np-caret .8s steps(1) infinite; }
+@keyframes np-fade-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+.np-fade-in { animation: np-fade-in .3s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .np-fade-in { animation: none; } .np-streaming::after { animation: none; } }`;
+
+const StreamedReply: React.FC<{ text: string; onProgress: () => void; onDone: () => void }> = ({ text, onProgress, onDone }) => {
+  const [shown, setShown] = useState("");
+  const progress = useRef(onProgress);
+  const done = useRef(onDone);
+  progress.current = onProgress;
+  done.current = onDone;
+  useEffect(() => {
+    const units = revealUnits(text);
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || document.hidden || units.length < 2) { setShown(text); done.current(); return; }
+    // Progress follows the clock, not the frame count, so a throttled tab still finishes on time.
+    const duration = typingDuration(text.length, units.length);
+    const started = performance.now();
+    let count = 0, partial = "", frame = 0;
+    const step = () => {
+      const target = Math.min(units.length, Math.ceil((performance.now() - started) / duration * units.length));
+      while (count < target) partial += units[count++];
+      // Close an open ** so half-revealed bold text does not show the asterisks.
+      const open = (partial.match(/\*\*/g) || []).length % 2 === 1;
+      setShown(open ? partial + "**" : partial);
+      progress.current();
+      if (count < units.length) frame = requestAnimationFrame(step);
+      else done.current();
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [text]);
+  return <span className={shown === text ? undefined : "np-streaming"}>{renderReply(shown)}</span>;
+};
 
 const Turnstile: React.FC<{ onToken: (token: string) => void }> = ({ onToken }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -90,7 +153,16 @@ export const AiSalesChatWidget: React.FC = () => {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lead, setLead] = useState(false);
+  /** Index of the reply being typed out; its sources and buttons appear once it is complete. */
+  const [typing, setTyping] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const typingRef = useRef<HTMLDivElement>(null);
+  /** Keeps the growing reply in view, but never scrolls its first line out of sight. */
+  const followReply = () => {
+    const list = listRef.current, el = typingRef.current;
+    if (!list || !el) return;
+    list.scrollTop = Math.min(el.offsetTop - list.offsetTop - 8, list.scrollHeight - list.clientHeight);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -102,13 +174,18 @@ export const AiSalesChatWidget: React.FC = () => {
       }).catch(() => undefined);
     return () => { alive = false; };
   }, []);
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, lead]);
+  useEffect(() => {
+    // While a reply is typed out (and right after), follow its first line instead of jumping to the bottom.
+    if (typing !== null) return;
+    if (messages[messages.length - 1]?.stream) { followReply(); return; }
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages, lead, typing]);
 
   if (!enabled) return null;
 
   const ask = async (question: string) => {
     const text = question.trim().slice(0, 500);
-    if (!text || busy) return;
+    if (!text || busy || typing !== null) return;
     const history = messages.slice(1).slice(-6).map(m => ({ role: m.role, text: m.text }));
     setMessages(prev => [...prev, { role: "user", text }]);
     setInput("");
@@ -119,8 +196,10 @@ export const AiSalesChatWidget: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "ส่งข้อความไม่สำเร็จ กรุณาลองใหม่");
+      // Only one question is in flight, so the reply lands right after the question added above.
+      setTyping(messages.length + 1);
       setMessages(prev => [...prev, { role: "assistant", text: data.reply, sources: data.sources, mock: data.mock, handoff: data.handoff,
-        suggestions: Array.isArray(data.suggestions) ? data.suggestions.slice(0, 4) : undefined }]);
+        suggestions: Array.isArray(data.suggestions) ? data.suggestions.slice(0, 4) : undefined, stream: true }]);
     } catch (err: any) {
       setMessages(prev => [...prev, { role: "assistant", text: err.message }]);
     } finally { setBusy(false); }
@@ -131,6 +210,7 @@ export const AiSalesChatWidget: React.FC = () => {
 
   return (
     <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 8000, fontSize: 14 }}>
+      <style>{TYPING_CSS}</style>
       {open && (
         <div role="dialog" aria-label="ผู้ช่วยตอบคำถาม" className="ps-card"
           style={{ width: "min(360px, calc(100vw - 32px))", height: "min(560px, calc(100vh - 100px))", display: "flex", flexDirection: "column", marginBottom: 12, boxShadow: "0 18px 48px rgba(24,36,67,0.18)", overflow: "hidden" }}>
@@ -139,20 +219,26 @@ export const AiSalesChatWidget: React.FC = () => {
             <button type="button" onClick={() => setOpen(false)} aria-label="ปิดแชท" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</button>
           </div>
           <div ref={listRef} aria-live="polite" style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10, background: "var(--ps-cream)" }}>
-            {messages.map((m, i) => (
-              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
+            {messages.map((m, i) => {
+              const isTyping = i === typing;
+              // Sources and buttons appear once the reply is fully shown, and fade in if it was typed out.
+              const extras = m.stream ? "np-fade-in" : undefined;
+              return (
+              <div key={i} ref={isTyping ? typingRef : undefined} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%" }}>
                 <div style={{ whiteSpace: "pre-wrap", padding: "8px 12px", borderRadius: 14, lineHeight: 1.6,
                   background: m.role === "user" ? "var(--ps-blue)" : "#fff", color: m.role === "user" ? "#fff" : "var(--ps-ink)", border: m.role === "user" ? "none" : "1px solid var(--ps-line)" }}>
-                  {m.role === "assistant" ? renderReply(m.text) : m.text}
+                  {m.role === "user" ? m.text : isTyping
+                    ? <StreamedReply text={m.text} onProgress={followReply} onDone={() => setTyping(null)} />
+                    : renderReply(m.text)}
                 </div>
-                {m.sources && m.sources.length > 0 && (
-                  <div style={{ fontSize: 12, color: "var(--ps-ink-2)", marginTop: 4 }}>
+                {!isTyping && m.sources && m.sources.length > 0 && (
+                  <div className={extras} style={{ fontSize: 12, color: "var(--ps-ink-2)", marginTop: 4 }}>
                     แหล่งข้อมูล: {m.sources.map((s, si) => <React.Fragment key={si}>{si > 0 && " · "}<Link to={s.url}>{SOURCE_LABEL[s.type]}: {s.title}</Link></React.Fragment>)}
                   </div>
                 )}
-                {m.mock && <div style={{ fontSize: 11, color: "var(--ps-ink-2)", marginTop: 2 }}>สรุปจากรายการบนเว็บไซต์โดยตรง</div>}
-                {m.suggestions && m.suggestions.length > 0 && i === messages.length - 1 && !busy && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {!isTyping && m.mock && <div className={extras} style={{ fontSize: 11, color: "var(--ps-ink-2)", marginTop: 2 }}>สรุปจากรายการบนเว็บไซต์โดยตรง</div>}
+                {!isTyping && m.suggestions && m.suggestions.length > 0 && i === messages.length - 1 && !busy && (
+                  <div className={extras} style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                     {m.suggestions.map(q => (
                       <button key={q} type="button" onClick={() => ask(q)}
                         style={{ fontSize: 12, padding: "5px 10px", borderRadius: 999, border: "1px solid var(--ps-line)", background: "#fff", color: "var(--ps-brand-strong)", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
@@ -161,11 +247,12 @@ export const AiSalesChatWidget: React.FC = () => {
                     ))}
                   </div>
                 )}
-                {m.handoff && !lead && (
-                  <button type="button" className="ps-btn" style={{ marginTop: 6, fontSize: 13 }} onClick={() => setLead(true)}>ให้เจ้าหน้าที่ติดต่อกลับ</button>
+                {!isTyping && m.handoff && !lead && (
+                  <button type="button" className={`ps-btn${extras ? ` ${extras}` : ""}`} style={{ marginTop: 6, fontSize: 13 }} onClick={() => setLead(true)}>ให้เจ้าหน้าที่ติดต่อกลับ</button>
                 )}
               </div>
-            ))}
+              );
+            })}
             {busy && <div style={{ color: "var(--ps-ink-2)", fontSize: 13 }}>กำลังพิมพ์...</div>}
           </div>
           {lead ? (
@@ -176,7 +263,7 @@ export const AiSalesChatWidget: React.FC = () => {
               <form onSubmit={send} style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--ps-line)" }}>
                 <input value={input} onChange={e => setInput(e.target.value)} maxLength={500} placeholder="พิมพ์คำถาม..." aria-label="พิมพ์คำถาม"
                   style={{ flex: 1, padding: "8px 12px", border: "1px solid var(--ps-field)", borderRadius: 10, font: "inherit" }} />
-                <button type="submit" className="ps-btn ps-btn-primary" disabled={busy || !input.trim()}>ส่ง</button>
+                <button type="submit" className="ps-btn ps-btn-primary" disabled={busy || typing !== null || !input.trim()}>ส่ง</button>
               </form>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "0 12px 10px", fontSize: 11, color: "var(--ps-ink-2)" }}>
                 <span>ตอบจากข้อมูลบนเว็บไซต์ อาจคลาดเคลื่อนได้</span>
