@@ -255,6 +255,9 @@ test('website chatbot answers common questions from the knowledge base, without 
   assert.equal(sessions.answer, 'list');
   assert.match(sessions.reply, /\(\/schedule\)/);
   assert.ok(sessions.sources.every(s => s.type === 'session'));
+  // Session dates are given in Thai with the Buddhist year, so the model has nothing to convert.
+  assert.doesNotMatch(sessions.reply, /\d{4}-\d{2}-\d{2}/);
+  if (sessions.sources.length) assert.match(sessions.reply, /\d{1,2}(–\d{1,2})? [ก-๙.]+ 25\d\d/);
   // A topic in the question makes it a search, not the whole list.
   const topic = await expectStatus('/api/ai/public/chat', 200, { method: 'POST', body: { message: 'มีคอร์สอะไรเกี่ยวกับ firewall บ้าง' } });
   assert.notEqual(topic.answer, 'list');
