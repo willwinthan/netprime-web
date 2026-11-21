@@ -361,6 +361,10 @@ test('chatbot keeps only links to the site pages it was given', () => {
     'อ่าน บทความ หรือ [ตาราง](/schedule) และ [บล็อก](/blog/ccna-plan)');
   assert.equal(siteLinksOnly('ดูที่ลิงก์นี้: https://x.example/abc', allowed), 'ดูที่หน้าเว็บไซต์');
   assert.equal(siteLinksOnly('[สมัคร](javascript:alert(1))', allowed), 'สมัคร');
+  // Angle-bracket autolinks lose their brackets.
+  assert.equal(siteLinksOnly('ดูได้ที่ลิงก์ <https://x.workers.net/schedule>', allowed), 'ดูได้ที่ลิงก์ /schedule');
+  assert.equal(siteLinksOnly('ดูได้ที่ลิงก์ </schedule>', allowed), 'ดูได้ที่ลิงก์ /schedule');
+  assert.equal(siteLinksOnly('ดูที่ลิงก์นี้: <https://x.example/abc>', allowed), 'ดูที่หน้าเว็บไซต์');
   // Relative links that were given stay as they are.
   assert.equal(siteLinksOnly('ราคา ฿4,900 ดูที่ /courses', allowed), 'ราคา ฿4,900 ดูที่ /courses');
 });
