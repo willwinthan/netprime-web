@@ -361,3 +361,32 @@ export function directAnswer(message: string, entries: KnowledgeEntry[] = CHATBO
   for (let i = 1; i < scores.length; i++) if (scores[i] > scores[top]) top = i;
   return entries[top] === best.entry && scores[top] >= TEXT_AGREE ? best : null;
 }
+
+/**
+ * Keeps only links to this site's own pages in a model-written reply. The model is given relative links
+ * ("/schedule") but sometimes adds a made-up host ("https://…workers.net/schedule"); such a link becomes its path
+ * when that path is one of `allowed`, and is removed otherwise (a Markdown link keeps its text).
+ */
+export function siteLinksOnly(reply: string, allowed: Iterable<string>): string {
+  const ok = new Set([...allowed].map(p => p.replace(/\/+$/, "") || "/"));
+  const pathOf = (url: string): string | null => {
+    if (url.startsWith("/") && !url.startsWith("//")) return url;
+    try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.pathname : null; } catch { return null; }
+  };
+  const keep = (url: string): string | null => {
+    const path = pathOf(url);
+    if (!path) return null;
+    const bare = path.replace(/\/+$/, "") || "/";
+    return ok.has(bare) ? bare : null;
+  };
+  let out = reply.replace(/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g, (_m, text: string, url: string) => {
+    const path = keep(url);
+    return path ? `[${text}](${path})` : text;
+  });
+  out = out.replace(/https?:\/\/[^\s<>()\[\]"']+/g, (url: string) => {
+    const trail = /[.,;:!?]+$/.exec(url)?.[0] ?? "";
+    return (keep(url.slice(0, url.length - trail.length)) ?? "") + trail;
+  });
+  // "ดูได้ที่ลิงก์นี้: " with its link removed.
+  return out.replace(/(ที่ลิงก์นี้|ลิงก์นี้|ที่ลิงก์)\s*:?\s*(?=$|\n)/g, "ที่หน้าเว็บไซต์").replace(/[ \t]{2,}/g, " ").trim();
+}

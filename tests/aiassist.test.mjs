@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { expectStatus, login, request } from './helpers.mjs';
+import { siteLinksOnly } from '../backend/src/utils/chatbotKnowledge.ts';
 
 // Local Workers have no AI binding: every assistant must answer through its deterministic mock path.
 
@@ -347,4 +348,19 @@ test('public chatbot is rate limited per IP', async () => {
   }
   assert.ok(statuses.includes(429), JSON.stringify(statuses));
   await setAi({ chatbot_per_ip: 20 });
+});
+
+// Local Workers have no AI, so the link filter applied to model replies is checked directly.
+test('chatbot keeps only links to the site pages it was given', () => {
+  const allowed = ['/', '/courses', '/schedule', '/blog/ccna-plan'];
+  // A made-up host on a real page becomes the page path.
+  assert.equal(siteLinksOnly('ดูได้ที่ลิงก์นี้: https://netprime-backend-staging.example.workers.net/schedule', allowed), 'ดูได้ที่ลิงก์นี้: /schedule');
+  assert.equal(siteLinksOnly('ดูได้ที่ https://netprimetrainingcenter.com/courses.', allowed), 'ดูได้ที่ /courses.');
+  // A page that was not given is removed; a Markdown link keeps its text.
+  assert.equal(siteLinksOnly('อ่าน [บทความ](https://evil.example/phish) หรือ [ตาราง](/schedule) และ [บล็อก](/blog/ccna-plan/)', allowed),
+    'อ่าน บทความ หรือ [ตาราง](/schedule) และ [บล็อก](/blog/ccna-plan)');
+  assert.equal(siteLinksOnly('ดูที่ลิงก์นี้: https://x.example/abc', allowed), 'ดูที่หน้าเว็บไซต์');
+  assert.equal(siteLinksOnly('[สมัคร](javascript:alert(1))', allowed), 'สมัคร');
+  // Relative links that were given stay as they are.
+  assert.equal(siteLinksOnly('ราคา ฿4,900 ดูที่ /courses', allowed), 'ราคา ฿4,900 ดูที่ /courses');
 });
