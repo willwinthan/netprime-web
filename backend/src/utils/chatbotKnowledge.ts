@@ -379,7 +379,9 @@ export function siteLinksOnly(reply: string, allowed: Iterable<string>): string 
     const bare = path.replace(/\/+$/, "") || "/";
     return ok.has(bare) ? bare : null;
   };
-  let out = reply.replace(/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g, (_m, text: string, url: string) => {
+  // Autolinks "<https://…/schedule>" lose their angle brackets: the widget would show them as text around the path.
+  let out = reply.replace(/<((?:https?:\/\/|\/)[^\s<>]+)>/g, (_m, url: string) => keep(url) ?? "");
+  out = out.replace(/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g, (_m, text: string, url: string) => {
     const path = keep(url);
     return path ? `[${text}](${path})` : text;
   });
