@@ -392,3 +392,20 @@ export function siteLinksOnly(reply: string, allowed: Iterable<string>): string 
   // "ดูได้ที่ลิงก์นี้: " with its link removed.
   return out.replace(/(ที่ลิงก์นี้|ลิงก์นี้|ที่ลิงก์)\s*:?\s*(?=$|\n)/g, "ที่หน้าเว็บไซต์").replace(/[ \t]{2,}/g, " ").trim();
 }
+
+/**
+ * Removes citation markers such as "[1]" that the model copies from numbered sources. "ลิงก์ [1]" becomes the link of
+ * source 1 (`urls[0]`), since the reader would otherwise be left with no link; elsewhere the marker is dropped.
+ * Markdown links ("[1](/schedule)") are left to siteLinksOnly.
+ */
+export function dropCitations(reply: string, urls: string[]): string {
+  return reply
+    .replace(/(ลิงก์(?:นี้)?\s*:?\s*)((?:\[\d{1,2}\]\s*)+)(?!\()/g, (_m, lead: string, marks: string) => {
+      const links = [...new Set([...marks.matchAll(/\d{1,2}/g)].map(m => urls[Number(m[0]) - 1]).filter(Boolean))];
+      return links.length ? `${lead}${links.join(" ")} ` : lead;
+    })
+    .replace(/\s*\[\d{1,2}\](?!\()/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +([.,])/g, "$1")
+    .trim();
+}
