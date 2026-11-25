@@ -8,7 +8,7 @@ import {
   chatbotAnswersToday, extractJson, loadAiSettings, logUsage, normalizeAiSettings, runAi, saveAiSettings, sentencesOf, sha256Hex,
   stripHtml, tableColumns, usedToday
 } from "../utils/aiclient";
-import { CHATBOT_KNOWLEDGE, DIRECT_ANSWER_SCORE, KnowledgeEntry, RELATED_SCORE, directAnswer, fillAnswer, matchKnowledge, siteLinksOnly } from "../utils/chatbotKnowledge";
+import { CHATBOT_KNOWLEDGE, DIRECT_ANSWER_SCORE, KnowledgeEntry, RELATED_SCORE, directAnswer, fillAnswer, dropCitations, matchKnowledge, siteLinksOnly } from "../utils/chatbotKnowledge";
 import { loadHome, loadSettings } from "./site";
 
 export const aiRouter = new Hono<Env>();
@@ -819,7 +819,8 @@ aiRouter.post("/ai/public/chat", async (c) => {
     return c.json({ reply: REFUSAL, sources: [], refused: true, handoff: false, mock: !c.env.AI, suggestions: STARTER_QUESTIONS });
   }
 
-  const context = sources.map((d, i) => `[${i + 1}] ${d.title}\nประเภท: ${d.type}\n${d.facts}\n${d.text}\nลิงก์: ${d.url}`).join("\n\n");
+  // Items are not numbered: numbered items led the model to cite "[1]" in its reply.
+  const context = sources.map(d => `รายการ: ${d.title}\nประเภท: ${d.type}\n${d.facts}\n${d.text}\nลิงก์: ${d.url}`).join("\n\n");
   const history = (Array.isArray(body?.history) ? body!.history : []).slice(-6).map(h => ({
     role: h?.role === "assistant" ? "assistant" as const : "user" as const, content: cleanText(h?.text, 500)
   })).filter(h => h.content);
@@ -832,7 +833,7 @@ aiRouter.post("/ai/public/chat", async (c) => {
   ], 700);
   // Only links to this site's pages that the context gave the model; a made-up host or page is dropped.
   const siteLinks = ["/", "/courses", "/schedule", ...sources.map(d => d.url)];
-  const reply = (result ? siteLinksOnly(result.text.slice(0, 3000), siteLinks) : "") || mockChatReply(sources, handoff);
+  const reply = (result ? siteLinksOnly(dropCitations(result.text.slice(0, 3000), sources.map(d => d.url)), siteLinks) : "") || mockChatReply(sources, handoff);
   const mock = !result;
   await logUsage(c.env.DB, { feature: "chatbot", userId: null, inputChars: message.length, outputChars: reply.length, tokens: result?.tokens, mock });
   return c.json({ reply, sources: citations, refused: false, handoff: handoff || !sources.length, mock,

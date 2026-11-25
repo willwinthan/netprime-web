@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { expectStatus, login, request } from './helpers.mjs';
-import { siteLinksOnly } from '../backend/src/utils/chatbotKnowledge.ts';
+import { dropCitations, siteLinksOnly } from '../backend/src/utils/chatbotKnowledge.ts';
 
 // Local Workers have no AI binding: every assistant must answer through its deterministic mock path.
 
@@ -367,4 +367,15 @@ test('chatbot keeps only links to the site pages it was given', () => {
   assert.equal(siteLinksOnly('ดูที่ลิงก์นี้: <https://x.example/abc>', allowed), 'ดูที่หน้าเว็บไซต์');
   // Relative links that were given stay as they are.
   assert.equal(siteLinksOnly('ราคา ฿4,900 ดูที่ /courses', allowed), 'ราคา ฿4,900 ดูที่ /courses');
+});
+
+test('chatbot drops citation markers copied from its sources', () => {
+  const urls = ['/schedule', '/courses'];
+  // "ลิงก์ [1]" (seen on staging) points to source 1's page instead of a bare marker.
+  assert.equal(dropCitations('สมัครได้โดยคลิกที่ลิงก์ [1] ซึ่งจะนำไปยังหน้าสมัคร', urls), 'สมัครได้โดยคลิกที่ลิงก์ /schedule ซึ่งจะนำไปยังหน้าสมัคร');
+  assert.equal(dropCitations('ดูได้ที่ลิงก์ [1][2]', urls), 'ดูได้ที่ลิงก์ /schedule /courses');
+  // Anywhere else the marker is removed.
+  assert.equal(dropCitations('ราคา ฿4,900 [2]. และรอบอบรม [1][2]', urls), 'ราคา ฿4,900. และรอบอบรม');
+  // Markdown links are not citation markers.
+  assert.equal(dropCitations('ดู [ตาราง](/schedule)', urls), 'ดู [ตาราง](/schedule)');
 });
