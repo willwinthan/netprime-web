@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VLAN: แบ่งเครือข่ายบนสวิตช์ | NetPrime Self-learning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!--
+  บทเรียน NetPrime Self-learning: VLAN (Lesson Kit v1)
+  คู่มือ: docs/SELF-LEARNING-LESSON-KIT.md ใน repo
+  ตรรกะการส่งเฟรม (ENGINE) เป็นฟังก์ชันล้วน ทดสอบได้ด้วย scripts/self-learning/vlan.test.mjs
+-->
+<style>
+  :root {
+    --np-primary: #c2541a;
+    --np-primary-dark: #973f13;
+    --np-primary-tint: #f9eee8;
+    --np-accent: #d48760;
+    --np-secondary: #182443;
+    --np-radius: 14px;
+    --np-font: 'Anuphan', system-ui, sans-serif;
+    --ink: var(--np-secondary);
+    --muted: #5a6478;
+    --line: #e6e1dc;
+    --bg: #fdfcfb;
+    --surface: #ffffff;
+    --ok: #1f6b45;
+    --ok-bg: #e3f4ea;
+    --bad: #b42318;
+    --bad-bg: #fdecea;
+    /* สีประจำ VLAN ใช้คู่กับตัวเลขเสมอ ไม่ใช้สีอย่างเดียว */
+    --v1: #6b7280;
+    --v10: #1d63c9;
+    --v20: #a3368a;
+    --v99: #8a6100;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--np-font); font-size: 16px; line-height: 1.7; }
+  .lesson { max-width: 960px; margin: 0 auto; padding: 24px 16px 96px; display: grid; gap: 18px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .kicker { margin: 0; color: var(--np-primary); font-weight: 600; font-size: 14px; }
+  h1 { margin: 0; font-size: 28px; line-height: 1.35; }
+  h2 { margin: 0 0 8px; font-size: 22px; line-height: 1.4; }
+  h3 { margin: 18px 0 6px; font-size: 17px; }
+  p { margin: 0 0 10px; }
+  .meter { display: grid; gap: 4px; min-width: 190px; font-size: 14px; color: var(--muted); }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .bar > span { display: block; height: 100%; width: 0; background: var(--np-primary); transition: width .3s ease; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; padding: 0; margin: 0; list-style: none; }
+  .steps button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer; min-height: 36px; }
+  .steps button[aria-current="step"] { border-color: var(--np-primary); background: var(--np-primary-tint); color: var(--np-primary-dark); font-weight: 600; }
+  .steps button.seen::after { content: " ✓"; color: var(--np-primary); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--np-radius); padding: 22px; display: grid; gap: 6px; }
+  .card :is(ul, ol) { margin: 0 0 10px; padding-left: 22px; }
+  .card li { margin: 2px 0; }
+  .lead { color: var(--muted); }
+  .nav { display: flex; justify-content: space-between; gap: 8px; }
+  .btn { font: inherit; font-weight: 600; border-radius: calc(var(--np-radius) - 4px); padding: 10px 18px; cursor: pointer; border: 1px solid var(--np-primary); min-height: 44px; }
+  .btn-primary { background: var(--np-primary); color: #fff; }
+  .btn-primary:hover { background: var(--np-primary-dark); }
+  .btn-ghost { background: transparent; color: var(--np-primary); }
+  .btn-small { padding: 6px 14px; min-height: 38px; font-size: 15px; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .scene { border: 1px solid var(--line); border-radius: calc(var(--np-radius) - 4px); background: var(--bg); padding: 8px; margin-top: 6px; }
+  .scene svg { display: block; width: 100%; height: auto; }
+  .log { min-height: 1.7em; margin: 8px 4px 0; font-size: 15px; }
+  .log b { font-weight: 600; }
+  .callout { border-left: 4px solid var(--np-accent); background: var(--np-primary-tint); padding: 10px 14px; border-radius: 6px; margin: 6px 0 10px; }
+  .chip { display: inline-block; border-radius: 999px; padding: 0 9px; font-size: 13px; font-weight: 600; color: #fff; line-height: 1.7; white-space: nowrap; }
+  .v1 { background: var(--v1); } .v10 { background: var(--v10); } .v20 { background: var(--v20); } .v99 { background: var(--v99); }
+  /* แผนภาพ */
+  .link { stroke: #9aa3b2; stroke-width: 3; fill: none; }
+  .link.trunk { stroke: var(--ink); stroke-width: 6; }
+  .link.trunk-inner { stroke: var(--surface); stroke-width: 2; stroke-dasharray: 6 5; }
+  .node-box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+  .sw-box { fill: var(--ink); }
+  .sw-text { fill: #fff; font-size: 15px; font-weight: 600; }
+  .lbl { fill: var(--ink); font-size: 13px; }
+  .lbl-muted { fill: var(--muted); font-size: 12px; }
+  .lbl-strong { fill: var(--ink); font-size: 15px; font-weight: 600; }
+  .badge-ok { fill: var(--ok-bg); stroke: var(--ok); }
+  .badge-ok-text { fill: var(--ok); font-size: 12px; font-weight: 700; }
+  .badge-no { fill: var(--bad-bg); stroke: var(--bad); }
+  .badge-no-text { fill: var(--bad); font-size: 12px; font-weight: 700; }
+  .frame-dot { stroke: #fff; stroke-width: 2; }
+  .tag-box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+  .tag-text { fill: var(--ink); font-size: 12px; font-weight: 700; }
+  /* ตัวแกะแท็ก */
+  .frame { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0; font-size: 13px; }
+  .frame > div { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; text-align: center; background: var(--surface); }
+  .frame > div small { display: block; color: var(--muted); font-size: 12px; }
+  .frame > .hot { border: 2px solid var(--np-primary); background: var(--np-primary-tint); }
+  .bytes { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 22px; font-weight: 600; letter-spacing: .06em; }
+  .bits { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-align: center; margin: 6px 0; }
+  .bits span { border: 1px solid var(--line); border-radius: 4px; padding: 3px 0; background: var(--surface); }
+  .bits .pcp { background: #f3e8d6; } .bits .dei { background: #e7e3f6; } .bits .vid { background: #dceafb; }
+  .bitkey { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .bitkey i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+  label.field { display: inline-flex; gap: 6px; align-items: center; font-size: 15px; }
+  input[type="number"], select { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface); color: var(--ink); min-height: 38px; }
+  input[type="number"] { width: 6.5em; }
+  .err { color: var(--bad); font-size: 14px; }
+  /* ตาราง */
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  td.changed { background: var(--np-primary-tint); font-weight: 600; }
+  tr.active td { background: #eef3fb; }
+  /* แล็บ */
+  .lab { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin-top: 8px; }
+  .panel { border: 1px solid var(--line); border-radius: calc(var(--np-radius) - 4px); padding: 12px 14px; background: var(--surface); }
+  .panel h3 { margin-top: 0; }
+  .cfg { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; font-size: 15px; }
+  .checks { display: flex; gap: 12px; flex-wrap: wrap; }
+  .checks label { display: inline-flex; gap: 4px; align-items: center; min-height: 32px; }
+  .goals { list-style: none; padding: 0 !important; margin: 0; display: grid; gap: 6px; }
+  .goals li { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  .goals li.met { border-color: var(--ok); background: var(--ok-bg); }
+  .goals li::before { content: "☐ "; }
+  .goals li.met::before { content: "☑ "; color: var(--ok); }
+  pre { margin: 6px 0 12px; padding: 12px 14px; background: #1c2333; color: #e9edf5; border-radius: 10px; overflow-x: auto; font-size: 14px; line-height: 1.6; }
+  pre .c { color: #9fb3c8; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+  :not(pre) > code { background: var(--np-primary-tint); padding: 1px 5px; border-radius: 4px; }
+  /* แบบฝึกหัด */
+  .q { border: 1px solid var(--line); border-radius: calc(var(--np-radius) - 4px); padding: 14px; margin-bottom: 12px; }
+  .q p.qt { font-weight: 600; }
+  .opts { display: grid; gap: 8px; }
+  .opts button { text-align: left; font: inherit; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 10px 14px; cursor: pointer; min-height: 44px; }
+  .opts button.right { border-color: var(--ok); background: var(--ok-bg); }
+  .opts button.wrong { border-color: var(--bad); background: var(--bad-bg); }
+  .opts button.right::after { content: "  ✓ ถูก"; color: var(--ok); font-weight: 600; }
+  .opts button.wrong::after { content: "  ✗ ยังไม่ใช่"; color: var(--bad); font-weight: 600; }
+  .why { margin-top: 8px; color: var(--muted); font-size: 15px; }
+  .done { color: var(--ok); font-weight: 600; }
+  :focus-visible { outline: 2px solid var(--np-primary); outline-offset: 2px; }
+  @media (max-width: 720px) { .lab { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { h1 { font-size: 23px; } h2 { font-size: 20px; } .card { padding: 16px; } .bytes { font-size: 18px; } .bits { font-size: 11px; } }
+  @media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }
+</style>
+</head>
+<body>
+<main class="lesson">
+  <header class="top">
+    <div>
+      <p class="kicker">NetPrime Self-learning · Switching</p>
+      <h1>VLAN: แบ่งเครือข่ายบนสวิตช์</h1>
+    </div>
+    <div class="meter" aria-live="polite">
+      <span id="progressText">เรียนไปแล้ว 0%</span>
+      <div class="bar"><span id="progressBar"></span></div>
+    </div>
+  </header>
+  <ol class="steps" id="stepList" aria-label="ขั้นตอนในบทเรียน"></ol>
+  <section class="card" id="stepCard"></section>
+  <div class="nav">
+    <button type="button" class="btn btn-ghost" id="prevBtn">ก่อนหน้า</button>
+    <button type="button" class="btn btn-primary" id="nextBtn">ถัดไป</button>
+  </div>
+</main>
+
+<!-- ========== NetPrime Lesson Kit v1: ห้ามแก้บล็อกนี้ ========== -->
+<script>
+(function () {
+  var P = 'netprime-lesson:';
+  var embedded = window.parent !== window;
+  var themeHandlers = [], restoreHandlers = [], lastRestore = null, timer = 0;
+  function send(type, data) {
+    if (!embedded) return;
+    var message = data || {};
+    message.type = P + type;
+    try { window.parent.postMessage(message, '*'); } catch (e) { /* ไม่มีหน้าแม่ */ }
+  }
+  function applyTheme(theme) {
+    if (!theme || !theme.vars) return;
+    var root = document.documentElement;
+    for (var name in theme.vars) {
+      if (/^--np-[a-z-]+$/.test(name) && typeof theme.vars[name] === 'string') root.style.setProperty(name, theme.vars[name]);
+    }
+    if (typeof theme.fontHref === 'string' && /^https:\/\/fonts\.googleapis\.com\//.test(theme.fontHref) && !document.querySelector('link[data-np-font]')) {
+      var link = document.createElement('link');
+      link.rel = 'stylesheet'; link.href = theme.fontHref; link.setAttribute('data-np-font', '');
+      document.head.appendChild(link);
+    }
+  }
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent || !e.data || typeof e.data.type !== 'string' || e.data.type.indexOf(P) !== 0) return;
+    var type = e.data.type.slice(P.length);
+    if (type === 'theme') { applyTheme(e.data.theme); themeHandlers.forEach(function (fn) { fn(e.data.theme); }); }
+    if (type === 'parent' && typeof e.data.url === 'string' && /^https?:\/\//.test(e.data.url)) kit.shareUrl = e.data.url;
+    if (type === 'restore') { lastRestore = e.data; restoreHandlers.forEach(function (fn) { fn(e.data.state, e.data); }); }
+  });
+  var kit = {
+    /** true เมื่อเปิดอยู่ในเว็บ NetPrime, false เมื่อเปิดไฟล์ตรง ๆ */
+    embedded: embedded,
+    /** ลิงก์หน้าบทเรียนบนเว็บ ใช้กับปุ่มแชร์ (null จนกว่าเว็บจะส่งมา) */
+    shareUrl: null,
+    /** เรียกเมื่อเว็บส่งธีม (ตัวแปร --np-* ถูกตั้งให้แล้ว) */
+    onTheme: function (fn) { themeHandlers.push(fn); },
+    /** เรียกเมื่อเว็บส่งความคืบหน้าที่บันทึกไว้ของผู้เรียนที่ login อาจถูกเรียกซ้ำได้ ต้องรวมค่าแบบเรียกกี่ครั้งก็ได้ผลเท่าเดิม */
+    onRestore: function (fn) { restoreHandlers.push(fn); if (lastRestore) fn(lastRestore.state, lastRestore); },
+    /** บันทึกความคืบหน้า: percent 0-100, completed true เมื่อเรียนครบ, state เป็น JSON อะไรก็ได้ไม่เกิน 64 KB */
+    saveProgress: function (progress) {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        send('progress', {
+          percent: Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0))),
+          completed: progress.completed === true,
+          state: progress.state === undefined ? null : progress.state
+        });
+      }, 800);
+    },
+    /** ให้แถบที่อยู่ของเว็บจำตำแหน่ง เช่น 'step-2' (a-z, 0-9, ขีดกลาง) */
+    setLocation: function (hash) { send('location', { hash: hash }); },
+    /** ส่งความสูงของเนื้อหาให้กรอบบนเว็บ (เรียกเองอัตโนมัติเมื่อขนาดเปลี่ยน) */
+    resize: function () { send('height', { height: Math.ceil(document.body.scrollHeight) }); }
+  };
+  window.NetPrimeLesson = kit;
+  if ('ResizeObserver' in window) new ResizeObserver(function () { kit.resize(); }).observe(document.body);
+  window.addEventListener('load', function () { kit.resize(); send('ready'); });
+})();
+</script>
+<!-- ========== จบ Lesson Kit ========== -->
+
+<script>
+/* ENGINE START: ตรรกะการส่งเฟรม เป็นฟังก์ชันล้วน ไม่แตะหน้าเว็บ */
+const PCS = {
+  A: { sw: 'SW1', port: 'Fa0/1', mac: '0050.7966.000a', ip: '192.168.10.11', dept: 'ฝ่ายขาย' },
+  B: { sw: 'SW1', port: 'Fa0/2', mac: '0050.7966.000b', ip: '192.168.20.12', dept: 'ฝ่ายบุคคล' },
+  C: { sw: 'SW2', port: 'Fa0/1', mac: '0050.7966.000c', ip: '192.168.10.13', dept: 'ฝ่ายขาย' },
+  D: { sw: 'SW2', port: 'Fa0/2', mac: '0050.7966.000d', ip: '192.168.20.14', dept: 'ฝ่ายบุคคล' }
+};
+const ROUTER = { mac: '00a0.c9aa.0001', gw: { 10: '192.168.10.1', 20: '192.168.20.1' } };
+
+/** เฟรมจาก VLAN `vlan` ออกจากสวิตช์ `fromSw` ข้ามลิงก์ระหว่างสวิตช์ได้ไหม ติดแท็กอะไร และไปตกที่ VLAN ไหนอีกฝั่ง */
+function crossLink(link, vlan, fromSw) {
+  if (link.mode === 'access') {
+    return vlan === link.access ? { crosses: true, tag: null, arrivesIn: link.access } : { crosses: false };
+  }
+  const allowed = link.allowed || [];
+  if (!allowed.includes(vlan)) return { crosses: false };
+  const myNative = fromSw === 'SW1' ? link.native1 : link.native2;
+  const otherNative = fromSw === 'SW1' ? link.native2 : link.native1;
+  const tag = vlan === myNative ? null : vlan;
+  const arrivesIn = tag === null ? otherNative : tag;
+  if (!allowed.includes(arrivesIn)) return { crosses: false };
+  return { crosses: true, tag, arrivesIn };
+}
+
+/** PC `src` ส่ง broadcast: ใครได้รับ และเฟรมวิ่งผ่านลิงก์ไหนบ้าง (stage เดียวกันวิ่งพร้อมกัน) */
+function broadcast(cfg, src) {
+  const vlan = cfg.ports[src];
+  const sw = PCS[src].sw;
+  const other = sw === 'SW1' ? 'SW2' : 'SW1';
+  const hops = [{ stage: 0, from: src, to: sw, tag: null, vlan }];
+  const receivers = [];
+  for (const p of Object.keys(PCS)) {
+    if (p !== src && PCS[p].sw === sw && cfg.ports[p] === vlan) {
+      receivers.push(p);
+      hops.push({ stage: 1, from: sw, to: p, tag: null, vlan });
+    }
+  }
+  const x = crossLink(cfg.link, vlan, sw);
+  if (x.crosses) {
+    hops.push({ stage: 1, from: sw, to: other, tag: x.tag, vlan, trunk: cfg.link.mode === 'trunk' });
+    for (const p of Object.keys(PCS)) {
+      if (PCS[p].sw === other && cfg.ports[p] === x.arrivesIn) {
+        receivers.push(p);
+        hops.push({ stage: 2, from: other, to: p, tag: null, vlan: x.arrivesIn });
+      }
+    }
+  }
+  receivers.sort();
+  return { vlan, receivers, hops, crossed: !!x.crosses, arrivesIn: x.crosses ? x.arrivesIn : null, trunkTag: x.crosses ? x.tag : null };
+}
+
+/** แท็ก 802.1Q 4 ไบต์: TPID 0x8100 ตามด้วย PCP (3 บิต), DEI (1 บิต), VID (12 บิต) */
+function dot1qTag(vid, pcp = 0, dei = 0) {
+  if (!Number.isInteger(vid) || vid < 1 || vid > 4094) throw new RangeError('VLAN ID ต้องอยู่ระหว่าง 1 ถึง 4094');
+  if (!Number.isInteger(pcp) || pcp < 0 || pcp > 7) throw new RangeError('PCP ต้องอยู่ระหว่าง 0 ถึง 7');
+  if (dei !== 0 && dei !== 1) throw new RangeError('DEI ต้องเป็น 0 หรือ 1');
+  return [0x81, 0x00, (pcp << 5) | (dei << 4) | (vid >> 8), vid & 0xff];
+}
+
+/** PC A (VLAN 10) ส่งหา PC B (VLAN 20) ผ่านเราเตอร์แบบ router-on-a-stick ที่ต่อ trunk กับ SW1 */
+function routeAtoB() {
+  const a = PCS.A, b = PCS.B;
+  const ip = { srcIp: a.ip, dstIp: b.ip };
+  return [
+    { stage: 0, from: 'A', to: 'SW1', link: 'PC A → SW1 (access VLAN 10)', tag: null, vlan: 10, srcMac: a.mac, dstMac: ROUTER.mac, ...ip },
+    { stage: 1, from: 'SW1', to: 'R1', link: 'SW1 → R1 (trunk)', tag: 10, vlan: 10, trunk: true, srcMac: a.mac, dstMac: ROUTER.mac, ...ip },
+    { stage: 2, from: 'R1', to: 'SW1', link: 'R1 → SW1 (trunk)', tag: 20, vlan: 20, trunk: true, srcMac: ROUTER.mac, dstMac: b.mac, ...ip },
+    { stage: 3, from: 'SW1', to: 'B', link: 'SW1 → PC B (access VLAN 20)', tag: null, vlan: 20, srcMac: ROUTER.mac, dstMac: b.mac, ...ip }
+  ];
+}
+
+/** เป้าหมายของแล็บ: A ถึง C เท่านั้น และ B ถึง D เท่านั้น */
+function labGoals(cfg) {
+  const a = broadcast(cfg, 'A').receivers.join();
+  const b = broadcast(cfg, 'B').receivers.join();
+  return { aToC: a === 'C', bToD: b === 'D' };
+}
+
+const FLAT = { ports: { A: 1, B: 1, C: 1, D: 1 }, link: { mode: 'access', access: 1, allowed: [1], native1: 1, native2: 1 } };
+const SPLIT = { ports: { A: 10, B: 20, C: 10, D: 20 }, link: { mode: 'trunk', access: 1, allowed: [1, 10, 20], native1: 1, native2: 1 } };
+const NATIVE_BAD = { ports: { A: 10, B: 20, C: 10, D: 20 }, link: { mode: 'trunk', access: 1, allowed: [1, 10, 20], native1: 10, native2: 20 } };
+/* ENGINE END */
+</script>
+
+<script>
+/* ---------- แผนภาพและภาพเคลื่อนไหว ---------- */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const POS = { A: [85, 92], B: [85, 290], C: [575, 92], D: [575, 290], SW1: [222, 190], SW2: [438, 190], R1: [222, 48] };
+const vcol = v => `var(--v${[1, 10, 20, 99].includes(v) ? v : 1})`;
+const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let animToken = 0;
+/* requestAnimationFrame หยุดเมื่อแท็บถูกซ่อน ใช้ตัวจับเวลาแทนเพื่อให้ภาพเคลื่อนไหวจบเสมอ */
+const tick = fn => document.hidden ? setTimeout(() => fn(performance.now()), 40) : requestAnimationFrame(fn);
+
+function el(name, attrs, text) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+/** วาดผัง: PC สี่เครื่อง สวิตช์สองตัว และเราเตอร์ (ถ้า opts.router) */
+function drawTopo(svg, cfg, opts = {}) {
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', '0 0 660 350');
+  const links = el('g'), nodes = el('g'), labels = el('g');
+  svg.append(links, nodes, labels);
+  const line = (a, b, trunk) => {
+    const [x1, y1] = POS[a], [x2, y2] = POS[b];
+    links.append(el('line', { x1, y1, x2, y2, class: trunk ? 'link trunk' : 'link' }));
+    if (trunk) links.append(el('line', { x1, y1, x2, y2, class: 'link trunk-inner' }));
+  };
+  for (const p of Object.keys(PCS)) line(p, PCS[p].sw, false);
+  line('SW1', 'SW2', cfg.link.mode === 'trunk');
+  if (opts.router) line('SW1', 'R1', true);
+
+  // ป้ายบนลิงก์ระหว่างสวิตช์
+  const lk = cfg.link;
+  const linkText = lk.mode === 'trunk' ? `trunk · VLAN ${lk.allowed.join(',') || '-'}` : `access · VLAN ${lk.access}`;
+  labels.append(el('text', { x: 330, y: 156, 'text-anchor': 'middle', class: 'lbl-strong' }, linkText));
+  labels.append(el('text', { x: 330, y: 210, 'text-anchor': 'middle', class: 'lbl-muted' }, 'Gi0/1 ↔ Gi0/1'));
+  if (opts.showNative && lk.mode === 'trunk') {
+    labels.append(el('text', { x: 222, y: 236, 'text-anchor': 'middle', class: 'lbl' }, `native ${lk.native1}`));
+    labels.append(el('text', { x: 438, y: 236, 'text-anchor': 'middle', class: 'lbl' }, `native ${lk.native2}`));
+  }
+  if (opts.router) labels.append(el('text', { x: 232, y: 122, class: 'lbl-muted' }, 'Gi0/2 trunk · VLAN 10,20'));
+
+  // สวิตช์และเราเตอร์
+  const box = (id, label, sub) => {
+    const [x, y] = POS[id];
+    const g = el('g');
+    g.append(el('rect', { x: x - 58, y: y - 22, width: 116, height: 44, rx: 8, class: 'sw-box' }));
+    g.append(el('text', { x, y: y + 5, 'text-anchor': 'middle', class: 'sw-text' }, label));
+    if (sub) g.append(el('text', { x: x + 66, y: y + 5, class: 'lbl-muted' }, sub));
+    nodes.append(g);
+  };
+  box('SW1', 'SW1');
+  box('SW2', 'SW2');
+  if (opts.router) box('R1', 'R1 (เราเตอร์)', 'g0/0.10 · g0/0.20');
+
+  // PC พร้อมป้าย VLAN (ตัวเลขกำกับสีเสมอ)
+  for (const p of Object.keys(PCS)) {
+    const [x, y] = POS[p];
+    const v = cfg.ports[p];
+    const g = el('g');
+    g.append(el('rect', { x: x - 62, y: y - 26, width: 124, height: 52, rx: 10, class: 'node-box' }));
+    g.append(el('text', { x, y: y - 5, 'text-anchor': 'middle', class: 'lbl-strong' }, `PC ${p}`));
+    g.append(el('rect', { x: x - 38, y: y + 3, width: 76, height: 18, rx: 9, style: `fill:${vcol(v)}` }));
+    g.append(el('text', { x, y: y + 16, 'text-anchor': 'middle', style: 'fill:#fff;font-size:12px;font-weight:700' }, `VLAN ${v}`));
+    const [sx, sy] = POS[PCS[p].sw];
+    const px = x + (sx - x) * 0.62, py = y + (sy - y) * 0.62;
+    labels.append(el('text', { x: px + (x < sx ? -6 : 6), y: py + (y < sy ? -8 : 16), 'text-anchor': x < sx ? 'end' : 'start', class: 'lbl-muted' }, PCS[p].port));
+    nodes.append(g);
+  }
+  svg.setAttribute('aria-label', `ผังเครือข่าย: ${Object.keys(PCS).map(p => `PC ${p} อยู่ VLAN ${cfg.ports[p]} ที่ ${PCS[p].sw} พอร์ต ${PCS[p].port}`).join(', ')}; ลิงก์ระหว่างสวิตช์เป็น ${linkText}`);
+}
+
+/** ป้าย "ได้รับ" / "ไม่ได้รับ" เหนือ PC */
+function markResults(svg, src, receivers, only) {
+  const g = el('g');
+  for (const p of Object.keys(PCS)) {
+    if (p === src || (only && !only.includes(p))) continue;
+    const [x, y] = POS[p];
+    const ok = receivers.includes(p);
+    const yy = y < 190 ? y - 50 : y + 29;
+    g.append(el('rect', { x: x - 38, y: yy, width: 76, height: 20, rx: 10, class: ok ? 'badge-ok' : 'badge-no' }));
+    g.append(el('text', { x, y: yy + 14, 'text-anchor': 'middle', class: ok ? 'badge-ok-text' : 'badge-no-text' }, ok ? 'ได้รับ' : 'ไม่ได้รับ'));
+  }
+  svg.append(g);
+}
+
+/** เล่นภาพเฟรมวิ่งตาม hops ทีละ stage แล้วเรียก done() */
+function animate(svg, hops, done) {
+  const token = ++animToken;
+  const stages = [...new Set(hops.map(h => h.stage))].sort((a, b) => a - b);
+  const layer = el('g');
+  svg.append(layer);
+  const dur = reduceMotion() ? 0 : 850;
+  let i = 0;
+  const runStage = () => {
+    if (token !== animToken) return;
+    if (i >= stages.length) { layer.remove(); done && done(); return; }
+    const items = hops.filter(h => h.stage === stages[i]).map(h => {
+      const g = el('g');
+      g.append(el('circle', { r: 9, class: 'frame-dot', style: `fill:${vcol(h.vlan)}` }));
+      if (h.trunk) {
+        const text = h.tag === null ? 'ไม่มีแท็ก' : `แท็ก VID ${h.tag}`;
+        const w = text.length * 7 + 14;
+        g.append(el('rect', { x: -w / 2, y: -34, width: w, height: 20, rx: 5, class: 'tag-box' }));
+        g.append(el('text', { x: 0, y: -20, 'text-anchor': 'middle', class: 'tag-text' }, text));
+      }
+      layer.append(g);
+      return { g, a: POS[h.from], b: POS[h.to] };
+    });
+    const t0 = performance.now();
+    const frame = now => {
+      if (token !== animToken) return;
+      const t = dur ? Math.min(1, (now - t0) / dur) : 1;
+      const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      for (const it of items) it.g.setAttribute('transform', `translate(${it.a[0] + (it.b[0] - it.a[0]) * e},${it.a[1] + (it.b[1] - it.a[1]) * e})`);
+      if (t < 1) tick(frame);
+      else { items.forEach(it => it.g.remove()); i++; setTimeout(runStage, dur ? 120 : 0); }
+    };
+    tick(frame);
+  };
+  runStage();
+}
+
+const names = list => list.length ? list.map(p => `PC ${p}`).join(', ') : 'ไม่มีใคร';
+const chip = v => `<span class="chip v${[1, 10, 20, 99].includes(v) ? v : 1}">VLAN ${v}</span>`;
+
+/** ฉากมาตรฐาน: ผัง + ปุ่มส่ง broadcast + บรรทัดผลลัพธ์ */
+function sceneHtml(id, buttons) {
+  return `<div class="scene"><svg id="${id}" role="img"></svg>
+    <div class="row">${buttons}</div>
+    <p class="log" id="${id}-log" aria-live="polite"></p></div>`;
+}
+function wireBroadcast(svgId, getCfg, explain, opts = {}) {
+  const svg = document.getElementById(svgId);
+  const log = document.getElementById(`${svgId}-log`);
+  drawTopo(svg, getCfg(), opts);
+  return src => {
+    const cfg = getCfg();
+    const r = broadcast(cfg, src);
+    drawTopo(svg, cfg, opts);
+    log.innerHTML = `PC ${src} ส่ง broadcast…`;
+    animate(svg, r.hops, () => {
+      markResults(svg, src, r.receivers);
+      log.innerHTML = explain(src, r, cfg);
+      kit.resize();
+    });
+  };
+}
+</script>
+
+<script>
+/* ---------- เนื้อหาบทเรียน ---------- */
+const kit = window.NetPrimeLesson;
+
+const STEPS = [
+  {
+    id: 'why', title: 'ทำไมต้องมี VLAN',
+    html: () => `<h2>ทำไมต้องมี VLAN</h2>
+      <p class="lead">สวิตช์ทั่วไปส่ง <strong>broadcast</strong> (เฟรมที่ส่งถึงทุกเครื่อง เช่น ARP หรือ DHCP Discover) ออกทุกพอร์ต เครื่องทุกเครื่องที่ต่อกับสวิตช์จึงอยู่ใน <strong>broadcast domain</strong> เดียวกัน</p>
+      <p>ในภาพนี้ ฝ่ายขาย (PC A, PC C) กับฝ่ายบุคคล (PC B, PC D) ต่อสวิตช์ชุดเดียวกัน ทุกพอร์ตอยู่ใน ${chip(1)} ซึ่งเป็นค่าเริ่มต้นของสวิตช์ ลองกดส่ง broadcast จาก PC A</p>
+      ${sceneHtml('sc-why', '<button type="button" class="btn btn-primary btn-small" data-src="A">ส่ง broadcast จาก PC A</button>')}
+      <div class="callout">ยิ่งเครือข่ายใหญ่ broadcast ยิ่งไปรบกวนทุกเครื่อง และทุกฝ่ายเห็นทราฟฟิกของกันและกัน ถ้าอยากแยกฝ่ายโดยไม่ใช้ VLAN ต้องซื้อสวิตช์แยกให้แต่ละฝ่ายและเดินสายใหม่</div>`,
+    mount: () => {
+      const run = wireBroadcast('sc-why', () => FLAT, (src, r) =>
+        `<b>ผลลัพธ์:</b> ${names(r.receivers)} ได้รับเฟรมจาก PC ${src} ทั้งหมด แม้จะอยู่คนละฝ่าย เพราะทุกพอร์ตอยู่ใน VLAN เดียวกัน`);
+      bindSrcButtons(run);
+    }
+  },
+  {
+    id: 'vlan', title: 'VLAN คืออะไร',
+    html: () => `<h2>VLAN คืออะไร</h2>
+      <p class="lead"><strong>VLAN (Virtual LAN)</strong> คือการแบ่งสวิตช์จริงหนึ่งตัวให้ทำงานเหมือนสวิตช์หลายตัว แต่ละ VLAN เป็น broadcast domain ของตัวเอง</p>
+      <ul>
+        <li>${chip(10)} ฝ่ายขาย ใช้ซับเน็ต <code>192.168.10.0/24</code></li>
+        <li>${chip(20)} ฝ่ายบุคคล ใช้ซับเน็ต <code>192.168.20.0/24</code></li>
+      </ul>
+      <p>โดยทั่วไป <strong>หนึ่ง VLAN = หนึ่งซับเน็ต IP</strong> ลองส่ง broadcast จาก PC A และ PC B แล้วดูว่าใครได้รับ</p>
+      ${sceneHtml('sc-vlan', '<button type="button" class="btn btn-primary btn-small" data-src="A">ส่งจาก PC A</button><button type="button" class="btn btn-ghost btn-small" data-src="B">ส่งจาก PC B</button>')}
+      <p>VLAN ID มีค่าได้ <strong>1 ถึง 4094</strong> สวิตช์ใหม่ทุกพอร์ตอยู่ใน VLAN 1</p>`,
+    mount: () => {
+      const run = wireBroadcast('sc-vlan', () => SPLIT, (src, r) => {
+        const others = Object.keys(PCS).filter(p => p !== src && !r.receivers.includes(p));
+        return `<b>ผลลัพธ์:</b> เฟรมอยู่ใน ${chip(r.vlan)} จึงถึงแค่ ${names(r.receivers)} ส่วน ${names(others)} อยู่คนละ VLAN ไม่ได้รับ`;
+      });
+      bindSrcButtons(run);
+    }
+  },
+  {
+    id: 'access', title: 'Access port',
+    html: () => `<h2>Access port: พอร์ตของ VLAN เดียว</h2>
+      <p class="lead">พอร์ตที่ต่อกับเครื่องปลายทาง (PC, ปริ้นเตอร์, IP camera) ตั้งเป็น <strong>access port</strong> หนึ่งพอร์ตอยู่ได้ <strong>VLAN เดียว</strong></p>
+      <ul>
+        <li>PC ไม่รู้เลยว่าตัวเองอยู่ VLAN ไหน เฟรมบนสายระหว่าง PC กับสวิตช์จึง<strong>ไม่มีแท็ก</strong></li>
+        <li>สวิตช์เป็นผู้จำว่าเฟรมที่เข้ามาทางพอร์ตนี้เป็นของ VLAN ไหน</li>
+        <li>สวิตช์เรียนรู้ MAC address แยกตาม VLAN และส่งเฟรมไปได้เฉพาะพอร์ตใน VLAN เดียวกัน</li>
+      </ul>
+      <div class="tablewrap"><table>
+        <thead><tr><th>สวิตช์</th><th>พอร์ต</th><th>โหมด</th><th>VLAN</th><th>ต่อกับ</th></tr></thead>
+        <tbody>${Object.keys(PCS).map(p => `<tr><td>${PCS[p].sw}</td><td class="mono">${PCS[p].port}</td><td>access</td><td>${chip(SPLIT.ports[p])}</td><td>PC ${p} (${PCS[p].dept})</td></tr>`).join('')}
+        <tr><td>SW1, SW2</td><td class="mono">Gi0/1</td><td>trunk</td><td>หลาย VLAN</td><td>สวิตช์อีกตัว (ดูขั้นถัดไป)</td></tr></tbody>
+      </table></div>
+      <div class="callout">ย้ายเครื่องไปอีกฝ่าย ไม่ต้องเดินสายใหม่ แค่เปลี่ยน VLAN ของพอร์ตนั้นในสวิตช์</div>`
+  },
+  {
+    id: 'trunk', title: 'Trunk และแท็ก 802.1Q',
+    html: () => `<h2>Trunk และแท็ก 802.1Q</h2>
+      <p class="lead">ลิงก์ระหว่างสวิตช์ต้องพาเฟรมได้หลาย VLAN บนสายเส้นเดียว เรียกว่า <strong>trunk</strong> สวิตช์จะ<strong>ใส่แท็ก 802.1Q</strong> ขนาด 4 ไบต์ในเฟรม เพื่อบอกอีกฝั่งว่าเฟรมนี้เป็นของ VLAN ไหน</p>
+      ${sceneHtml('sc-trunk', '<button type="button" class="btn btn-primary btn-small" data-src="A">ส่งจาก PC A</button><button type="button" class="btn btn-ghost btn-small" data-src="B">ส่งจาก PC B</button>')}
+      <p>SW2 อ่าน VID ในแท็ก แล้ว<strong>ถอดแท็กออก</strong>ก่อนส่งให้ PC ทาง access port PC จึงไม่เคยเห็นแท็กเลย</p>
+      <h3>แกะแท็กทีละบิต</h3>
+      <div class="row">
+        <label class="field">VLAN ID (VID) <input type="number" id="tagVid" min="1" max="4094" value="10"></label>
+        <label class="field">ลำดับความสำคัญ (PCP) <select id="tagPcp">${[0, 1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}">${n}</option>`).join('')}</select></label>
+      </div>
+      <p class="err" id="tagErr" role="alert"></p>
+      <div class="frame" aria-label="โครงสร้างเฟรม Ethernet ที่มีแท็ก">
+        <div>MAC ปลายทาง<small>6 ไบต์</small></div><div>MAC ต้นทาง<small>6 ไบต์</small></div>
+        <div class="hot">แท็ก 802.1Q<small>4 ไบต์</small></div><div>EtherType<small>2 ไบต์</small></div>
+        <div>ข้อมูล<small>46–1500 ไบต์</small></div><div>FCS<small>4 ไบต์</small></div>
+      </div>
+      <p>แท็กเป็นเลขฐานสิบหก: <span class="bytes" id="tagBytes"></span></p>
+      <div class="bits" id="tagBits" aria-label="16 บิตของ TCI"></div>
+      <div class="bitkey"><span><i style="background:#f3e8d6"></i>PCP 3 บิต (QoS)</span><span><i style="background:#e7e3f6"></i>DEI 1 บิต</span><span><i style="background:#dceafb"></i>VID 12 บิต</span></div>
+      <ul style="margin-top:10px">
+        <li><strong>TPID <code>0x8100</code></strong> 2 ไบต์แรก บอกว่าเฟรมนี้มีแท็ก 802.1Q</li>
+        <li><strong>VID 12 บิต</strong> มีได้ 4096 ค่า แต่ 0 และ 4095 สงวนไว้ จึงใช้ได้ 1–4094</li>
+        <li>ใส่แท็กแล้วเฟรมยาวสุดเพิ่มจาก 1518 เป็น 1522 ไบต์ และสวิตช์ต้องคำนวณ FCS ใหม่</li>
+      </ul>`,
+    mount: () => {
+      const run = wireBroadcast('sc-trunk', () => SPLIT, (src, r) =>
+        `<b>ผลลัพธ์:</b> บนสาย trunk เฟรมมี<strong>แท็ก VID ${r.trunkTag}</strong> SW2 ถอดแท็กแล้วส่งให้ ${names(r.receivers.filter(p => PCS[p].sw === 'SW2'))}`);
+      bindSrcButtons(run);
+      const draw = () => {
+        const vid = Number(document.getElementById('tagVid').value);
+        const pcp = Number(document.getElementById('tagPcp').value);
+        const err = document.getElementById('tagErr');
+        let bytes;
+        try { bytes = dot1qTag(vid, pcp, 0); err.textContent = ''; }
+        catch (e) { err.textContent = e.message; return; }
+        document.getElementById('tagBytes').textContent = bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+        const tci = (bytes[2] << 8) | bytes[3];
+        document.getElementById('tagBits').innerHTML = Array.from({ length: 16 }, (_, i) => {
+          const bit = (tci >> (15 - i)) & 1;
+          return `<span class="${i < 3 ? 'pcp' : i === 3 ? 'dei' : 'vid'}">${bit}</span>`;
+        }).join('');
+      };
+      document.getElementById('tagVid').addEventListener('input', draw);
+      document.getElementById('tagPcp').addEventListener('change', draw);
+      draw();
+    }
+  },
+  {
+    id: 'native', title: 'Native VLAN',
+    html: () => `<h2>Native VLAN: เฟรมที่ไม่มีแท็กบน trunk</h2>
+      <p class="lead">บน trunk มี VLAN หนึ่งที่ส่ง<strong>โดยไม่ใส่แท็ก</strong> เรียกว่า <strong>native VLAN</strong> ค่าเริ่มต้นคือ VLAN 1 อีกฝั่งรับเฟรมที่ไม่มีแท็กแล้วจัดเข้า native VLAN ของตัวเอง ทั้งสองฝั่งจึง<strong>ต้องตั้ง native VLAN ให้ตรงกัน</strong></p>
+      <div class="row"><button type="button" class="btn btn-ghost btn-small" id="nativeToggle" aria-pressed="false">จำลอง native VLAN ไม่ตรงกัน</button></div>
+      ${sceneHtml('sc-native', '<button type="button" class="btn btn-primary btn-small" data-src="A">ส่งจาก PC A</button>')}
+      <div class="callout"><strong>แนวทางที่ดี:</strong> ตั้ง native VLAN เป็น VLAN ที่ไม่มีเครื่องใช้งาน เช่น VLAN 99 ให้ตรงกันทั้งสองฝั่ง และไม่ใช้ VLAN 1 กับผู้ใช้ สวิตช์ Cisco จะเตือน <code>Native VLAN mismatch</code> ผ่าน CDP เมื่อสองฝั่งไม่ตรงกัน</div>`,
+    mount: () => {
+      let bad = false;
+      const opts = { showNative: true };
+      const run = wireBroadcast('sc-native', () => bad ? NATIVE_BAD : SPLIT, (src, r) => bad
+        ? `<b>ผลลัพธ์:</b> VLAN 10 เป็น native ของ SW1 เฟรมจึงออกไป<strong>ไม่มีแท็ก</strong> SW2 จัดเข้า native ของตัวเองคือ ${chip(r.arrivesIn)} ${names(r.receivers)} (${r.receivers.map(p => PCS[p].dept).join(', ') || '-'}) ได้รับเฟรมของฝ่ายขาย ทราฟฟิกรั่วข้าม VLAN`
+        : `<b>ผลลัพธ์:</b> native ตรงกันทั้งสองฝั่ง (VLAN 1) เฟรม VLAN 10 ออกไปพร้อม<strong>แท็ก VID ${r.trunkTag}</strong> ถึง ${names(r.receivers)} ตามปกติ`, opts);
+      bindSrcButtons(run);
+      const t = document.getElementById('nativeToggle');
+      t.onclick = () => {
+        bad = !bad;
+        t.setAttribute('aria-pressed', String(bad));
+        t.textContent = bad ? 'กลับเป็น native VLAN ตรงกัน' : 'จำลอง native VLAN ไม่ตรงกัน';
+        animToken++;
+        drawTopo(document.getElementById('sc-native'), bad ? NATIVE_BAD : SPLIT, opts);
+        document.getElementById('sc-native-log').textContent = bad ? 'ตอนนี้ SW1 ใช้ native VLAN 10 ส่วน SW2 ใช้ native VLAN 20 ลองส่งจาก PC A' : '';
+      };
+    }
+  },
+  {
+    id: 'routing', title: 'คุยข้าม VLAN',
+    html: () => `<h2>คุยข้าม VLAN (Inter-VLAN routing)</h2>
+      <p class="lead">แต่ละ VLAN เป็นคนละซับเน็ต สวิตช์ Layer 2 ส่งเฟรมข้าม VLAN ให้ไม่ได้ ต้องมีอุปกรณ์ <strong>Layer 3</strong> ช่วยเลือกเส้นทาง</p>
+      <ul>
+        <li><strong>Router-on-a-stick:</strong> เราเตอร์ต่อกับสวิตช์ด้วย trunk เส้นเดียว แล้วแบ่งเป็น sub-interface ตาม VLAN เช่น <code>g0/0.10</code> = <code>192.168.10.1</code></li>
+        <li><strong>Layer 3 switch:</strong> สร้าง SVI (<code>interface vlan 10</code>) ในสวิตช์เลย นิยมในองค์กรเพราะเร็วกว่าและไม่ต้องอ้อมไปเราเตอร์</li>
+      </ul>
+      <p>PC A ตั้ง default gateway เป็น <code>192.168.10.1</code> ลองส่งแพ็กเก็ตจาก PC A ไป PC B</p>
+      <div class="scene"><svg id="sc-route" role="img"></svg>
+        <div class="row"><button type="button" class="btn btn-primary btn-small" id="routePlay">ส่งจาก PC A ไป PC B</button></div>
+        <p class="log" id="sc-route-log" aria-live="polite"></p></div>
+      <div class="tablewrap"><table id="routeTable">
+        <thead><tr><th>ช่วง</th><th>แท็ก</th><th>MAC ต้นทาง</th><th>MAC ปลายทาง</th><th>IP ต้นทาง</th><th>IP ปลายทาง</th></tr></thead><tbody></tbody>
+      </table></div>
+      <p style="margin-top:10px">ช่องที่ไฮไลต์คือค่าที่เปลี่ยนจากช่วงก่อนหน้า: <strong>แท็กเปลี่ยนจาก 10 เป็น 20</strong> และ<strong>เราเตอร์เขียน MAC ใหม่</strong> ส่วน <strong>IP ต้นทางและปลายทางเหมือนเดิมตลอดทาง</strong></p>`,
+    mount: () => {
+      const svg = document.getElementById('sc-route');
+      const hops = routeAtoB();
+      const cols = ['tag', 'srcMac', 'dstMac', 'srcIp', 'dstIp'];
+      const body = document.querySelector('#routeTable tbody');
+      const fill = active => {
+        body.innerHTML = hops.map((h, i) => `<tr class="${i === active ? 'active' : ''}"><td>${h.link}</td>${cols.map(c => {
+          const val = c === 'tag' ? (h.tag === null ? 'ไม่มี' : `VID ${h.tag}`) : h[c];
+          const changed = i > 0 && h[c] !== hops[i - 1][c];
+          return `<td class="mono${changed ? ' changed' : ''}">${val}</td>`;
+        }).join('')}</tr>`).join('');
+      };
+      drawTopo(svg, SPLIT, { router: true });
+      fill(-1);
+      document.getElementById('routePlay').onclick = () => {
+        drawTopo(svg, SPLIT, { router: true });
+        const log = document.getElementById('sc-route-log');
+        log.textContent = 'PC A ส่งแพ็กเก็ตไปที่ default gateway…';
+        let step = 0;
+        const next = () => {
+          if (step >= hops.length) {
+            markResults(svg, 'A', ['B'], ['B']);
+            log.innerHTML = '<b>ผลลัพธ์:</b> PC B ได้รับแพ็กเก็ต โดยวิ่งผ่าน SW1 ขึ้นไปที่ R1 ทาง VLAN 10 และกลับลงมาทาง VLAN 20 บน trunk เส้นเดียวกัน';
+            return;
+          }
+          fill(step);
+          animate(svg, [hops[step]], () => { step++; next(); });
+        };
+        next();
+      };
+    }
+  },
+  {
+    id: 'lab', title: 'ลองตั้งค่าเอง',
+    html: () => `<h2>แล็บ: ตั้งค่า VLAN เอง</h2>
+      <p class="lead">ตอนนี้ทุกพอร์ตยังอยู่ VLAN 1 ตั้งค่าให้ผ่านเป้าหมายทั้งสองข้อ แล้วกดส่ง broadcast เพื่อตรวจผล</p>
+      <ul class="goals" id="goals">
+        <li id="g-aToC">broadcast จาก PC A ถึง <strong>PC C เท่านั้น</strong> (ฝ่ายขายอยู่คนละสวิตช์)</li>
+        <li id="g-bToD">broadcast จาก PC B ถึง <strong>PC D เท่านั้น</strong> (ฝ่ายบุคคล)</li>
+      </ul>
+      <div class="lab">
+        <div class="panel"><h3>พอร์ตของ PC (access)</h3><div class="cfg" id="labPorts"></div></div>
+        <div class="panel"><h3>ลิงก์ SW1 Gi0/1 ↔ SW2 Gi0/1</h3><div class="cfg" id="labLink"></div></div>
+      </div>
+      ${sceneHtml('sc-lab', '<button type="button" class="btn btn-primary btn-small" data-src="A">ส่งจาก PC A</button><button type="button" class="btn btn-ghost btn-small" data-src="B">ส่งจาก PC B</button><button type="button" class="btn btn-ghost btn-small" id="labReset">ตั้งค่าใหม่</button>')}
+      <p class="done" id="labDone" aria-live="polite"></p>`,
+    mount: () => {
+      const fresh = () => ({ ports: { A: 1, B: 1, C: 1, D: 1 }, link: { mode: 'access', access: 1, allowed: [1], native1: 1, native2: 1 } });
+      let cfg = fresh();
+      const vOpts = v => [1, 10, 20].map(n => `<option value="${n}"${n === v ? ' selected' : ''}>VLAN ${n}</option>`).join('');
+      const renderControls = () => {
+        document.getElementById('labPorts').innerHTML = Object.keys(PCS).map(p =>
+          `<label for="lp-${p}">PC ${p} <span class="lbl-muted">${PCS[p].sw} ${PCS[p].port}</span></label><select id="lp-${p}" data-pc="${p}">${vOpts(cfg.ports[p])}</select>`).join('');
+        const lk = cfg.link;
+        document.getElementById('labLink').innerHTML = `
+          <label for="lk-mode">โหมด</label><select id="lk-mode"><option value="access"${lk.mode === 'access' ? ' selected' : ''}>access</option><option value="trunk"${lk.mode === 'trunk' ? ' selected' : ''}>trunk</option></select>
+          ${lk.mode === 'access'
+            ? `<label for="lk-access">VLAN</label><select id="lk-access">${vOpts(lk.access)}</select>`
+            : `<span>VLAN ที่อนุญาต</span><div class="checks">${[1, 10, 20].map(n => `<label><input type="checkbox" data-allow="${n}"${lk.allowed.includes(n) ? ' checked' : ''}> ${n}</label>`).join('')}</div>`}`;
+        document.querySelectorAll('#labPorts select').forEach(s => s.onchange = () => { cfg.ports[s.dataset.pc] = Number(s.value); changed(); });
+        document.getElementById('lk-mode').onchange = e => { cfg.link.mode = e.target.value; renderControls(); changed(); };
+        const acc = document.getElementById('lk-access');
+        if (acc) acc.onchange = () => { cfg.link.access = Number(acc.value); changed(); };
+        document.querySelectorAll('#labLink [data-allow]').forEach(c => c.onchange = () => {
+          const n = Number(c.dataset.allow);
+          cfg.link.allowed = c.checked ? [...new Set([...cfg.link.allowed, n])].sort((a, b) => a - b) : cfg.link.allowed.filter(x => x !== n);
+          changed();
+        });
+      };
+      const svg = document.getElementById('sc-lab');
+      const log = document.getElementById('sc-lab-log');
+      const showGoals = () => {
+        const g = labGoals(cfg);
+        document.getElementById('g-aToC').classList.toggle('met', g.aToC);
+        document.getElementById('g-bToD').classList.toggle('met', g.bToD);
+        return g.aToC && g.bToD;
+      };
+      const showDone = () => {
+        document.getElementById('labDone').textContent = state.lab ? 'ผ่านแล้ว: VLAN ฝ่ายขายและฝ่ายบุคคลแยกกัน และข้ามสวิตช์ได้ผ่าน trunk' : '';
+      };
+      const changed = () => { animToken++; drawTopo(svg, cfg); log.textContent = ''; showGoals(); };
+      const run = wireBroadcast('sc-lab', () => cfg, (src, r) => {
+        const msg = `<b>ผลลัพธ์:</b> เฟรมจาก PC ${src} อยู่ใน ${chip(r.vlan)} ถึง ${names(r.receivers)}`;
+        if (showGoals() && !state.lab) { state.lab = true; save(); drawProgress(); renderStepList(); }
+        showDone();
+        return msg + (r.crossed && cfg.link.mode === 'trunk' ? ` (ข้าม trunk ${r.trunkTag === null ? 'โดยไม่มีแท็ก' : `พร้อมแท็ก VID ${r.trunkTag}`})` : r.crossed ? ' (ข้ามลิงก์ access ระหว่างสวิตช์)' : ' (ไม่ข้ามไป SW2)');
+      });
+      bindSrcButtons(run);
+      document.getElementById('labReset').onclick = () => { cfg = fresh(); renderControls(); changed(); };
+      renderControls(); showGoals(); showDone();
+    }
+  },
+  {
+    id: 'commands', title: 'คำสั่ง Cisco',
+    html: () => `<h2>คำสั่ง Cisco IOS ที่ใช้บ่อย</h2>
+      <p class="lead">ตัวอย่างนี้ตั้งค่าตามแล็บ: ฝ่ายขาย VLAN 10 ฝ่ายบุคคล VLAN 20 และ trunk ระหว่าง SW1 กับ SW2 โดยใช้ native VLAN 99</p>
+      <h3>1. สร้าง VLAN และตั้งชื่อ</h3>
+<pre>SW1(config)# vlan 10
+SW1(config-vlan)# name SALES
+SW1(config-vlan)# vlan 20
+SW1(config-vlan)# name HR
+SW1(config-vlan)# vlan 99
+SW1(config-vlan)# name NATIVE</pre>
+      <h3>2. Access port</h3>
+<pre>SW1(config)# interface fa0/1
+SW1(config-if)# switchport mode access
+SW1(config-if)# switchport access vlan 10
+SW1(config-if)# interface fa0/2
+SW1(config-if)# switchport mode access
+SW1(config-if)# switchport access vlan 20</pre>
+      <h3>3. Trunk</h3>
+<pre>SW1(config)# interface gi0/1
+SW1(config-if)# switchport trunk encapsulation dot1q   <span class="c">! เฉพาะบางรุ่น ดูด้านล่าง</span>
+SW1(config-if)# switchport mode trunk
+SW1(config-if)# switchport trunk allowed vlan 10,20,99
+SW1(config-if)# switchport trunk native vlan 99</pre>
+      <p><code>switchport trunk encapsulation dot1q</code> ใช้กับสวิตช์บางรุ่นที่รองรับทั้ง ISL และ 802.1Q (เช่น Catalyst 3560 รุ่นเก่า) สวิตช์ส่วนใหญ่ในปัจจุบันรองรับแค่ 802.1Q จึงไม่มีคำสั่งนี้ ทำแบบเดียวกันที่ SW2</p>
+      <h3>4. Router-on-a-stick</h3>
+<pre>R1(config)# interface g0/0.10
+R1(config-subif)# encapsulation dot1Q 10
+R1(config-subif)# ip address 192.168.10.1 255.255.255.0
+R1(config-subif)# interface g0/0.20
+R1(config-subif)# encapsulation dot1Q 20
+R1(config-subif)# ip address 192.168.20.1 255.255.255.0
+R1(config-subif)# interface g0/0
+R1(config-if)# no shutdown</pre>
+      <h3>5. ตรวจสอบ</h3>
+<pre>SW1# show vlan brief          <span class="c">! VLAN ที่มีและพอร์ตในแต่ละ VLAN</span>
+SW1# show interfaces trunk    <span class="c">! พอร์ต trunk, native VLAN และ VLAN ที่อนุญาต</span>
+SW1# show interfaces fa0/1 switchport</pre>
+      <div class="callout">พอร์ต trunk ไม่แสดงใน <code>show vlan brief</code> ถ้าหาพอร์ตไม่เจอ ให้ดู <code>show interfaces trunk</code></div>`
+  },
+  {
+    id: 'summary', title: 'สรุป',
+    html: () => `<h2>สรุป</h2>
+      <ul>
+        <li><strong>VLAN</strong> แบ่งสวิตช์ออกเป็นหลาย broadcast domain โดยทั่วไปหนึ่ง VLAN คือหนึ่งซับเน็ต IP</li>
+        <li><strong>Access port</strong> อยู่ VLAN เดียว ใช้ต่อเครื่องปลายทาง เฟรมไม่มีแท็ก</li>
+        <li><strong>Trunk</strong> พาได้หลาย VLAN โดยใส่<strong>แท็ก 802.1Q 4 ไบต์</strong> ที่มี VID 12 บิต (ใช้ได้ 1–4094)</li>
+        <li><strong>Native VLAN</strong> วิ่งบน trunk แบบไม่มีแท็ก ต้องตั้งให้ตรงกันทั้งสองฝั่ง ไม่อย่างนั้นทราฟฟิกจะรั่วข้าม VLAN</li>
+        <li>คุยข้าม VLAN ต้องใช้ <strong>Layer 3</strong>: router-on-a-stick หรือ SVI บน Layer 3 switch แท็กและ MAC เปลี่ยน แต่ IP เหมือนเดิม</li>
+      </ul>
+      <p>ไปทำแบบฝึกหัดต่อได้เลย ต้องตอบถูกทุกข้อ และทำแล็บให้ผ่าน จึงนับว่าเรียนครบ</p>`
+  }
+];
+
+const QUIZ = [
+  { id: 'q-domain', q: 'VLAN ช่วยแบ่งอะไรในเครือข่าย', opts: ['Broadcast domain', 'Collision domain ของสาย LAN', 'ความเร็วของพอร์ต'], answer: 0,
+    why: 'แต่ละ VLAN เป็น broadcast domain ของตัวเอง broadcast จึงไม่ข้ามไป VLAN อื่น' },
+  { id: 'q-size', q: 'แท็ก 802.1Q ที่ใส่ในเฟรมบน trunk มีขนาดเท่าไร', opts: ['2 ไบต์', '4 ไบต์', '12 ไบต์'], answer: 1,
+    why: 'แท็กมี 4 ไบต์: TPID 0x8100 สองไบต์ และ TCI (PCP, DEI, VID) อีกสองไบต์' },
+  { id: 'q-range', q: 'VLAN ID ที่ตั้งใช้งานได้อยู่ในช่วงใด', opts: ['0–4095', '1–1024', '1–4094'], answer: 2,
+    why: 'VID มี 12 บิต (4096 ค่า) แต่ค่า 0 และ 4095 สงวนไว้' },
+  { id: 'q-access', q: 'พอร์ตที่ต่อกับคอมพิวเตอร์ของพนักงานควรตั้งเป็นโหมดใด', opts: ['trunk', 'access', 'native'], answer: 1,
+    why: 'เครื่องปลายทางอยู่ VLAN เดียวและไม่เข้าใจแท็ก จึงใช้ access port' },
+  { id: 'q-native', q: 'ถ้า native VLAN สองฝั่งของ trunk ไม่ตรงกัน จะเกิดอะไรขึ้น', opts: ['Trunk ปิดตัวทันทีและไม่มีเฟรมผ่าน', 'เฟรมที่ไม่มีแท็กไปตกอีก VLAN หนึ่ง ทำให้ทราฟฟิกรั่วข้าม VLAN', 'ไม่มีผลอะไร เพราะทุกเฟรมมีแท็ก'], answer: 1,
+    why: 'ฝั่งรับจัดเฟรมที่ไม่มีแท็กเข้า native VLAN ของตัวเอง ถ้าไม่ตรงกัน เฟรมจะไปอยู่ผิด VLAN' },
+  { id: 'q-route', q: 'PC ใน VLAN 10 จะคุยกับ PC ใน VLAN 20 ได้ ต้องมีอะไร', opts: ['ตั้งพอร์ตทั้งสองเป็น trunk', 'อุปกรณ์ Layer 3 เช่นเราเตอร์ หรือ Layer 3 switch', 'ใช้ VLAN ID เดียวกันกับ native VLAN'], answer: 1,
+    why: 'คนละ VLAN คือคนละซับเน็ต ต้องมีการ route ผ่าน Layer 3 (router-on-a-stick หรือ SVI)' }
+];
+
+/* ---------- การทำงาน ---------- */
+const KEY = 'netprime-vlan-v1-progress';
+const STEP_IDS = STEPS.map(s => s.id);
+const QUIZ_IDS = QUIZ.map(q => q.id);
+const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
+
+/** รวมความคืบหน้าสองชุดแบบเรียกซ้ำกี่ครั้งก็ได้ผลเท่าเดิม และรับเฉพาะค่าที่รู้จัก */
+function mergeState(base, saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  const seen = Array.isArray(s.seen) ? s.seen.filter(id => STEP_IDS.includes(id)) : [];
+  const quiz = Object.assign({}, base.quiz);
+  if (s.quiz && typeof s.quiz === 'object') for (const id of QUIZ_IDS) if (s.quiz[id] === true) quiz[id] = true;
+  return { seen: STEP_IDS.filter(id => base.seen.includes(id) || seen.includes(id)), lab: base.lab === true || s.lab === true, quiz };
+}
+
+let state = mergeState({ seen: [], lab: false, quiz: {} }, read());
+let current = 0;
+const $ = id => document.getElementById(id);
+const quizCorrect = () => QUIZ_IDS.filter(id => state.quiz[id]).length;
+const completed = () => state.seen.length === STEP_IDS.length && state.lab && quizCorrect() === QUIZ_IDS.length;
+const percent = () => Math.round(((state.seen.length + (state.lab ? 1 : 0) + quizCorrect() / QUIZ_IDS.length) / (STEP_IDS.length + 2)) * 100);
+
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ไม่มีที่เก็บก็ยังเรียนได้ */ }
+  kit.saveProgress({ percent: percent(), completed: completed(), state });
+}
+
+function bindSrcButtons(run) {
+  document.querySelectorAll('#stepCard [data-src]').forEach(b => { b.onclick = () => run(b.dataset.src); });
+}
+
+function renderStepList() {
+  $('stepList').innerHTML = '';
+  [...STEPS.map(s => s.title), 'แบบฝึกหัด'].forEach((title, i) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = title;
+    if (i === current) b.setAttribute('aria-current', 'step');
+    const done = i < STEPS.length ? state.seen.includes(STEP_IDS[i]) && (STEP_IDS[i] !== 'lab' || state.lab) : quizCorrect() === QUIZ_IDS.length;
+    if (done) b.className = 'seen';
+    b.onclick = () => go(i);
+    li.append(b); $('stepList').append(li);
+  });
+}
+
+function renderQuiz(card) {
+  const missing = [];
+  if (state.seen.length < STEP_IDS.length) missing.push(`ยังไม่ได้เปิด: ${STEPS.filter(s => !state.seen.includes(s.id)).map(s => s.title).join(', ')}`);
+  if (!state.lab) missing.push('ยังไม่ผ่านแล็บ "ลองตั้งค่าเอง"');
+  card.innerHTML = `<h2>แบบฝึกหัด</h2><p class="lead">ตอบให้ถูกทุกข้อ ตอบผิดเลือกใหม่ได้</p><div id="quizList"></div>
+    <p class="done" id="quizDone" aria-live="polite"></p>`;
+  QUIZ.forEach((item, qi) => {
+    const box = document.createElement('div');
+    box.className = 'q';
+    box.innerHTML = `<p class="qt">${qi + 1}. ${item.q}</p><div class="opts"></div><p class="why" ${state.quiz[item.id] ? '' : 'hidden'}>${item.why}</p>`;
+    item.opts.forEach((text, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = text;
+      if (state.quiz[item.id] && i === item.answer) b.className = 'right';
+      b.onclick = () => {
+        b.className = i === item.answer ? 'right' : 'wrong';
+        if (i === item.answer) {
+          box.querySelector('.why').hidden = false;
+          if (!state.quiz[item.id]) { state.quiz[item.id] = true; save(); drawProgress(); renderStepList(); quizStatus(missing); }
+        }
+        kit.resize();
+      };
+      box.querySelector('.opts').append(b);
+    });
+    $('quizList').append(box);
+  });
+  quizStatus(missing);
+}
+
+function quizStatus(missing) {
+  const n = quizCorrect();
+  const el2 = $('quizDone');
+  if (!el2) return;
+  if (completed()) el2.textContent = 'เรียนครบบทเรียน VLAN แล้ว';
+  else if (n === QUIZ_IDS.length) el2.textContent = `ตอบถูกครบทุกข้อแล้ว อีกนิดเดียว: ${missing.join(' · ')}`;
+  else el2.textContent = `ตอบถูกแล้ว ${n} จาก ${QUIZ_IDS.length} ข้อ`;
+}
+
+function render() {
+  animToken++;
+  const onQuiz = current === STEPS.length;
+  if (!onQuiz && !state.seen.includes(STEP_IDS[current])) { state.seen = STEP_IDS.filter(id => id === STEP_IDS[current] || state.seen.includes(id)); save(); }
+  renderStepList();
+  const card = $('stepCard');
+  if (onQuiz) renderQuiz(card);
+  else { card.innerHTML = STEPS[current].html(); if (STEPS[current].mount) STEPS[current].mount(); }
+  $('prevBtn').disabled = current === 0;
+  $('nextBtn').disabled = onQuiz;
+  $('nextBtn').textContent = current === STEPS.length - 1 ? 'ไปทำแบบฝึกหัด' : 'ถัดไป';
+  kit.setLocation(onQuiz ? 'quiz' : STEP_IDS[current]);
+  drawProgress();
+}
+
+function go(i) {
+  current = Math.max(0, Math.min(STEPS.length, i));
+  render();
+  const h = $('stepCard').querySelector('h2');
+  if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+  document.querySelector('.lesson').scrollIntoView({ block: 'start' });
+}
+
+function drawProgress() {
+  $('progressText').textContent = completed() ? 'เรียนครบแล้ว' : `เรียนไปแล้ว ${percent()}%`;
+  $('progressBar').style.width = `${percent()}%`;
+}
+
+/* ผู้เรียนที่ login: รวมความคืบหน้าที่บันทึกไว้ในระบบกับในเครื่องนี้ (เรียกซ้ำได้ ผลเท่าเดิม) */
+kit.onRestore(saved => {
+  state = mergeState(state, saved);
+  save();
+  drawProgress();
+  renderStepList();
+  if (current === STEPS.length) renderQuiz($('stepCard'));
+});
+
+$('prevBtn').onclick = () => go(current - 1);
+$('nextBtn').onclick = () => go(current + 1);
+const startHash = location.hash.replace(/^#/, '');
+if (startHash === 'quiz') current = STEPS.length;
+else if (STEP_IDS.includes(startHash)) current = STEP_IDS.indexOf(startHash);
+render();
+</script>
+</body>
+</html>
